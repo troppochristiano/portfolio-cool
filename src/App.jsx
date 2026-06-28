@@ -4,6 +4,7 @@ import { photos } from "./photos";
 import { Nav } from "./components/Nav";
 import { AsciiGallery } from "./components/AsciiGallery";
 import { Loader } from "./components/Loader";
+import { AboutOverlay } from "./components/AboutOverlay";
 
 // Map photos.js entries into the viewer's photo-config shape (same as the bundled demo),
 // pointing thumbnails at the public/photos copy.
@@ -36,7 +37,7 @@ const FIGURES = [
   "GunInverted",
   "GunLight",
   "V4n7am",
-  "V4nD0wn",
+  "s09r4n0",
 ];
 
 export default function App() {
@@ -48,6 +49,10 @@ export default function App() {
   const [galleryReady, setGalleryReady] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
   const [figures, setFigures] = useState(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  // Show the "scroll to open" hint only where wheel-to-open is active (fine pointer) and
+  // only until the overlay has been opened at least once.
+  const [showScrollHint, setShowScrollHint] = useState(false);
   const warm = (avatarReady && galleryReady) || timedOut;
 
   // Fetch + parse the ASCII figures once on mount. They download behind the loader
@@ -75,6 +80,21 @@ export default function App() {
       alive = false;
     };
   }, []);
+
+  // Scroll-to-open is now owned by the dissolve effect (useDissolveReveal inside
+  // AboutOverlay): a downward wheel on the closed hero scrubs the overlay open. The old
+  // one-shot deltaY>24 listener lived here; it's gone so the two don't fight.
+
+  // Reveal the "^" open hint once the scene is up (both pointer types — it signals the
+  // scroll/swipe-up-to-open gesture); hide it for good the first time the overlay opens.
+  useEffect(() => {
+    if (!preloaded) return;
+    setShowScrollHint(true);
+  }, [preloaded]);
+
+  useEffect(() => {
+    if (aboutOpen) setShowScrollHint(false);
+  }, [aboutOpen]);
 
   // Safety net: never let the overlay hang if a ready signal fails to fire (e.g. an
   // asset error). Once the scene is mounted, reveal after at most 12s regardless.
@@ -134,6 +154,25 @@ export default function App() {
               onReady={() => setAvatarReady(true)}
             />
           </div>
+          <div className="about-trigger-group">
+            {showScrollHint && (
+              <span className="about-trigger-caret" aria-hidden="true">
+                ^
+              </span>
+            )}
+            <button
+              type="button"
+              className="about-trigger"
+              onClick={() => setAboutOpen(true)}
+            >
+              About
+            </button>
+          </div>
+          <AboutOverlay
+            open={aboutOpen}
+            onOpenChange={setAboutOpen}
+            ready={warm}
+          />
         </>
       )}
     </>

@@ -18,21 +18,33 @@ body {
         sans-serif;
 }
 
-/* Full-screen preloader overlay; fades out once assets are warm. */
+/* Full-screen preloader. Transparent shell; the opaque .loader__panel is the cover the
+   dissolve removes (top→bottom) to reveal the hero once assets are warm. */
 .loader {
     position: fixed;
     inset: 0;
     z-index: 10;
+    background-color: transparent;
+}
+
+/* The cover the dissolve clips. Carries the black background + centers the bar. */
+.loader__panel {
+    position: absolute;
+    inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     background-color: #000;
-    opacity: 1;
-    transition: opacity 0.5s ease;
+    will-change: clip-path;
 }
 
-.loader.is-hidden {
-    opacity: 0;
+/* The dissolve band canvas — full-viewport, above the panel, never blocks input. */
+.loader__dissolve {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
     pointer-events: none;
 }
 
@@ -53,7 +65,7 @@ body {
 
 .loader__fill {
     height: 100%;
-    background-color: #d4f70c;
+    background-color: #0000ff;
     transition: width 0.2s ease;
 }
 
@@ -113,7 +125,7 @@ body {
    (the FRAMED toggle in AsciiGallery.jsx). Only the bottom edge is bordered */
 .ascii-plane.is-framed {
     position: relative;
-    border-bottom: 2px solid #0001f4;
+    border-bottom: 2px solid #0000ff;
     background-color: #050505;
     padding: 8px 8px 0;
 }
@@ -123,7 +135,7 @@ body {
 .ascii-frame-label {
     margin: 8px -8px 0;
     padding: 2px 4px;
-    background-color: #0001f4;
+    background-color: #0000ff;
     color: #fff;
     text-align: center;
     text-transform: uppercase;
@@ -151,7 +163,7 @@ body {
     font-size: 12px;
     font-weight: 600;
     padding: 4px;
-    background-color: #d4f70c;
+    background-color: #0000ff;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
@@ -191,8 +203,322 @@ body {
     letter-spacing: 0.02em;
     padding: 4px 8px;
     color: #fff;
-    background-color: #0001f4;
+    background-color: #0000ff;
     white-space: nowrap;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── ABOUT trigger + overlay ───────────────────────────────────────────────── */
+
+/* Button + "^" hint, grouped under the avatar (desktop) or anchored to the bottom (touch).
+   Fixed; the children stack vertically and centered. Sibling of .hero-avatar
+   (pointer-events:none), so the button re-enables pointer events for itself. */
+.about-trigger-group {
+    position: fixed;
+    left: 50%;
+    top: calc(50% + min(240px, 40vw, 35vh) + 20px);
+    transform: translateX(-50%);
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    pointer-events: none;
+}
+
+/* On touch devices the group anchors to the bottom: that bottom strip is the swipe-up
+   open-zone (gestures starting on/below it open About; higher swipes pan the gallery). */
+@media (pointer: coarse) {
+    .about-trigger-group {
+        top: auto;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+    }
+}
+
+/* Animated up-caret hinting the scroll/swipe-up-to-open gesture. */
+.about-trigger-caret {
+    pointer-events: none;
+    font-size: 14px;
+    line-height: 1;
+    font-weight: 700;
+    color: #0000ff;
+    animation: about-caret-bob 1.6s ease-in-out infinite;
+}
+
+@keyframes about-caret-bob {
+    0%,
+    100% {
+        opacity: 0.4;
+        transform: translateY(2px);
+    }
+    50% {
+        opacity: 1;
+        transform: translateY(-3px);
+    }
+}
+
+/* Neon pill. Static inside the group; re-enables pointer events for itself. */
+.about-trigger {
+    pointer-events: auto;
+    cursor: pointer;
+    border: none;
+    font: inherit;
+    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 6px 12px;
+    color: #000;
+    background-color: #0000ff;
+    transition: opacity 0.15s ease;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.about-trigger:hover {
+    opacity: 0.85;
+}
+
+/* Full-screen overlay: a second "page" of readable content. Sits above the scene; only
+   opens after load so the z-10 loader is already gone. */
+/* Transparent: the opaque layer is .about-overlay__content, clipped by the dissolve, so
+   the un-built region reveals the hero behind. visibility/pointer-events are driven
+   imperatively by useDissolveReveal (no opacity fade). */
+.about-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    background-color: transparent;
+    visibility: hidden;
+    overflow: hidden;
+}
+
+/* Owns its own scroll (body is overflow:hidden). Starts hidden so no scrollbar flashes
+   during the build; the hook flips it to auto only once fully open. */
+.about-overlay__scroll {
+    height: 100%;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    /* No rubber-band bounce/scroll-chaining revealing the hero at the ends (the hook also
+       paints this black when open as a fallback for browsers without overscroll-behavior). */
+    overscroll-behavior: none;
+    /* Reserve the scrollbar gutter in both overflow states so the content doesn't shift
+       when the hook flips hidden→auto on open. Thin, dark, not the default white bar. */
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: #333 transparent;
+}
+
+.about-overlay__scroll::-webkit-scrollbar {
+    width: 8px;
+}
+.about-overlay__scroll::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 4px;
+}
+.about-overlay__scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* Full-width opaque layer the dissolve clips (so the hero never shows in the side
+   margins when fully open). The centered column lives inside it. */
+.about-overlay__content {
+    min-height: 100%;
+    background-color: #000;
+    will-change: clip-path;
+}
+
+/* The dissolve band canvas — full-viewport, above the content, never blocks input. */
+.about-overlay__dissolve {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 21;
+    pointer-events: none;
+}
+
+.about-overlay__inner {
+    width: min(900px, 90vw);
+    margin: 0 auto;
+    padding: 120px 0 120px;
+}
+
+.about-overlay__close {
+    position: fixed;
+    top: 2em;
+    right: 2em;
+    z-index: 21;
+    cursor: pointer;
+    border: none;
+    font: inherit;
+    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 6px 12px;
+    color: #000;
+    background-color: #0000ff;
+    transition: opacity 0.15s ease;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.about-overlay__close:hover {
+    opacity: 0.85;
+}
+
+/* Hide the close button during the open/close animation AND while scrubbing — it only
+   shows once the overlay is fully settled-open (the hook toggles .is-revealed). */
+.about-overlay:not(.is-revealed) .about-overlay__close {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* (Pull-to-close indicator removed — the dissolve band is the close feedback now.) */
+
+/* Each section reads as a distinct scrollable panel. */
+.about-section {
+    padding: 48px 0;
+}
+
+.about-section + .about-section {
+    border-top: 1px solid #1a1a1a;
+}
+
+.about-section__heading {
+    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: #0000ff;
+    margin-bottom: 28px;
+}
+
+.about-overlay__about-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 1em;
+    max-width: 60ch;
+    color: #fff;
+    font-size: clamp(20px, 3vw, 32px);
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+}
+
+/* Works accordion (henriheymans.com Recognitions & Awards style). */
+.works-list {
+    list-style: none;
+    border-top: 1px solid #1a1a1a;
+}
+
+.works-row {
+    border-bottom: 1px solid #1a1a1a;
+}
+
+.works-row__toggle {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: baseline;
+    gap: 16px;
+    padding: 22px 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font: inherit;
+    color: #fff;
+    text-align: left;
+    transition: color 0.15s ease;
+}
+
+.works-row__toggle:hover {
+    color: #0000ff;
+}
+
+.works-row__title {
+    font-size: clamp(18px, 2.4vw, 26px);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+.works-row__meta {
+    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #888;
+}
+
+.works-row__indicator {
+    font-size: 22px;
+    line-height: 1;
+    width: 1ch;
+    text-align: center;
+    color: #0000ff;
+}
+
+/* Height/opacity transition keeps it dependency-free. Closed = collapsed. */
+.works-row__panel {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition:
+        grid-template-rows 0.3s ease,
+        opacity 0.3s ease;
+}
+
+.works-row.is-open .works-row__panel {
+    grid-template-rows: 1fr;
+    opacity: 1;
+}
+
+.works-row__panel-inner {
+    overflow: hidden;
+}
+
+.works-row.is-open .works-row__panel-inner {
+    padding-bottom: 24px;
+}
+
+.works-row__panel-inner p {
+    max-width: 60ch;
+    color: #bbb;
+    font-size: 16px;
+    line-height: 1.5;
+}
+
+/* Contact links. */
+.contact-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.contact-link {
+    color: #fff;
+    text-decoration: none;
+    font-size: clamp(18px, 2.4vw, 26px);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    transition: color 0.15s ease;
+}
+
+.contact-link:hover {
+    color: #0000ff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .about-overlay,
+    .works-row__panel {
+        transition: none;
+    }
+
+    .about-trigger-caret {
+        animation: none;
+        opacity: 0.7;
+    }
 }

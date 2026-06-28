@@ -14,8 +14,8 @@
 /outputs/
 /photos/
 
-# Unused legacy video assets (replaced by the ASCII gallery)
-/public/videos/
+# Unused legacy ascii animations assets
+/asciiLegacy
 
 # Docs / notes — kept out of the public repo
 *.md

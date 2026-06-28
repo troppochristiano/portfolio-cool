@@ -2,7 +2,7 @@
 export function Nav() {
   return (
     <nav className="nav">
-      <p>Frames 2024</p>
+      <p>Placeholder</p>
     </nav>
   );
 }
