@@ -1,0 +1,463 @@
+/* Styles for <EyeBallzViewer>. Ported from the original viewer-3d.html <style> block,
+   scoped under .eye-ballz so they don't leak into the host project. */
+
+.eye-ballz {
+  position: relative;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Windowed mode: a floating, draggable/resizable "desktop window". JS owns the
+   left/top/width/height; this just gives it window chrome styling. */
+.eye-ballz--windowed {
+  position: fixed;
+  min-width: 240px;
+  min-height: 240px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  background: black;
+}
+
+/* Unpinned: drop into page flow so the window scrolls with the content. */
+.eye-ballz--windowed.eye-ballz--scrolls {
+  position: absolute;
+}
+
+/* Transparent mode: drop the windowed black fill so the viewer composites over the page. */
+.eye-ballz--transparent.eye-ballz--windowed {
+  background: transparent;
+}
+
+/* Title bar — the drag handle. */
+.eye-ballz-titlebar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: move;
+  user-select: none;
+  touch-action: none;
+}
+
+.eye-ballz-titlebar-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.eye-ballz-titlebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.eye-ballz-restore,
+.eye-ballz-pin,
+.eye-ballz-debug-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  color: white;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.eye-ballz-pin,
+.eye-ballz-debug-toggle {
+  padding: 4px 8px;
+  line-height: 1;
+}
+
+.eye-ballz-restore:hover,
+.eye-ballz-pin:hover,
+.eye-ballz-debug-toggle:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.eye-ballz-debug-toggle.active {
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Resize handles — thin hit-areas on the window's edges/corners. z-index sits above the
+   title bar (30) so the overlapping top handles (n/ne/nw) still receive the pointer. */
+.eye-ballz-resize-handle {
+  position: absolute;
+  z-index: 35;
+  touch-action: none;
+}
+.eye-ballz-resize-handle.n { top: -3px; left: 8px; right: 8px; height: 8px; cursor: ns-resize; }
+.eye-ballz-resize-handle.s { bottom: -3px; left: 8px; right: 8px; height: 8px; cursor: ns-resize; }
+.eye-ballz-resize-handle.e { right: -3px; top: 8px; bottom: 8px; width: 8px; cursor: ew-resize; }
+.eye-ballz-resize-handle.w { left: -3px; top: 8px; bottom: 8px; width: 8px; cursor: ew-resize; }
+.eye-ballz-resize-handle.ne { top: -3px; right: -3px; width: 14px; height: 14px; cursor: nesw-resize; }
+.eye-ballz-resize-handle.nw { top: -3px; left: -3px; width: 14px; height: 14px; cursor: nwse-resize; }
+.eye-ballz-resize-handle.se { bottom: -3px; right: -3px; width: 14px; height: 14px; cursor: nwse-resize; }
+.eye-ballz-resize-handle.sw { bottom: -3px; left: -3px; width: 14px; height: 14px; cursor: nesw-resize; }
+
+/* Nudge the debug overlays down so they clear the 32px title bar in windowed mode. */
+.eye-ballz--windowed .eye-ballz-ascii-toggle { top: 44px; }
+.eye-ballz--windowed .eye-ballz-crt-toggle { top: 88px; }
+.eye-ballz--windowed .eye-ballz-panel--ascii { top: 132px; }
+.eye-ballz--windowed .eye-ballz-panel--distortion { top: 44px; }
+.eye-ballz--windowed .eye-ballz-panel--expression { top: 44px; }
+.eye-ballz--windowed .eye-ballz-panel--tilt { top: 324px; }
+.eye-ballz--windowed .eye-ballz-panel--crt { top: 44px; }
+
+.eye-ballz-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.eye-ballz-ascii {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: #fff;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* CSS CRT effect, after njbair's "Pure CSS CRT Effect" (codepen ZVPomJ).
+   The overlay (scanline grille + drifting scan bar) composites over whatever is
+   below (canvas OR ASCII DOM) so it stacks with the ASCII effect. It sits above the
+   rendered eye but below the debug controls (depth slider z-index 10, panels 20) —
+   pointer-events: none keeps cursor eye-tracking / OrbitControls working through it.
+   The chromatic glow + curved bezel are applied to the content layers via the root
+   .eye-ballz--crt class (below). */
+.eye-ballz-crt-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.eye-ballz-crt {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9;
+}
+/* drifting scan bar: a full-height layer painting a thin bar at its top, translated
+   from below the viewer up past the top (njbair's scan-moving, container-relative). */
+.eye-ballz-crt::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.25) 0,
+    rgba(0, 0, 0, 0.25) 3px,
+    transparent 3px
+  );
+  opacity: 0.75;
+  animation: eye-ballz-scan-moving 6s linear infinite;
+}
+.eye-ballz-crt.no-bar::before {
+  display: none;
+}
+/* fine scanline grille (njbair's scan-crt: 50%/51% gradient tiled by --crt-scanline-size,
+   jittered each frame via the steps animation). */
+.eye-ballz-crt::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(
+    to bottom,
+    transparent 50%,
+    rgba(0, 0, 0, var(--crt-scanline-opacity)) 51%
+  );
+  background-size: 100% var(--crt-scanline-size);
+  animation: eye-ballz-scan-crt 1s steps(60) infinite;
+}
+.eye-ballz--crt-curved .eye-ballz-crt {
+  clip-path: url(#eye-ballz-crt-path);
+}
+
+@keyframes eye-ballz-scan-moving {
+  0% {
+    transform: translateY(100%);
+  }
+  100% {
+    transform: translateY(-100%);
+  }
+}
+@keyframes eye-ballz-scan-crt {
+  0% {
+    background-position: 0 50%;
+  }
+}
+/* CRT turn-on: horizontal-line collapse expanding to full + a brightness flash.
+   Deliberately never touches `opacity`, so the canvas's inline opacity (used to hide
+   it in ASCII mode) is left intact while this plays. */
+@keyframes eye-ballz-crt-power-on {
+  0% {
+    transform: scale(1, 0.02);
+    filter: brightness(6);
+  }
+  40% {
+    transform: scale(1.04, 0.02);
+  }
+  60% {
+    transform: scale(1, 1);
+    filter: brightness(2);
+  }
+  100% {
+    transform: scale(1, 1);
+    filter: brightness(1);
+  }
+}
+
+/* ---- Content-layer treatment (canvas + ASCII), keyed on the root CRT class. ---- */
+.eye-ballz--crt-curved .eye-ballz-canvas,
+.eye-ballz--crt-curved .eye-ballz-ascii {
+  clip-path: url(#eye-ballz-crt-path);
+}
+/* phosphor chromatic split — lives on text, so it lights up the ASCII layer. */
+.eye-ballz--crt .eye-ballz-ascii {
+  text-shadow:
+    0 0 0.08em #fff,
+    -0.08em 0 0.08em aqua,
+    0.08em 0 0.08em fuchsia;
+}
+.eye-ballz--crt.glow-on .eye-ballz-canvas,
+.eye-ballz--crt.glow-on .eye-ballz-ascii {
+  filter: contrast(1) brightness(1.2) saturate(1.3);
+}
+/* replays once whenever CRT is switched on (the property is freshly applied). */
+.eye-ballz--crt .eye-ballz-canvas,
+.eye-ballz--crt .eye-ballz-ascii {
+  animation: eye-ballz-crt-power-on 1.6s ease-out;
+}
+
+.eye-ballz-depth {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 200px;
+  z-index: 10;
+}
+
+.eye-ballz-ascii-toggle,
+.eye-ballz-crt-toggle {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 20;
+  padding: 8px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  color: white;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+/* CRT toggle sits just below the ASCII toggle, sharing the top-right column. */
+.eye-ballz-crt-toggle {
+  top: 64px;
+}
+
+.eye-ballz-ascii-toggle:hover,
+.eye-ballz-crt-toggle:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.eye-ballz-ascii-toggle.active,
+.eye-ballz-crt-toggle.active {
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.eye-ballz-panel {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 200px;
+  padding: 14px;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 10px;
+  backdrop-filter: blur(10px);
+  font-size: 12px;
+  color: white;
+}
+
+.eye-ballz-panel--ascii {
+  top: 108px;
+  right: 20px;
+}
+
+.eye-ballz-panel--distortion {
+  top: 20px;
+  left: 20px;
+}
+
+.eye-ballz-panel--tilt {
+  top: 300px;
+  left: 20px;
+}
+
+/* Own column to the right of distortion/tilt — the CRT panel is tall (10 sliders). */
+.eye-ballz-panel--crt {
+  top: 20px;
+  left: 240px;
+}
+
+.eye-ballz-panel--export {
+  bottom: 20px;
+  right: 20px;
+  width: 220px;
+}
+
+.eye-ballz-panel--expression {
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 180px;
+}
+
+.eye-ballz-btn.active {
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.eye-ballz-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.eye-ballz-title {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+  font-size: 11px;
+}
+
+.eye-ballz-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.eye-ballz-row span {
+  white-space: nowrap;
+}
+
+.eye-ballz-row input[type='text'] {
+  width: 110px;
+  font-family: 'Courier New', monospace;
+}
+
+.eye-ballz-row input[type='range'] {
+  width: 110px;
+}
+
+.eye-ballz-row input[type='color'] {
+  width: 36px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.eye-ballz-export-text {
+  width: 100%;
+  height: 120px;
+  resize: vertical;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+.eye-ballz-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.eye-ballz-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  color: white;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.eye-ballz-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.eye-ballz-switcher {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  z-index: 20;
+  display: flex;
+  gap: 8px;
+}
+
+.eye-ballz-switcher-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  color: white;
+  font-size: 11px;
+}
+
+.eye-ballz-switcher-btn.active {
+  border-color: #fff;
+}
+
+.eye-ballz-switcher-btn img {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 4px;
+}
