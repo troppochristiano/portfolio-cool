@@ -1,0 +1,188 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    background-color: #000;
+    overflow: hidden;
+    font-family:
+        "Akkurat Trial TT",
+        system-ui,
+        -apple-system,
+        "Segoe UI",
+        sans-serif;
+}
+
+/* Full-screen preloader overlay; fades out once assets are warm. */
+.loader {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #000;
+    opacity: 1;
+    transition: opacity 0.5s ease;
+}
+
+.loader.is-hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.loader__inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    width: min(240px, 60vw);
+}
+
+.loader__bar {
+    width: 100%;
+    height: 3px;
+    background-color: #222;
+    overflow: hidden;
+}
+
+.loader__fill {
+    height: 100%;
+    background-color: #d4f70c;
+    transition: width 0.2s ease;
+}
+
+.loader__pct {
+    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #fff;
+}
+
+/* The CSS3D ascii gallery fills the viewport behind everything else. */
+.ascii-gallery {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+}
+
+.ascii-gallery > div {
+    position: fixed;
+    top: 0;
+    left: 0;
+}
+
+/* React renders the players into this off-screen stage; CSS3DRenderer then adopts each
+   .ascii-plane into its own tree, so the stage itself stays out of the way. */
+.ascii-stage {
+    position: fixed;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+}
+
+/* One floating ascii player. The component's own <pre> sets the monospace font,
+   line-height, and letter-spacing; here we just color it and keep text crisp under the
+   3D transform. */
+.ascii-plane {
+    color: #fff;
+    pointer-events: auto;
+    cursor: default;
+    will-change: transform;
+    background-color: #050505;
+    backface-visibility: hidden;
+}
+
+/* Code-side framed look: a "screen" around each player with a caption bar at the bottom
+   (the FRAMED toggle in AsciiGallery.jsx). Only the bottom edge is bordered */
+.ascii-plane.is-framed {
+    position: relative;
+    border-bottom: 2px solid #0001f4;
+    background-color: #050505;
+    padding: 8px 8px 0;
+}
+
+/* Permanent name caption at the bottom of a framed player — reuses the hover label's
+   color/typography (.ascii-label) but sits statically inside the frame. */
+.ascii-frame-label {
+    margin: 8px -8px 0;
+    padding: 2px 4px;
+    background-color: #0001f4;
+    color: #fff;
+    text-align: center;
+    text-transform: uppercase;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    padding: 2em;
+    display: flex;
+    justify-content: center;
+    z-index: 2;
+}
+
+.nav p {
+    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px;
+    background-color: #d4f70c;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* The eye-ballz avatar replaces the reference title text as the centerpiece. */
+.hero-avatar {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    pointer-events: none;
+}
+
+/* Override the component's inline width/height to stay responsive; its ResizeObserver
+   keeps the renderer in sync with the box. */
+.hero-avatar .eye-ballz {
+    width: min(480px, 80vw) !important;
+    height: min(480px, 80vw, 70vh) !important;
+}
+
+/* Name label pinned to the hovered ascii plane. Its left/top are set per frame from the
+   projected 3D position; this transform centers it horizontally and drops it just below
+   that point. */
+.ascii-label {
+    position: fixed;
+    top: 0;
+    left: 0;
+    transform: translate(-50%, 6px);
+    z-index: 2;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 4px 8px;
+    color: #fff;
+    background-color: #0001f4;
+    white-space: nowrap;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
