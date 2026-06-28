@@ -1,0 +1,28 @@
+# Dependencies
+/node_modules/
+
+# Build output
+/dist/
+
+# Design tooling
+/.impeccable/
+
+# Third-party reference material (large, not part of the app)
+/REFERENCE CODE/
+
+# Local working/source asset dirs — served copies live under public/
+/outputs/
+/photos/
+
+# Unused legacy video assets (replaced by the ASCII gallery)
+/public/videos/
+
+# Docs / notes — kept out of the public repo
+*.md
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
