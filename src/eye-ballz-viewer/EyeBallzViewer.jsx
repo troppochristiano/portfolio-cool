@@ -37,6 +37,21 @@ const FPS = 60;
 const pixelRatioFor = (asciiEnabled, backplate = 0) =>
   asciiEnabled && !(backplate > 0) ? 1 : Math.min(window.devicePixelRatio, 2);
 
+// The ASCII column count is containerWidth(css) × resolution, so a smaller container (mobile)
+// yields fewer columns and a coarser face at the same resolution. To keep detail roughly
+// constant across screens, scale the resolution up as the container shrinks below this
+// reference width (the desktop cap), never below the base value, and capped so tiny screens
+// don't blow up the per-frame asciify cost.
+const ASCII_REF_WIDTH = 480;
+const ASCII_MAX_RESOLUTION = 0.5;
+const effectiveAsciiResolution = (baseRes, containerWidth) =>
+  containerWidth
+    ? Math.min(
+        ASCII_MAX_RESOLUTION,
+        Math.max(baseRes, (baseRes * ASCII_REF_WIDTH) / containerWidth),
+      )
+    : baseRes;
+
 // Smallest the floating window can be resized to (px), in `windowed` mode.
 const MIN_WINDOW = 240;
 const easeInOutCubic = (t) =>
@@ -45,6 +60,21 @@ const easeInOutCubic = (t) =>
 // How long a look "sweep" takes when easing through the grid cells — used by the touch
 // sweep, the animation-mode recenter, and the one-shot eased return to mouse tracking.
 const LOOK_TRANSITION_MS = 300;
+
+// "Rub the forehead to smile" easter-egg. While the pointer is held and circling over the
+// forehead, the avatar smiles; it reverts shortly after the motion stops or on release.
+// All tunable for feel:
+const CIRCLE_WINDOW_MS = 500; // sliding window of pointer samples the circle is measured over
+const CIRCLE_MIN_SAMPLES = 6; // need at least this many samples before judging a circle
+const CIRCLE_MIN_RADIUS = 16; // px — mean radius must exceed this (rejects jitter / a held still finger)
+const CIRCLE_TURN_THRESHOLD = Math.PI * 1.5; // total turned angle to count as circling (~¾ turn)
+const SMILE_STOP_MS = 250; // revert this long after the circular motion stops
+// The forehead as a box in container-normalized coords (origin = container center, y negative
+// = up). The avatar is centered and the head fills the middle, so the forehead is a band just
+// above center — not the very top, which is empty space above the head. Calibrated by feel.
+const FOREHEAD_X_HALF = 0.4; // half-width of the brow zone
+const FOREHEAD_Y_TOP = -0.95; // upper edge — above this is the top of the head / empty space
+const FOREHEAD_Y_BOTTOM = -0.2; // lower edge — below this is the eyes / face center
 
 // Resolve the blink variant the auto-blink loop flashes on top of a base expression.
 // Convention: "neutral" → "blink", any other "<name>" → "<name>Blink". Returns the
@@ -101,98 +131,108 @@ const defaultUrlFor = (prefix, step, exprFolder) => ({
  *   getGestures()          -> string[] of registered gesture names.
  *   getExpressions()       -> string[] of the avatar's selectable expression names.
  */
-function EyeBallzViewerInner({
-  photos,
-  urlFor = defaultUrlFor,
-  width = 800,
-  height = 800,
+function EyeBallzViewerInner(
+  {
+    photos,
+    urlFor = defaultUrlFor,
+    width = 800,
+    height = 800,
 
-  // initialSettings ={
-  //   "displacementScale": 0.5,
-  //   "ascii": {
-  //     "enabled": false,
-  //     "characters": " .:-+*=%@#",
-  //     "invert": false,
-  //     "color": false,
-  //     "resolution": 0.15,
-  //     "fgColor": "#ffffff",
-  //     "bgColor": "#000000"
-  //   },
-  //   "distortion": {
-  //     "waveAmp": 0,
-  //     "waveSpeed": 2,
-  //     "swirl": 0,
-  //     "glitch": 0,
-  //     "noise": 0,
-  //     "rgbShift": 0
-  //   },
-  //   "tilt": {
-  //     "enabled": true,
-  //     "maxTiltX": 6,
-  //     "maxTiltY": 6
-  //   }
-  // },
-  //
-  initialSettings = {
-    displacementScale: 0.5,
-    ascii: {
-      enabled: true,
-      characters: " .:-+*=%@#",
-      invert: true,
-      color: false,
-      resolution: 0.27,
-      fgColor: "#00ff88",
-      bgColor: "#000000",
+    // initialSettings ={
+    //   "displacementScale": 0.5,
+    //   "ascii": {
+    //     "enabled": false,
+    //     "characters": " .:-+*=%@#",
+    //     "invert": false,
+    //     "color": false,
+    //     "resolution": 0.15,
+    //     "fgColor": "#ffffff",
+    //     "bgColor": "#000000"
+    //   },
+    //   "distortion": {
+    //     "waveAmp": 0,
+    //     "waveSpeed": 2,
+    //     "swirl": 0,
+    //     "glitch": 0,
+    //     "noise": 0,
+    //     "rgbShift": 0
+    //   },
+    //   "tilt": {
+    //     "enabled": true,
+    //     "maxTiltX": 6,
+    //     "maxTiltY": 6
+    //   }
+    // },
+    //
+    initialSettings = {
+      displacementScale: 0.5,
+      ascii: {
+        enabled: true,
+        characters: " .:-+*=%@#",
+        invert: true,
+        color: false,
+        resolution: 0.27,
+        fgColor: "#00ff88",
+        bgColor: "#000000",
+      },
+      distortion: {
+        waveAmp: 0.003,
+        waveSpeed: 2,
+        swirl: 0,
+        glitch: 0,
+        noise: 0,
+        rgbShift: 0,
+      },
+      tilt: {
+        enabled: true,
+        maxTiltX: 6,
+        maxTiltY: 6,
+      },
     },
-    distortion: {
-      waveAmp: 0.003,
-      waveSpeed: 2,
-      swirl: 0,
-      glitch: 0,
-      noise: 0,
-      rgbShift: 0,
-    },
-    tilt: {
-      enabled: true,
-      maxTiltX: 6,
-      maxTiltY: 6,
-    },
+    onSettingsChange,
+    status: statusProp = "neutral",
+    autoBlink: autoBlinkProp = true,
+    // When true the avatar ignores the cursor and rests forward-facing, so scripted
+    // animations play cleanly. Toggleable at runtime via the ref API / debug panel.
+    animationMode: animationModeProp = false,
+    debug = false,
+    // Treat the viewer as a draggable / resizable desktop window (fixed-position,
+    // title bar drag handle, edge/corner resize handles, smooth "restore" button).
+    // Off by default so the component stays embeddable inline; `width`/`height`
+    // become the default (restore) size.
+    windowed = false,
+    // In windowed mode: start anchored to the viewport (position:fixed, stays on screen
+    // when the page scrolls). false starts "scrolling with the page" (position:absolute).
+    // Toggleable at runtime via the title-bar pin button.
+    anchored = true,
+    // In windowed mode: show the title-bar action buttons (⚙ debug toggle, 📌 pin,
+    // ⟲ restore). Off hides all three — the title bar + drag handle stay, but there's no
+    // way to open the debug overlay at runtime.
+    showTitlebarButtons = true,
+    // Render with a see-through background: the ASCII overlay's opaque bg becomes
+    // transparent (the canvas is already alpha-cleared) so the viewer composites over
+    // whatever is behind it.
+    transparent = false,
+    // Fired once after the active avatar's full grid set (depth + every expression) has
+    // finished loading AND uploading to the GPU. Lets a parent hold a loading overlay
+    // until the avatar is fully warm, so no upload jank shows after reveal.
+    onReady,
+    // Draw the "rub the forehead to smile" trigger zone (the FOREHEAD_* box) over the avatar
+    // so it can be calibrated by eye. Dev-only; leave off in production.
+    debugForehead = false,
   },
-  onSettingsChange,
-  status: statusProp = "neutral",
-  autoBlink: autoBlinkProp = true,
-  // When true the avatar ignores the cursor and rests forward-facing, so scripted
-  // animations play cleanly. Toggleable at runtime via the ref API / debug panel.
-  animationMode: animationModeProp = false,
-  debug = false,
-  // Treat the viewer as a draggable / resizable desktop window (fixed-position,
-  // title bar drag handle, edge/corner resize handles, smooth "restore" button).
-  // Off by default so the component stays embeddable inline; `width`/`height`
-  // become the default (restore) size.
-  windowed = false,
-  // In windowed mode: start anchored to the viewport (position:fixed, stays on screen
-  // when the page scrolls). false starts "scrolling with the page" (position:absolute).
-  // Toggleable at runtime via the title-bar pin button.
-  anchored = true,
-  // In windowed mode: show the title-bar action buttons (⚙ debug toggle, 📌 pin,
-  // ⟲ restore). Off hides all three — the title bar + drag handle stay, but there's no
-  // way to open the debug overlay at runtime.
-  showTitlebarButtons = true,
-  // Render with a see-through background: the ASCII overlay's opaque bg becomes
-  // transparent (the canvas is already alpha-cleared) so the viewer composites over
-  // whatever is behind it.
-  transparent = false,
-  // Fired once after the active avatar's full grid set (depth + every expression) has
-  // finished loading AND uploading to the GPU. Lets a parent hold a loading overlay
-  // until the avatar is fully warm, so no upload jank shows after reveal.
-  onReady,
-}, ref) {
+  ref,
+) {
   const containerRef = useRef(null);
   // Mutable Three.js handles kept outside React's render cycle.
   const three = useRef(null);
   // Holds the latest playGesture closure so the (mount-stable) imperative handle always
   // calls the current one without re-creating the handle.
   const playGestureRef = useRef(() => {});
+
+  // Bridge so the imperative forehead-circle detector (which lives on the Three.js handle,
+  // outside React) can drive the smile expression on/off through React state. Set once below.
+  const foreheadSmileRef = useRef(() => {});
 
   const [settings, setSettings] = useState(() =>
     mergeSettings(initialSettings),
@@ -352,6 +392,9 @@ function EyeBallzViewerInner({
       tiltTargetY: 0,
       asciiEffect: null,
       asciiEnabled: settingsRef.current.ascii.enabled,
+      // Last responsive ASCII resolution actually built (see effectiveAsciiResolution); the
+      // resize observer compares against it to rebuild only when the column count changes.
+      asciiRes: 0,
       // Per-expression resident color textures: { [expression]: Map<filename, tex> }.
       // All loaded expressions stay resident so swapping between them never reloads.
       expr: {},
@@ -372,7 +415,12 @@ function EyeBallzViewerInner({
       yIndex: 0,
       // Touch only: tween the displayed grid cell through intermediate look phases
       // instead of snapping (a tap is one discrete pointer update, not a hover sweep).
-      look: { animating: false, from: { x: 0, y: 0 }, to: { x: 0, y: 0 }, start: 0 },
+      look: {
+        animating: false,
+        from: { x: 0, y: 0 },
+        to: { x: 0, y: 0 },
+        start: 0,
+      },
       // Active scripted gesture (nod yes/no), or null. Driven each frame in the
       // animation loop; sweeps the grid look-cell so the face turns (no mesh tilt).
       gesture: null,
@@ -382,6 +430,13 @@ function EyeBallzViewerInner({
       // One-shot: when true the next cursor reacquire eases (smooth look-sweep) instead
       // of snapping, then reverts to normal snap behavior. Set on gesture-end / mode-off.
       easeNextLook: false,
+      // "Rub the forehead to smile" detector state. pointerDown gates sampling; circle is a
+      // sliding ring buffer of recent {x,y,t} pointer samples; smiling is the current toggle;
+      // lastCircleTime stamps the last qualifying circular frame.
+      pointerDown: false,
+      circle: [],
+      smiling: false,
+      lastCircleTime: 0,
       lastFrameTime: 0,
       loadToken: 0,
       disposed: false,
@@ -395,18 +450,19 @@ function EyeBallzViewerInner({
       if (h.asciiEffect?.domElement.parentElement) {
         h.container.removeChild(h.asciiEffect.domElement);
       }
+      // Scale the resolution to the live container so mobile keeps desktop-like detail.
+      const cw = h.container.clientWidth || width;
+      const resolution = effectiveAsciiResolution(a.resolution, cw);
+      h.asciiRes = resolution; // remembered so the resize observer only rebuilds on a real change
       // invert is handled in the material shader, not here (see uInvert).
       const effect = new PhraseAsciiEffect(h.renderer, a.characters, {
         color: a.color,
-        resolution: a.resolution,
+        resolution,
         phrase: a.phrase,
       });
       // Size from the live container, not the width/height props — keeps the ASCII
       // grid in sync after the window is resized.
-      effect.setSize(
-        h.container.clientWidth || width,
-        h.container.clientHeight || height,
-      );
+      effect.setSize(cw, h.container.clientHeight || height);
       effect.domElement.classList.add("eye-ballz-ascii");
       effect.domElement.style.display = a.enabled ? "" : "none";
       effect.domElement.style.color = a.fgColor;
@@ -459,14 +515,26 @@ function EyeBallzViewerInner({
           (performance.now() - h.look.start) / LOOK_TRANSITION_MS,
         );
         const e = easeInOutCubic(p);
-        const nx = Math.round(h.look.from.x + (h.look.to.x - h.look.from.x) * e);
-        const ny = Math.round(h.look.from.y + (h.look.to.y - h.look.from.y) * e);
+        const nx = Math.round(
+          h.look.from.x + (h.look.to.x - h.look.from.x) * e,
+        );
+        const ny = Math.round(
+          h.look.from.y + (h.look.to.y - h.look.from.y) * e,
+        );
         if (nx !== h.xIndex || ny !== h.yIndex) {
           h.xIndex = nx;
           h.yIndex = ny;
           applyTexture(h, h.steps[ny][nx]);
         }
         if (p >= 1) h.look.animating = false;
+      }
+
+      // Forehead-smile falling edge: revert once the circular motion has stalled (no
+      // qualifying frame for SMILE_STOP_MS). The rising edge is set in onMouseMove; pointerup
+      // forces it off immediately.
+      if (h.smiling && performance.now() - h.lastCircleTime > SMILE_STOP_MS) {
+        h.smiling = false;
+        foreheadSmileRef.current(false);
       }
 
       if (h.asciiEnabled && h.asciiEffect) {
@@ -483,6 +551,12 @@ function EyeBallzViewerInner({
       // A scripted gesture or animation mode owns the avatar — ignore the cursor entirely
       // (no grid look, no tilt) while either is active.
       if (h.gesture || h.animMode) return;
+      // Track held state for the forehead-circle detector. Set before the FPS throttle so a
+      // pointerdown is never dropped (it can arrive right after a throttled pointermove).
+      if (e.type === "pointerdown") {
+        h.pointerDown = true;
+        h.circle.length = 0;
+      }
       const now = performance.now();
       if (now - h.lastFrameTime < 1000 / FPS) return;
       h.lastFrameTime = now;
@@ -503,10 +577,68 @@ function EyeBallzViewerInner({
 
       const xIndex = Math.round(((nx + 1) / 2) * (h.xSteps - 1));
       const yIndex = Math.round(((ny + 1) / 2) * (h.ySteps - 1));
+
+      // "Rub the forehead to smile": while the pointer is held, sample its path and look for a
+      // sustained circular motion (net turned angle past the threshold, with a real radius so
+      // jitter/holding-still doesn't count) whose center sits on the forehead. Runs before the
+      // same-cell early-return below so small circles within one cell still count.
+      if (h.pointerDown && h.steps.length) {
+        const c = h.circle;
+        c.push({ x: e.clientX, y: e.clientY, t: now });
+        while (c.length && now - c[0].t > CIRCLE_WINDOW_MS) c.shift();
+        if (c.length >= CIRCLE_MIN_SAMPLES) {
+          let mx = 0;
+          let my = 0;
+          for (const p of c) {
+            mx += p.x;
+            my += p.y;
+          }
+          mx /= c.length;
+          my /= c.length;
+          let turned = 0;
+          let radius = 0;
+          for (let i = 1; i < c.length; i++) {
+            const ax = c[i - 1].x - mx;
+            const ay = c[i - 1].y - my;
+            const bx = c[i].x - mx;
+            const by = c[i].y - my;
+            // signed angle from a→b (atan2 of cross, dot) — accumulates either direction.
+            turned += Math.atan2(ax * by - ay * bx, ax * bx + ay * by);
+            radius += Math.hypot(bx, by);
+          }
+          radius /= c.length - 1;
+          // Gate on where the circle is *centered*, in container-normalized coords (origin =
+          // center, y negative = up). The head is centered, so the forehead is a band just
+          // above center — this rejects circles above the head and in the top corners.
+          const nmx = (mx - cx) / (rect.width / 2);
+          const nmy = (my - cy) / (rect.height / 2);
+          const onForehead =
+            Math.abs(nmx) <= FOREHEAD_X_HALF &&
+            nmy >= FOREHEAD_Y_TOP &&
+            nmy <= FOREHEAD_Y_BOTTOM;
+          const circling =
+            radius >= CIRCLE_MIN_RADIUS &&
+            Math.abs(turned) >= CIRCLE_TURN_THRESHOLD &&
+            onForehead;
+          if (circling) {
+            h.lastCircleTime = now; // keeps the smile alive; loop reverts after SMILE_STOP_MS
+            if (!h.smiling) {
+              h.smiling = true;
+              foreheadSmileRef.current(true);
+            }
+          }
+        }
+      }
+
       if (xIndex === h.xIndex && yIndex === h.yIndex) return;
 
-      if (e.pointerType === "touch" || h.easeNextLook) {
-        // Touch, or the one-shot eased return after an animation: tween from the current
+      // A touch *tap* (initial contact, pointerdown) eases a sweep to the tapped cell; a
+      // touch *drag* (continuous pointermove) snaps so the look tracks the finger 1:1 with
+      // no ~300ms lag. The easeNextLook one-shot (eased return after a gesture/anim-mode
+      // exit) still eases regardless of input.
+      const touchTap = e.pointerType === "touch" && e.type !== "pointermove";
+      if (touchTap || h.easeNextLook) {
+        // Touch tap, or the one-shot eased return after an animation: tween from the current
         // cell toward the target; the animation loop steps through the intermediate look
         // phases. Retargets cleanly mid-sweep since h.xIndex/yIndex track the live cell.
         h.look.from = { x: h.xIndex, y: h.yIndex };
@@ -528,6 +660,21 @@ function EyeBallzViewerInner({
     document.addEventListener("pointermove", onMouseMove);
     document.addEventListener("pointerdown", onMouseMove);
 
+    // Release ends the forehead-circle gesture: drop the held state, clear the sample buffer,
+    // and force the smile off immediately (don't wait out SMILE_STOP_MS).
+    const onPointerUp = () => {
+      const h = three.current;
+      if (!h) return;
+      h.pointerDown = false;
+      h.circle.length = 0;
+      if (h.smiling) {
+        h.smiling = false;
+        foreheadSmileRef.current(false);
+      }
+    };
+    document.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("pointercancel", onPointerUp);
+
     // Keep camera / renderer / ASCII effect in sync with the container's content box.
     // One ResizeObserver covers manual drag-resize, the restore tween, and inline
     // (non-windowed) embedding where the host sizes the element via CSS.
@@ -542,6 +689,18 @@ function EyeBallzViewerInner({
       for (const entry of entries) {
         const cr = entry.contentRect;
         resizeViewer(cr.width, cr.height);
+        // The responsive ASCII resolution depends on width; when it shifts enough (e.g. an
+        // orientation change or crossing the mobile/desktop size), rebuild so the column
+        // count — and the face's detail — stays consistent. Guarded so a continuous resize
+        // (drag/restore tween) doesn't rebuild every frame.
+        const h = three.current;
+        if (h?.asciiEnabled && cr.width) {
+          const next = effectiveAsciiResolution(
+            settingsRef.current.ascii.resolution,
+            cr.width,
+          );
+          if (Math.abs(next - h.asciiRes) > 0.01) buildAscii.current();
+        }
       }
     });
     resizeObserver.observe(container);
@@ -550,6 +709,8 @@ function EyeBallzViewerInner({
       handles.disposed = true;
       document.removeEventListener("pointermove", onMouseMove);
       document.removeEventListener("pointerdown", onMouseMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      document.removeEventListener("pointercancel", onPointerUp);
       resizeObserver.disconnect();
       renderer.setAnimationLoop(null);
       controls.dispose();
@@ -746,10 +907,14 @@ function EyeBallzViewerInner({
       let revealed = false;
       for (const [name, folder] of ordered) {
         const colors = h.expr[name];
-        for (let i = 0; i < all.length; i += batchSize) {
+        // Some expressions (e.g. smile/smileBlink, only shown by the forehead easter-egg)
+        // load just their top N rows — the look-up poses — to skip ~60% of the textures.
+        const rowLimit = photo.topRowsOnly?.[name];
+        const frames = rowLimit ? all.filter((s) => s.y < rowLimit) : all;
+        for (let i = 0; i < frames.length; i += batchSize) {
           if (cancelled || token !== h.loadToken) return;
           await Promise.all(
-            all.slice(i, i + batchSize).map(
+            frames.slice(i, i + batchSize).map(
               (step) =>
                 new Promise((resolve) => {
                   const { photo: photoUrl } = urlFor(
@@ -899,6 +1064,23 @@ function EyeBallzViewerInner({
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
+    };
+  }, []);
+
+  // ---- "Rub the forehead to smile": let the imperative circle detector toggle the smile. --
+  // Mirrors the hold-"c" logic: remember the current base on the rising edge, restore it on
+  // the falling edge. setStatus("smile") degrades safely — if the smile grid isn't loaded,
+  // resolveBase falls back to neutral, so the gesture is simply a no-op.
+  useEffect(() => {
+    const prev = { current: null };
+    foreheadSmileRef.current = (on) => {
+      if (on) {
+        if (prev.current == null) prev.current = statusRef.current;
+        setStatus("smile");
+      } else if (prev.current != null) {
+        setStatus(prev.current);
+        prev.current = null;
+      }
     };
   }, []);
 
@@ -1138,6 +1320,24 @@ function EyeBallzViewerInner({
       // the style prop off so React never overwrites the live left/top/width/height.
       style={windowed ? undefined : { width, height }}
     >
+      {/* Calibration overlay: the forehead trigger zone, derived from the FOREHEAD_* box
+          constants (container-normalized → CSS %). Origin is the center, y negative = up. */}
+      {debugForehead && (
+        <div
+          className="eye-ballz-forehead-debug"
+          style={{
+            left: `${((1 - FOREHEAD_X_HALF) / 2) * 100}%`,
+            width: `${FOREHEAD_X_HALF * 100}%`,
+            top: `${((FOREHEAD_Y_TOP + 1) / 2) * 100}%`,
+            height: `${((FOREHEAD_Y_BOTTOM - FOREHEAD_Y_TOP) / 2) * 100}%`,
+          }}
+        >
+          <span>
+            forehead zone — x±{FOREHEAD_X_HALF} y[{FOREHEAD_Y_TOP},{" "}
+            {FOREHEAD_Y_BOTTOM}]
+          </span>
+        </div>
+      )}
       {settings.crt.enabled && (
         <div
           className={`eye-ballz-crt${settings.crt.scanBar ? "" : " no-bar"}`}
@@ -1149,7 +1349,12 @@ function EyeBallzViewerInner({
       )}
       {/* CRT bezel clip shape (after njbair's #crtPath) — always present so the
           clip-path url() resolves; only referenced when curvature is on. */}
-      <svg className="eye-ballz-crt-defs" width="0" height="0" aria-hidden="true">
+      <svg
+        className="eye-ballz-crt-defs"
+        width="0"
+        height="0"
+        aria-hidden="true"
+      >
         <clipPath
           id="eye-ballz-crt-path"
           clipPathUnits="objectBoundingBox"
@@ -1300,11 +1505,17 @@ export const EyeBallzViewer = forwardRef(EyeBallzViewerInner);
 // grid cell. Falls back to the base expression, then any loaded grid, so a missing or
 // still-loading variant never blanks the avatar.
 function applyTexture(h, step) {
-  const colors =
-    h.expr[h.displayExpression] ??
-    h.expr[h.baseExpression] ??
-    Object.values(h.expr)[0];
-  const tex = colors?.get(step.filename);
+  // Resolve the cell *per-cell*, not per-grid: a grid may be partially loaded (e.g. smile
+  // only holds its top forehead rows), so if the chosen expression lacks this exact cell we
+  // fall back to the base grid's cell, then any grid that has it. This keeps a partial grid
+  // from freezing on the last frame when the look-cell leaves its loaded region.
+  const fn = step.filename;
+  const tex =
+    h.expr[h.displayExpression]?.get(fn) ??
+    h.expr[h.baseExpression]?.get(fn) ??
+    Object.values(h.expr)
+      .map((m) => m.get(fn))
+      .find(Boolean);
   if (!tex) return;
   const depthTex = h.depth.get(step.filename) ?? null; // shared depth
   h.material.map = tex;
@@ -1554,7 +1765,9 @@ function AsciiPanel({ ascii, onChange }) {
               step={1}
               value={g.angle}
               onChange={(e) =>
-                onChange({ gradient: { ...g, angle: parseInt(e.target.value, 10) } })
+                onChange({
+                  gradient: { ...g, angle: parseInt(e.target.value, 10) },
+                })
               }
             />
           </Row>

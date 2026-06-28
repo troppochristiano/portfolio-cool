@@ -70,6 +70,14 @@ body {
     position: fixed;
     inset: 0;
     overflow: hidden;
+    cursor: grab;
+    /* Let pointer drags pan the wall instead of the browser scrolling/zooming the page. */
+    touch-action: none;
+}
+
+.ascii-gallery.is-grabbing,
+.ascii-gallery.is-grabbing .ascii-plane {
+    cursor: grabbing;
 }
 
 .ascii-gallery > div {
@@ -93,7 +101,9 @@ body {
 .ascii-plane {
     color: #fff;
     pointer-events: auto;
-    cursor: default;
+    cursor: grab;
+    /* Match the gallery so a drag starting over a player pans rather than scrolling. */
+    touch-action: none;
     will-change: transform;
     background-color: #050505;
     backface-visibility: hidden;

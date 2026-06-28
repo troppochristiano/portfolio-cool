@@ -86,7 +86,10 @@ class PhraseAsciiEffect {
 			oStyle.fontFamily = strFont;
 			oStyle.fontSize = fFontSize + 'px';
 			oStyle.lineHeight = fLineHeight + 'px';
-			oStyle.textAlign = 'left';
+			// Center (not left) so any residual gap between the art width and the image width
+			// stays symmetric — the face is centered in the grid, so it reads as centered
+			// regardless of small font-metric differences across resolutions.
+			oStyle.textAlign = 'center';
 			oStyle.textDecoration = 'none';
 
 		}
@@ -129,7 +132,13 @@ class PhraseAsciiEffect {
 
 			switch ( iScale ) {
 
-				case 1 : fLetterSpacing = - 1; break;
+				// Scale letter-spacing with the font (which is 2/fResolution) so the row fills
+				// the image width at ANY resolution. The original constant -1 only filled at one
+				// resolution (~0.2); at a higher resolution the font shrinks but a fixed -1 packs
+				// glyphs too tight, leaving the art narrower than the container — a horizontal
+				// squish that also reads as off-center under left-align. -0.2/fResolution == -1
+				// at that original calibration point and stays correct elsewhere.
+				case 1 : fLetterSpacing = - 0.2 / fResolution; break;
 				case 2 :
 				case 3 : fLetterSpacing = - 2.1; break;
 				case 4 : fLetterSpacing = - 3.1; break;

@@ -87,6 +87,13 @@ export function AsciiGallery({ figures, onReady }) {
     let targetY = 0;
     const lookAtTarget = new THREE.Vector3(0, 0, 0);
 
+    // grab/drag navigation: while a pointer is held, accumulate its delta into mouseX/mouseY
+    // (the same normalized target the absolute mousemove drives). Works for mouse and touch.
+    let isDragging = false;
+    let lastX = 0;
+    let lastY = 0;
+    const DRAG_SPEED = 1.5; // how far a full-viewport drag moves the normalized target
+
     // hover state (driven by DOM pointer events — CSS3D objects aren't raycastable)
     let currentHover = null;
     let hoveredObject = null;
@@ -181,10 +188,44 @@ export function AsciiGallery({ figures, onReady }) {
 
     // event listeners
     function onMouseMove(event) {
+      // While dragging, the pointer handlers own mouseX/mouseY — don't let the absolute
+      // mapping clobber the accumulated drag delta.
+      if (isDragging) return;
       mouseX =
         (event.clientX - window.innerWidth / 2) / (window.innerWidth / 2);
       mouseY =
         (event.clientY - window.innerHeight / 2) / (window.innerHeight / 2);
+    }
+
+    function onPointerDown(event) {
+      isDragging = true;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      mount.classList.add("is-grabbing");
+    }
+
+    function onPointerMove(event) {
+      if (!isDragging) return;
+      const dx = event.clientX - lastX;
+      const dy = event.clientY - lastY;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      // Grab metaphor: dragging right pulls the view left (flip the sign if it feels reversed).
+      mouseX = THREE.MathUtils.clamp(
+        mouseX - (dx / (window.innerWidth / 2)) * DRAG_SPEED,
+        -1,
+        1,
+      );
+      mouseY = THREE.MathUtils.clamp(
+        mouseY - (dy / (window.innerHeight / 2)) * DRAG_SPEED,
+        -1,
+        1,
+      );
+    }
+
+    function onPointerUp() {
+      isDragging = false;
+      mount.classList.remove("is-grabbing");
     }
 
     function onResize() {
@@ -290,6 +331,13 @@ export function AsciiGallery({ figures, onReady }) {
 
     document.addEventListener("mousemove", onMouseMove);
     window.addEventListener("resize", onResize);
+    // pointerdown on the mount so a drag can start anywhere over the gallery (events from the
+    // planes bubble up through the CSS3D subtree); move/up on window so the drag keeps
+    // tracking even if the pointer leaves the element.
+    mount.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
 
     animate();
 
@@ -298,6 +346,10 @@ export function AsciiGallery({ figures, onReady }) {
       cancelAnimationFrame(rafId);
       document.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("resize", onResize);
+      mount.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
 
       objects.forEach((object) => scene.remove(object));
       objects.length = 0;

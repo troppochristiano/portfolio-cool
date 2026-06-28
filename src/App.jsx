@@ -14,6 +14,7 @@ const photoConfigs = Object.entries(photos).map(([key, p]) => ({
   xSteps: p.X_STEPS,
   ySteps: p.Y_STEPS,
   expressions: p.expressions,
+  topRowsOnly: p.topRowsOnly,
 }));
 
 // Resolve each frame's color + depth URL against the public/outputs grid. Absolute
@@ -126,6 +127,9 @@ export default function App() {
               autoBlink
               transparent
               debug={false}
+              // Show the forehead "rub to smile" trigger box for calibration. Set to false
+              // once the FOREHEAD_* constants in EyeBallzViewer.jsx feel right.
+              // debugForehead={true}
               onSettingsChange={() => {}}
               onReady={() => setAvatarReady(true)}
             />

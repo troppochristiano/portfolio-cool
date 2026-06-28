@@ -128,6 +128,33 @@
   height: 100%;
 }
 
+/* Calibration overlay for the forehead "rub to smile" trigger zone (debugForehead prop).
+   Sits above the rendered avatar; pointer-events:none so it never blocks interaction. */
+.eye-ballz-forehead-debug {
+  position: absolute;
+  z-index: 40;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 1px dashed #00ff88;
+  background: rgba(0, 255, 136, 0.12);
+  border-radius: 4px;
+}
+
+.eye-ballz-forehead-debug span {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 2px;
+  padding: 1px 4px;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #001b10;
+  background: #00ff88;
+  border-radius: 3px;
+}
+
 .eye-ballz-ascii {
   position: absolute;
   top: 0;
