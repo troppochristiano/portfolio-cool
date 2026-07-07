@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   EyeBallzViewer,
   generateSteps,
@@ -9,6 +9,8 @@ import { Nav } from "./components/Nav";
 import { AsciiGallery } from "./components/AsciiGallery";
 import { Loader } from "./components/Loader";
 import { AboutOverlay } from "./components/AboutOverlay";
+import FigureDialog from "./components/FigureDialog";
+import { getRandomFigures } from "./lib/api";
 
 // Map photos.js entries into the viewer's photo-config shape (same as the bundled demo),
 // pointing thumbnails at the public/photos copy.
@@ -36,6 +38,20 @@ const urlFor = (prefix, step, exprFolder) => ({
 // on every load and waste a round-trip that competes with the avatar preload.
 const FIGURES = ["4x3Big", "3x9l0s10n", "GunInverted", "V4n7am", "s09r4n0"];
 
+// Descriptor pool seeds: the wall now receives lightweight descriptors (name +
+// URL + metadata) and each plane fetches its own JSON lazily. The static clips
+// always work — even with the backend down — and community uploads are blended
+// in on top when the API answers.
+const STATIC_POOL = FIGURES.map((name) => ({
+  key: `static:${name}`,
+  name,
+  author: "Christian Bianchi",
+  url: `/data/${name}.json`,
+}));
+
+// How many random approved community figures to mix into each roll.
+const COMMUNITY_COUNT = 12;
+
 // Dev/preview knob: `?grid=5` renders the avatar on a 5×5 sub-sample of the rendered
 // 10×10 grid (coarser head tracking, ~¼ the frames), `?grid=5x3` for a rectangle.
 // Absent/invalid → null → the full source grid (production behavior, unchanged).
@@ -58,6 +74,19 @@ export default function App() {
   const [avatarReady, setAvatarReady] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
   const [figures, setFigures] = useState(null);
+  // Figure tapped on the wall → info dialog (name, author, downloads).
+  const [dialogFigure, setDialogFigure] = useState(null);
+  // User toggle: hide the eyeballz avatar so the ASCII wall is unobstructed.
+  // Persisted so the choice survives reloads.
+  const [avatarHidden, setAvatarHidden] = useState(
+    () => localStorage.getItem("avatarHidden") === "1",
+  );
+  const toggleAvatar = () => {
+    setAvatarHidden((h) => {
+      localStorage.setItem("avatarHidden", h ? "0" : "1");
+      return !h;
+    });
+  };
   const [aboutOpen, setAboutOpen] = useState(false);
   // Section the About overlay should scroll to once open (set by the header shortcuts).
   const [aboutTarget, setAboutTarget] = useState(null);
@@ -67,33 +96,36 @@ export default function App() {
   // Reveal as soon as the hero avatar is warm — it's the focal point. The floating
   // ASCII wall is ambient background, so it no longer holds the overlay hostage to its
   // ~3.3MB of figure JSON; it fades itself in a beat later behind the hero.
-  const warm = avatarReady || timedOut;
+  // A hidden avatar can never report ready, so it must not hold the reveal either.
+  const warm = avatarReady || timedOut || avatarHidden;
 
-  // Fetch + parse the ASCII figures once on mount. They download in the background and
-  // the wall mounts + fades itself in once they resolve — independent of the hero reveal,
-  // so this ~3.3MB never sits on the "Preparing…" critical path.
-  useEffect(() => {
-    let alive = true;
-    // allSettled (not all): a single missing/bad file is skipped instead of taking down
-    // the whole wall. Check res.ok first so a 404's HTML body doesn't throw a confusing
-    // JSON parse error.
-    Promise.allSettled(
-      FIGURES.map(async (name) => {
-        const res = await fetch(`/data/${name}.json`);
-        if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
-        return { name, data: await res.json() };
-      }),
-    ).then((results) => {
-      if (!alive) return;
-      // Keep only the figures that loaded (empty is fine — the 12s timeout reveals).
-      setFigures(
-        results.filter((r) => r.status === "fulfilled").map((r) => r.value),
-      );
-    });
-    return () => {
-      alive = false;
-    };
+  // Build the wall's descriptor pool: the static clips are known synchronously,
+  // and a tiny metadata call (~2KB — no frame data) blends in random approved
+  // community figures. Each plane then fetches its own JSON lazily inside the
+  // wall, so nothing heavy ever sits on the reveal's critical path. Re-running
+  // this (the reroll button) produces a fresh random pick + a fresh random
+  // plane assignment; already-seen figure JSONs come straight from cache.
+  const loadPool = useCallback(async () => {
+    let community = [];
+    try {
+      const { figures: rows } = await getRandomFigures(COMMUNITY_COUNT);
+      community = rows.map((r) => ({
+        key: r.id,
+        name: r.name,
+        author: r.author,
+        url: `/api/figures/${r.id}/data`,
+        createdAt: r.createdAt,
+        framesCount: r.framesCount,
+      }));
+    } catch {
+      // Backend unreachable (dev without wrangler, outage) — static-only wall.
+    }
+    setFigures([...STATIC_POOL, ...community]);
   }, []);
+
+  useEffect(() => {
+    loadPool();
+  }, [loadPool]);
 
   // Scroll-to-open is now owned by the dissolve effect (useDissolveReveal inside
   // AboutOverlay): a downward wheel on the closed hero scrubs the overlay open. The old
@@ -142,10 +174,18 @@ export default function App() {
     return urls;
   }, []);
 
+  // With the avatar hidden there's nothing to warm — hand the Loader an empty
+  // list so the reveal is instant. Memoized: a fresh [] every render would
+  // re-trigger the Loader's preload effect in a loop.
+  const preloadUrls = useMemo(
+    () => (avatarHidden ? [] : imageUrls),
+    [avatarHidden, imageUrls],
+  );
+
   return (
     <>
       <Loader
-        imageUrls={imageUrls}
+        imageUrls={preloadUrls}
         onPreloaded={() => setPreloaded(true)}
         done={warm}
       />
@@ -161,24 +201,45 @@ export default function App() {
           {figures && figures.length > 0 && (
             // The wall fades itself in once its first CSS3D render lands; it no longer
             // gates the reveal, so no onReady wiring is needed here.
-            <AsciiGallery figures={figures} />
+            <AsciiGallery figures={figures} onSelect={setDialogFigure} />
           )}
-          <div className="hero-avatar">
-            <EyeBallzViewer
-              photos={photoConfigs}
-              urlFor={urlFor}
-              status="neutral"
-              autoBlink
-              transparent
-              previewGrid={PREVIEW_GRID}
-              // debug={true}
-              // Show the forehead "rub to smile" trigger box for calibration. Set to false
-              // once the FOREHEAD_* constants in EyeBallzViewer.jsx feel right.
-              // debugForehead={true}
-              onSettingsChange={() => {}}
-              onReady={() => setAvatarReady(true)}
-            />
+          {/* Bottom-right pills: avatar visibility + wall reroll. */}
+          <div className="corner-triggers">
+            <button
+              type="button"
+              className="corner-pill"
+              onClick={toggleAvatar}
+              title={avatarHidden ? "show the avatar" : "hide the avatar to see the wall"}
+            >
+              {avatarHidden ? "☻ show face" : "☻ hide face"}
+            </button>
+            <button
+              type="button"
+              className="corner-pill"
+              onClick={loadPool}
+              title="load a new random set of figures"
+            >
+              ↻ reroll
+            </button>
           </div>
+          {!avatarHidden && (
+            <div className="hero-avatar">
+              <EyeBallzViewer
+                photos={photoConfigs}
+                urlFor={urlFor}
+                status="neutral"
+                autoBlink
+                transparent
+                previewGrid={PREVIEW_GRID}
+                // debug={true}
+                // Show the forehead "rub to smile" trigger box for calibration. Set to false
+                // once the FOREHEAD_* constants in EyeBallzViewer.jsx feel right.
+                // debugForehead={true}
+                onSettingsChange={() => {}}
+                onReady={() => setAvatarReady(true)}
+              />
+            </div>
+          )}
           <div className="about-trigger-group">
             {showScrollHint && (
               <span className="about-trigger-caret" aria-hidden="true">
@@ -200,6 +261,12 @@ export default function App() {
             scrollTarget={aboutTarget}
             onScrolled={() => setAboutTarget(null)}
           />
+          {dialogFigure && (
+            <FigureDialog
+              figure={dialogFigure}
+              onClose={() => setDialogFigure(null)}
+            />
+          )}
         </>
       )}
     </>

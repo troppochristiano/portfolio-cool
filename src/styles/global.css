@@ -561,3 +561,221 @@ body {
         opacity: 0.7;
     }
 }
+
+/* ── lazy wall planes ─────────────────────────────────────────── */
+/* Each plane's player fades in when its own figure JSON lands, so the wall
+   populates piece by piece instead of popping all at once. */
+.plane-body {
+    opacity: 0;
+    transition: opacity 0.6s ease;
+}
+
+.plane-body.is-loaded {
+    opacity: 1;
+}
+
+/* ── corner pills (hero): avatar toggle + reroll ──────────────── */
+/* Same neon pill as .about-trigger, stacked in the bottom-right corner. */
+.corner-triggers {
+    position: fixed;
+    right: 16px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+.corner-pill {
+    pointer-events: auto;
+    cursor: pointer;
+    border: none;
+    font: inherit;
+    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 6px 12px;
+    color: #fff;
+    background-color: #0000ff;
+    transition: opacity 0.15s ease;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.corner-pill:hover {
+    opacity: 0.85;
+}
+
+/* ── figure info dialog (hero + gallery) ──────────────────────── */
+.figdialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.figdialog {
+    width: min(560px, 100%);
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    background: #000;
+    border: 1px solid #fff;
+}
+
+.figdialog__bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background-color: #0000ff;
+    color: #fff;
+    padding: 4px 4px 4px 10px;
+    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+
+.figdialog__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.figdialog__close {
+    flex: none;
+    border: none;
+    background: none;
+    color: #fff;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 6px;
+    cursor: pointer;
+}
+
+.figdialog__stage {
+    background: #050505;
+    min-height: 160px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    color: #fff;
+    overflow: hidden;
+}
+
+.figdialog__note {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+}
+
+.figdialog__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+    margin: 0;
+    padding: 12px 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.figdialog__meta dt {
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.figdialog__meta dd {
+    margin: 2px 0 0;
+    color: #fff;
+    font-size: 14px;
+}
+
+.figdialog__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 14px 14px;
+}
+
+.figdialog__btn {
+    background: transparent;
+    border: 1px solid #0000ff;
+    color: #fff;
+    font: inherit;
+    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+}
+
+.figdialog__btn:hover:not(:disabled) {
+    opacity: 0.85;
+}
+
+.figdialog__btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Moderation row — only rendered on the admin library's dialogs. */
+.figdialog__admin {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px 14px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.25);
+}
+
+.figdialog__btn--danger {
+    border-color: #ff5b52;
+}
+
+.figdialog__admin-error {
+    color: #ff5b52;
+    font-size: 13px;
+}
+
+/* Small status markers on admin library cards (clip/photo, hero). */
+.gallery-card__badges {
+    display: flex;
+    gap: 6px;
+    padding: 6px 10px 0;
+}
+
+.gallery-card__badge {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 6px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.gallery-card__badge.is-hero {
+    border-color: #0000ff;
+    background: #0000ff;
+    color: #fff;
+}
+
+.gallery-card__badge.is-hidden {
+    border-color: #ff5b52;
+    color: #ff5b52;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .plane-body {
+        transition: none;
+    }
+}

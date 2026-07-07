@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import {
   CSS3DRenderer,
@@ -6,6 +6,7 @@ import {
 } from "three/examples/jsm/renderers/CSS3DRenderer.js";
 import AsciiPlayer from "./AsciiPlayer.jsx";
 import { setInteracting } from "../lib/galleryBus.js";
+import { getFigureData } from "../lib/api.js";
 
 // A curved wall of floating ASCII players, ported from the Three.js video gallery
 // (REFERENCE CODE/cg-threejs-video-gallery) — same camera parallax, per-plane
@@ -55,7 +56,7 @@ const params = {
   verticalCurvature: 0.5, // dimensionless — feeds rotation (rad) and a scaled z-offset
 };
 
-export function AsciiGallery({ figures, onReady }) {
+export function AsciiGallery({ figures, onReady, onSelect }) {
   const mountRef = useRef(null);
   const stageRef = useRef(null);
   // The hover label is positioned imperatively every frame (it tracks a moving 3D plane),
@@ -64,6 +65,8 @@ export function AsciiGallery({ figures, onReady }) {
   const planeRefs = useRef([]);
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
 
   // Assign each of rows*columns planes a figure at random (same idea as the old video
   // pool). Stable for the lifetime of the figures array so React never reorders nodes.
@@ -158,6 +161,17 @@ export function AsciiGallery({ figures, onReady }) {
 
     // Build the wall: wrap each pre-rendered player div in a CSS3DObject.
     const objects = [];
+    // Per-plane DOM listeners are collected so the effect teardown can remove
+    // them — the same divs are reused by React across rerolls, so listeners
+    // would otherwise stack up and fire onSelect multiple times per tap.
+    const elListeners = [];
+    // Click-vs-drag: a tap opens the figure dialog only if the pointer barely
+    // moved and released quickly; anything longer is the existing orbit drag.
+    let downX = 0;
+    let downY = 0;
+    let downTime = 0;
+    const TAP_DIST = 6;
+    const TAP_MS = 400;
 
     function buildGallery() {
       let i = 0;
@@ -194,12 +208,22 @@ export function AsciiGallery({ figures, onReady }) {
           };
 
           // Hover label: set on enter, cleared on leave (positioned per-frame below).
-          el.addEventListener("pointerenter", () => {
+          const onEnter = () => {
             hoveredObject = object;
-          });
-          el.addEventListener("pointerleave", () => {
+          };
+          const onLeave = () => {
             if (hoveredObject === object) hoveredObject = null;
-          });
+          };
+          const onTapUp = (e) => {
+            const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
+            if (dist < TAP_DIST && performance.now() - downTime < TAP_MS) {
+              onSelectRef.current?.(fig);
+            }
+          };
+          el.addEventListener("pointerenter", onEnter);
+          el.addEventListener("pointerleave", onLeave);
+          el.addEventListener("pointerup", onTapUp);
+          elListeners.push([el, "pointerenter", onEnter], [el, "pointerleave", onLeave], [el, "pointerup", onTapUp]);
 
           objects.push(object);
           scene.add(object);
@@ -222,6 +246,9 @@ export function AsciiGallery({ figures, onReady }) {
       isDragging = true;
       lastX = event.clientX;
       lastY = event.clientY;
+      downX = event.clientX;
+      downY = event.clientY;
+      downTime = performance.now();
       mount.classList.add("is-grabbing");
       // Pause ASCII playback for the duration of the interaction.
       if (settleTimer) {
@@ -405,6 +432,9 @@ export function AsciiGallery({ figures, onReady }) {
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointercancel", onPointerUp);
 
+      elListeners.forEach(([el, type, fn]) => el.removeEventListener(type, fn));
+      elListeners.length = 0;
+
       objects.forEach((object) => scene.remove(object));
       objects.length = 0;
 
@@ -426,7 +456,7 @@ export function AsciiGallery({ figures, onReady }) {
             ref={(el) => (planeRefs.current[i] = el)}
             className={`ascii-plane${FRAMED ? " is-framed" : ""}`}
           >
-            <AsciiPlayer data={fig.data} width={PLANE_PX} loop />
+            <LazyPlane desc={fig} index={i} />
             {FRAMED && (
               <div className="ascii-frame-label">{labelFor(fig.name)}</div>
             )}
@@ -435,5 +465,36 @@ export function AsciiGallery({ figures, onReady }) {
       </div>
       <div className="ascii-label" ref={labelRef} aria-hidden="true" />
     </>
+  );
+}
+
+// One plane's content. Each plane fetches its own figure JSON (promise-cached
+// in api.js, so N planes sharing a figure download it once) after a small
+// per-plane stagger, then fades in — the wall populates plane by plane instead
+// of blocking on one big up-front download.
+function LazyPlane({ desc, index }) {
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    setData(null);
+    let alive = true;
+    const delay = index * 60 + Math.random() * 400;
+    const timer = setTimeout(() => {
+      getFigureData(desc.url)
+        .then((d) => {
+          if (alive) setData(d);
+        })
+        .catch(() => {}); // failed plane stays empty — ambient, not critical
+    }, delay);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [desc, index]);
+
+  return (
+    <div className={`plane-body${data ? " is-loaded" : ""}`}>
+      {data && <AsciiPlayer data={data} width={PLANE_PX} loop />}
+    </div>
   );
 }
