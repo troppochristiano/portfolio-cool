@@ -24,6 +24,9 @@ export function Nav({ onHome, onNavigate }) {
         >
           Contact
         </button>
+        <Link className="nav__link" to="/gallery">
+          Gallery
+        </Link>
         <Link className="nav__link" to="/create">
           Create
         </Link>
