@@ -38,8 +38,59 @@ const LIMITS = {
   FRAMES_MAX: 900,
   TOTAL_CHARS_MAX: 2_500_000,
   THUMB_COLS_MAX: 80,
+  // optional style block (mirrors src/create/styleOptions.js — keep in sync)
+  LETTER_SPACING_MAX: 0.5, // em
+  LINE_HEIGHT_MIN: 0.7,
+  LINE_HEIGHT_MAX: 1.6,
 };
 export { LIMITS };
+
+// Whitelisted font KEYS (the client maps keys to font stacks; the server
+// never stores a raw font-family string).
+const STYLE_FONTS = new Set(['default', 'courier', 'consolas', 'lucida']);
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+/**
+ * Validate the optional `figure.style` block. Returns:
+ *   { ok: true, value: null }          — absent / empty → default look
+ *   { ok: true, value: {…normalized} } — validated, unknown keys dropped
+ *   { ok: false, code, message }       — anything out of contract
+ */
+function validateStyle(style) {
+  if (style === undefined || style === null) return { ok: true, value: null };
+  const fail = (code, message) => ({ ok: false, code, message });
+  if (typeof style !== 'object' || Array.isArray(style)) {
+    return fail('invalid_style', 'style must be an object');
+  }
+  const out = {};
+  if (style.font !== undefined) {
+    if (!STYLE_FONTS.has(style.font)) return fail('invalid_style_font', 'unknown font key');
+    if (style.font !== 'default') out.font = style.font;
+  }
+  if (style.letterSpacing !== undefined) {
+    const v = style.letterSpacing;
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > LIMITS.LETTER_SPACING_MAX) {
+      return fail('invalid_style_spacing', `letterSpacing must be 0–${LIMITS.LETTER_SPACING_MAX} em`);
+    }
+    if (v > 0) out.letterSpacing = v;
+  }
+  if (style.lineHeight !== undefined) {
+    const v = style.lineHeight;
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < LIMITS.LINE_HEIGHT_MIN || v > LIMITS.LINE_HEIGHT_MAX) {
+      return fail('invalid_style_line_height', `lineHeight must be ${LIMITS.LINE_HEIGHT_MIN}–${LIMITS.LINE_HEIGHT_MAX}`);
+    }
+    if (v !== 1) out.lineHeight = v;
+  }
+  for (const key of ['background', 'color']) {
+    if (style[key] !== undefined) {
+      if (typeof style[key] !== 'string' || !HEX_COLOR.test(style[key])) {
+        return fail('invalid_style_color', `${key} must be a #rrggbb hex color`);
+      }
+      out[key] = style[key].toLowerCase();
+    }
+  }
+  return { ok: true, value: Object.keys(out).length ? out : null };
+}
 
 const isInt = (v) => typeof v === 'number' && Number.isInteger(v);
 
@@ -120,7 +171,13 @@ export function validateUpload(body) {
   if (!isInt(thumbFrame) || thumbFrame < 0 || thumbFrame >= frames.length)
     return fail('invalid_thumb_frame', 'thumbFrame must index an existing frame');
 
-  return { ok: true, value: { name, author, thumbFrame, cols, rows, fps, cellPx, frames } };
+  const styleResult = validateStyle(fig.style);
+  if (!styleResult.ok) return styleResult;
+
+  return {
+    ok: true,
+    value: { name, author, thumbFrame, cols, rows, fps, cellPx, frames, style: styleResult.value },
+  };
 }
 
 /**

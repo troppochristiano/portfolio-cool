@@ -32,13 +32,17 @@ export async function onRequestGet({ request, env }) {
       `SELECT id, name, author, cols, rows, fps, cell_px AS cellPx,
               frames_count AS framesCount, thumb_frame AS thumbFrame,
               thumb, thumb_cols AS thumbCols, thumb_rows AS thumbRows,
-              created_at AS createdAt
+              style, created_at AS createdAt
        FROM figures WHERE ${where}
        ORDER BY created_at DESC, id DESC
        LIMIT ${limit + 1}`,
     ).bind(...binds).all();
 
-    const items = results.slice(0, limit);
+    // The style column holds server-validated JSON (or NULL) — hand the
+    // client an object so cards can tint without re-parsing.
+    const items = results
+      .slice(0, limit)
+      .map((r) => ({ ...r, style: r.style ? JSON.parse(r.style) : null }));
     const last = items[items.length - 1];
     const nextCursor =
       results.length > limit ? btoa(JSON.stringify([last.createdAt, last.id])) : null;

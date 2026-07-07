@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS figures (
   thumb_rows INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved')),
   hero INTEGER NOT NULL DEFAULT 0,     -- 1 = also appears on the hero wall (approved only)
+  style TEXT,                          -- validated style block as JSON, NULL = default look
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   ip_hash TEXT NOT NULL                -- SHA-256(IP_SALT + ip); raw IPs are never stored
 );

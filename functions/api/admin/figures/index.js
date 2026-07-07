@@ -19,12 +19,13 @@ export async function onRequestGet({ request, env }) {
       `SELECT id, name, author, cols, rows, fps, cell_px AS cellPx,
               frames_count AS framesCount, size_bytes AS sizeBytes,
               thumb_frame AS thumbFrame, thumb, thumb_cols AS thumbCols,
-              thumb_rows AS thumbRows, status, hero, created_at AS createdAt
+              thumb_rows AS thumbRows, style, status, hero, created_at AS createdAt
        FROM figures WHERE ${where}
        ORDER BY created_at ${status === 'pending' ? 'ASC' : 'DESC'}`,
     );
     const { results } = await (status === 'all' ? stmt : stmt.bind(status)).all();
-    return json({ items: results }, 200, { 'Cache-Control': 'no-store' });
+    const items = results.map((r) => ({ ...r, style: r.style ? JSON.parse(r.style) : null }));
+    return json({ items }, 200, { 'Cache-Control': 'no-store' });
   } catch {
     return error('internal', 'something went wrong', 500);
   }

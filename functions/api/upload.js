@@ -61,12 +61,18 @@ export async function onRequestPost({ request, env, waitUntil }) {
 
     const result = validateUpload(body);
     if (!result.ok) return error(result.code, result.message, 400);
-    const { name, author, thumbFrame, cols, rows, fps, cellPx, frames } = result.value;
+    const { name, author, thumbFrame, cols, rows, fps, cellPx, frames, style } = result.value;
 
     const id = crypto.randomUUID();
     const createdAt = new Date().toISOString();
     // Canonical stored document — exactly the figure.json player contract.
-    const doc = JSON.stringify({ cols, rows, fps, color: false, cellPx, name, author, createdAt, frames });
+    // `style` is the validated visual block (font key / spacing / line height /
+    // colors); omitted entirely for default-look figures.
+    const doc = JSON.stringify({
+      cols, rows, fps, color: false, cellPx, name, author, createdAt,
+      ...(style ? { style } : {}),
+      frames,
+    });
     const { thumb, thumbCols, thumbRows } = makeThumb(frames[thumbFrame], cols, rows);
 
     await env.FIGURES.put(`figures/${id}.json`, doc, {
@@ -76,11 +82,12 @@ export async function onRequestPost({ request, env, waitUntil }) {
       await env.DB.prepare(
         `INSERT INTO figures
            (id, name, author, cols, rows, fps, cell_px, frames_count, size_bytes,
-            thumb_frame, thumb, thumb_cols, thumb_rows, status, created_at, ip_hash)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'pending', ?14, ?15)`,
+            thumb_frame, thumb, thumb_cols, thumb_rows, style, status, created_at, ip_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 'pending', ?15, ?16)`,
       ).bind(
         id, name, author, cols, rows, fps, cellPx, frames.length, doc.length,
-        thumbFrame, thumb, thumbCols, thumbRows, createdAt, hash,
+        thumbFrame, thumb, thumbCols, thumbRows, style ? JSON.stringify(style) : null,
+        createdAt, hash,
       ).run();
     } catch (e) {
       // Don't leave an orphaned R2 object if the metadata insert fails.

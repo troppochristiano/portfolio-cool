@@ -15,9 +15,11 @@
 #   npx wrangler pages secret put NOTIFY_EMAIL
 #
 # schema.sql creates the full table on a fresh DB. If the remote DB was created
-# before the hero flag existed, also run once:
+# before these columns existed, also run once (each):
 #   npx wrangler d1 execute ascii-figures --remote \
 #     --command "ALTER TABLE figures ADD COLUMN hero INTEGER NOT NULL DEFAULT 0"
+#   npx wrangler d1 execute ascii-figures --remote \
+#     --command "ALTER TABLE figures ADD COLUMN style TEXT"
 name = "portfolio"
 pages_build_output_dir = "dist"
 compatibility_date = "2026-06-01"
