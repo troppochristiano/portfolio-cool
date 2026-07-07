@@ -138,16 +138,87 @@ export function lumaGrid(data, srcW, srcH, cols, rows, key) {
   return luma;
 }
 
-/** Stage 2: gamma + invert, in place. Blank (-1) cells are untouched. */
-export function adjustLuma(luma, gamma, invert) {
+/**
+ * Stage 2: contrast + gamma + invert, in place. Blank (-1) cells are
+ * untouched. Contrast stretches around mid-grey before gamma (1 = neutral,
+ * <1 flattens, >1 separates tones — often the difference between mush and a
+ * readable figure on low-contrast sources).
+ */
+export function adjustLuma(luma, gamma, invert, contrast = 1) {
   for (let i = 0; i < luma.length; i++) {
     let v = luma[i];
     if (v < 0) continue;
+    if (contrast !== 1) {
+      v = (v - 0.5) * contrast + 0.5;
+      v = v < 0 ? 0 : v > 1 ? 1 : v;
+    }
     if (gamma !== 1) v = Math.pow(v, gamma);
     if (invert) v = 1 - v;
     luma[i] = v;
   }
   return luma;
+}
+
+/**
+ * Edge glyphs by edge orientation bucket: horizontal line, rising diagonal,
+ * vertical line, falling diagonal. All four are part of the server's charset
+ * whitelist (they appear in the detailed ramp), so edge-mode figures upload
+ * unchanged.
+ */
+export const EDGE_GLYPHS = ['-', '/', '|', '\\'];
+
+/**
+ * Sobel edge detector over the (adjusted) cell-resolution luma grid.
+ * Returns an Int8Array: -1 = no edge, 0..3 = EDGE_GLYPHS bucket for cells
+ * whose normalized gradient magnitude clears `threshold` (0..1).
+ *
+ * Blank (-1) cells never become edges, and blank NEIGHBORS are sampled as
+ * the center value so keyed/cut boundaries don't turn into thick outlines —
+ * only real tonal edges inside the content register.
+ */
+export function detectEdges(luma, cols, rows, threshold) {
+  const out = new Int8Array(cols * rows).fill(-1);
+  const at = (x, y, center) => {
+    if (x < 0) x = 0; else if (x >= cols) x = cols - 1;
+    if (y < 0) y = 0; else if (y >= rows) y = rows - 1;
+    const v = luma[y * cols + x];
+    return v < 0 ? center : v;
+  };
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const p = y * cols + x;
+      const c = luma[p];
+      if (c < 0) continue;
+      const tl = at(x - 1, y - 1, c), t = at(x, y - 1, c), tr = at(x + 1, y - 1, c);
+      const l = at(x - 1, y, c), r = at(x + 1, y, c);
+      const bl = at(x - 1, y + 1, c), b = at(x, y + 1, c), br = at(x + 1, y + 1, c);
+      const gx = (tr + 2 * r + br) - (tl + 2 * l + bl);
+      const gy = (bl + 2 * b + br) - (tl + 2 * t + tr);
+      // Kernel max is 4 per axis on 0..1 luma — /4 normalizes into ~0..1.4.
+      const mag = Math.sqrt(gx * gx + gy * gy) / 4;
+      if (mag < threshold) continue;
+      // The edge LINE runs perpendicular to the gradient. Bucket its angle
+      // into 4 directions: 0° → '-', 45° → '/', 90° → '|', 135° → '\'.
+      const angle = Math.atan2(gy, gx) + Math.PI / 2;
+      const bucket = Math.round((angle / Math.PI) * 4);
+      out[p] = ((bucket % 4) + 4) % 4;
+    }
+  }
+  return out;
+}
+
+/**
+ * Merge the edge map into the glyph indices. Edge cells are encoded as
+ * negative codes below the blank sentinel: -2 - bucket (indicesToFrame
+ * decodes them back to EDGE_GLYPHS). mode 'overlay' draws edges over the
+ * ramp output; 'only' blanks everything that isn't an edge.
+ */
+export function applyEdges(indices, edgeMap, mode) {
+  for (let i = 0; i < indices.length; i++) {
+    if (edgeMap[i] >= 0) indices[i] = -2 - edgeMap[i];
+    else if (mode === 'only' && indices[i] >= 0) indices[i] = -1;
+  }
+  return indices;
 }
 
 // 4×4 Bayer matrix, row-major. (v + 0.5)/16 - 0.5 gives a threshold offset
@@ -209,14 +280,17 @@ export function quantizeLuma(luma, cols, rows, glyphCount, dither) {
   return out;
 }
 
-/** Stage 5: glyph indices → frame string. -1 → ' ' (transparent cell). */
+/**
+ * Stage 5: glyph indices → frame string. -1 → ' ' (transparent cell),
+ * codes ≤ -2 → edge direction glyphs (see applyEdges).
+ */
 export function indicesToFrame(indices, cols, rows, glyphs) {
   const lines = new Array(rows);
   for (let y = 0; y < rows; y++) {
     let line = '';
     for (let x = 0; x < cols; x++) {
       const idx = indices[y * cols + x];
-      line += idx < 0 ? ' ' : glyphs[idx];
+      line += idx === -1 ? ' ' : idx < -1 ? EDGE_GLYPHS[-2 - idx] : glyphs[idx];
     }
     lines[y] = line;
   }
@@ -226,14 +300,20 @@ export function indicesToFrame(indices, cols, rows, glyphs) {
 /**
  * The whole chain in one call — what the live preview and the bake use.
  * data: Uint8ClampedArray from ctx.getImageData(...).data, srcW×srcH.
- * opts: { cols, rows, ramp, invert, gamma, key, dither }.
+ * opts: { cols, rows, ramp, invert, gamma, contrast, key, dither, edge }.
+ * edge: { mode: 'off'|'overlay'|'only', threshold: 0..1 } or undefined.
  */
 export function convertFrame(data, srcW, srcH, opts) {
-  const { cols, rows, ramp, invert, gamma, key, dither = 'off' } = opts;
+  const { cols, rows, ramp, invert, gamma, contrast = 1, key, dither = 'off', edge } = opts;
   const glyphs = toGlyphs(ramp);
   const luma = lumaGrid(data, srcW, srcH, cols, rows, key);
-  adjustLuma(luma, gamma, invert);
+  adjustLuma(luma, gamma, invert, contrast);
+  // Edges read the adjusted luma and must be computed BEFORE quantize —
+  // the floyd path mutates the luma array as it diffuses error.
+  const edgeOn = edge && edge.mode && edge.mode !== 'off';
+  const edgeMap = edgeOn ? detectEdges(luma, cols, rows, edge.threshold ?? 0.25) : null;
   const indices = quantizeLuma(luma, cols, rows, glyphs.length, dither);
+  if (edgeMap) applyEdges(indices, edgeMap, edge.mode);
   return indicesToFrame(indices, cols, rows, glyphs);
 }
 
