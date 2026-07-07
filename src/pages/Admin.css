@@ -1,0 +1,199 @@
+/* Moderation page — minimal, same black + neon-blue language. */
+
+.admin-page {
+    height: 100vh;
+    height: 100dvh;
+    overflow-y: auto;
+    background: #000;
+    color: #fff;
+    padding: 20px 24px 48px;
+}
+
+.admin-head,
+.admin-list,
+.admin-page > p {
+    max-width: 960px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.admin-head {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    border-bottom: 2px solid #fff;
+    padding-bottom: 14px;
+    margin-bottom: 20px;
+}
+
+.admin-head h1 {
+    font-size: clamp(1.2rem, 2.5vw, 1.7rem);
+    font-weight: 700;
+    flex: 1;
+}
+
+/* queue / library switch */
+.admin-tabs {
+    flex: 1;
+    display: flex;
+    gap: 6px;
+}
+
+.admin-tab {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: #fff;
+    font: inherit;
+    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.admin-tab:hover {
+    border-color: #fff;
+}
+
+.admin-tab.is-active {
+    background: #0000ff;
+    border-color: #0000ff;
+}
+
+/* the mirrored gallery reuses .gallery-grid from Gallery.css */
+.admin-library {
+    max-width: 960px;
+    margin: 0 auto;
+}
+
+/* Same neon pill as Gallery's .home-pill — defined here too so /admin works
+   without the gallery chunk having loaded. */
+.admin-page .home-pill {
+    display: inline-block;
+    margin-bottom: 0;
+    text-decoration: none;
+    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #fff;
+    background-color: #0000ff;
+    padding: 4px 8px;
+    transition: opacity 0.15s ease;
+}
+
+.admin-page .home-pill:hover {
+    opacity: 0.85;
+}
+
+.admin-gate {
+    max-width: 360px;
+    margin: 18vh auto 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.admin-gate h1 {
+    font-size: 1.4rem;
+    font-weight: 700;
+}
+
+.admin-gate input,
+.admin-page input[type="password"] {
+    font: inherit;
+    color: #fff;
+    background: #000;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    padding: 8px 10px;
+}
+
+.admin-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.admin-card {
+    display: grid;
+    grid-template-columns: 220px 1fr auto;
+    gap: 14px;
+    align-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    padding: 12px;
+}
+
+@media (max-width: 720px) {
+    .admin-card {
+        grid-template-columns: 1fr;
+    }
+}
+
+.admin-card__screen {
+    background: #050505;
+    aspect-ratio: 4 / 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    padding: 6px;
+}
+
+.admin-card__meta {
+    min-width: 0;
+    line-height: 1.5;
+    font-size: 14px;
+}
+
+.admin-card__actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.admin-btn {
+    background: transparent;
+    border: 1px solid #0000ff;
+    color: #fff;
+    font: inherit;
+    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+}
+
+.admin-btn.primary {
+    background: #0000ff;
+}
+
+.admin-btn.danger {
+    border-color: #ff5b52;
+}
+
+.admin-btn:hover:not(:disabled) {
+    opacity: 0.85;
+}
+
+.admin-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.admin-muted {
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.admin-error {
+    color: #ff5b52;
+    font-size: 13px;
+}
+
+.admin-page :focus-visible {
+    outline: 2px solid #0000ff;
+    outline-offset: 2px;
+}
