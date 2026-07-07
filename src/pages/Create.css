@@ -477,12 +477,49 @@
 .create-page .progress { width: 100%; height: 3px; background: var(--faint); }
 .create-page .progress span { display: block; height: 100%; background: var(--phosphor); transition: width .1s linear; }
 
-/* ── snippet ── */
-.create-page .snippet {
-  border: 1px solid var(--faint); background: rgba(255, 255, 255, 0.04);
-  font-family: var(--mono);
-  padding: 0.8rem 1rem; font-size: 0.78rem; line-height: 1.5; color: var(--ink);
-  white-space: pre; overflow-x: auto;
-}
-
 .create-page :focus-visible { outline: 2px solid var(--phosphor); outline-offset: 2px; }
+
+/* ── share-to-gallery modal ── */
+.create-page .upmodal-backdrop {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex; align-items: center; justify-content: center;
+  padding: 1rem;
+}
+.create-page .upmodal {
+  width: min(420px, 100%);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+.create-page .upmodal-title {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.create-page .upmodal-close {
+  background: none; border: none; color: #fff;
+  font-size: 1.1rem; line-height: 1; padding: 0 0.2rem; cursor: pointer;
+}
+.create-page .upmodal-body { padding: 1rem; }
+.create-page .upmodal-body > * + * { margin-top: 0.9rem; }
+.create-page .upmodal-field { display: block; }
+.create-page .upmodal-field .field-label { display: block; margin-bottom: 0.35rem; }
+.create-page .upmodal-field input[type="text"] {
+  width: 100%; box-sizing: border-box;
+  font-family: var(--mono); font-size: 0.9rem;
+  color: var(--ink); background: var(--paper);
+  border: 1px solid var(--faint); padding: 0.45rem 0.55rem;
+}
+.create-page .upmodal-field input[type="text"]:hover,
+.create-page .upmodal-field input[type="text"]:focus { border-color: var(--ink); }
+.create-page .upmodal-thumb {
+  font-family: var(--mono); line-height: 1; letter-spacing: 0; white-space: pre;
+  color: var(--screen-ink); background: var(--screen-bg);
+  border: 1px solid var(--faint);
+  margin: 0; padding: 0.5rem;
+  max-height: 220px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.create-page .upmodal-error { color: var(--alert); font-size: 0.82rem; line-height: 1.4; }
+.create-page .upmodal-done { line-height: 1.5; }
+.create-page .upmodal-actions { display: flex; gap: 0.6rem; justify-content: flex-end; }

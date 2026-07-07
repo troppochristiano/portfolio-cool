@@ -8,6 +8,8 @@ import {
   gzipSize,
   formatBytes,
 } from '../create/asciify.js';
+import { downloadJson, downloadPng, downloadWebm, webmMimeType } from '../create/exportMedia.js';
+import UploadModal from '../components/UploadModal.jsx';
 import './Create.css';
 
 const RAMP_PRESETS = {
@@ -785,14 +787,32 @@ export default function Create() {
 
   const exportJson = () => {
     if (!baked) return;
-    const json = JSON.stringify(baked);
-    const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'figure.json';
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadJson(baked, 'figure.json');
   };
+
+  // PNG/WebM exports render the baked frames to a canvas client-side. WebM is
+  // only offered for animations and when MediaRecorder supports it (the export
+  // records in real time, hence the busy readout).
+  const canWebm = !!webmMimeType();
+  const [webmProgress, setWebmProgress] = useState(null); // null | 0..1
+  const exportPng = () => {
+    if (!baked) return;
+    downloadPng(baked).catch(() => setError('png export failed'));
+  };
+  const exportWebm = async () => {
+    if (!baked || webmProgress !== null) return;
+    setWebmProgress(0);
+    try {
+      await downloadWebm(baked, { onProgress: setWebmProgress });
+    } catch {
+      setError('webm export failed');
+    } finally {
+      setWebmProgress(null);
+    }
+  };
+
+  // share-to-gallery modal
+  const [shareOpen, setShareOpen] = useState(false);
 
   // Each cell renders at exactly cellPx — a direct handle on block size.
   // Lower `cols` (fewer, fatter cells) + a high pixel size = chunky pixels.
@@ -1295,7 +1315,24 @@ export default function Create() {
                 {baking ? `baking… ${bakeProgress}%` : isStill ? '● bake still' : '● bake animation'}
               </button>
               <button className="btn" onClick={exportJson} disabled={!baked || baking}>
-                ↓ export figure.json
+                ↓ json
+              </button>
+              <button className="btn" onClick={exportPng} disabled={!baked || baking}>
+                ↓ png
+              </button>
+              {canWebm && !isStill && (
+                <button
+                  className="btn"
+                  onClick={exportWebm}
+                  disabled={!baked || baking || webmProgress !== null}
+                >
+                  {webmProgress !== null
+                    ? `recording… ${Math.round(webmProgress * 100)}%`
+                    : '↓ webm'}
+                </button>
+              )}
+              <button className="btn" onClick={() => setShareOpen(true)} disabled={!baked || baking}>
+                ↑ share to gallery
               </button>
               <div className="readout">
                 {baked
@@ -1311,16 +1348,6 @@ export default function Create() {
               )}
             </div>
 
-            {baked && (
-              <pre className="snippet">{`// react (portfolio) — size with fit / width / fontSize:
-import AsciiPlayer from './components/AsciiPlayer.jsx';
-import figure from './data/figure.json';
-<AsciiPlayer data={figure} fit />
-
-// any site — copy ascii-player.js + figure.json:
-<script type="module" src="ascii-player.js"></script>
-<ascii-player src="figure.json" fit></ascii-player>`}</pre>
-            )}
           </main>
         </div>
 
@@ -1379,6 +1406,10 @@ import figure from './data/figure.json';
               <button className="btn primary" onClick={() => setDrawFullscreen(false)}>✕ exit</button>
             </div>
           </div>
+        )}
+
+        {shareOpen && baked && (
+          <UploadModal baked={baked} onClose={() => setShareOpen(false)} />
         )}
       </div>
     </div>
