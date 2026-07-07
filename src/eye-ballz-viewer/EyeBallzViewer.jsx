@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   Scene,
   PerspectiveCamera,
@@ -22,12 +23,12 @@ import {
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { PhraseAsciiEffect } from "./PhraseAsciiEffect.js";
 import { applyShader, createUniforms } from "./shader.js";
-import { generateSteps } from "./steps.js";
+import { generateSteps, subsampleSteps } from "./steps.js";
 import { listGestures, sampleGesture, startGesture } from "./gestures.js";
 import { mergeSettings } from "./settings.js";
 import "./EyeBallzViewer.css";
 
-const FPS = 60;
+const FPS = 24;
 
 // Device pixel ratio to render at. Cap at 2 so high-DPI displays don't rasterize 4–9× the
 // pixels for no visible gain. When ASCII is on the WebGL canvas is invisible (opacity:0)
@@ -123,6 +124,8 @@ const defaultUrlFor = (prefix, step, exprFolder) => ({
  *   anchored           Windowed-only: start pinned to the viewport (default true).
  *   showTitlebarButtons  Windowed-only: show the ⚙/📌/⟲ title-bar buttons (default true).
  *   transparent        See-through background (no opaque ASCII/window fill) (default false).
+ *   previewGrid        Dev: sub-sample the rendered grid to a coarser display grid —
+ *                      number (N×N) or { x, y }; null = full source grid (default null).
  *
  * Imperative ref API (useRef + ref={...}):
  *   playGesture(name)      Play a gesture ("nodYes" | "nodNo"); see getGestures().
@@ -172,7 +175,8 @@ function EyeBallzViewerInner(
         invert: true,
         color: false,
         resolution: 0.27,
-        fgColor: "#00ff88",
+        // fgColor: "#00ff88",
+        fgColor: "#0000ff",
         bgColor: "#000000",
       },
       distortion: {
@@ -220,10 +224,29 @@ function EyeBallzViewerInner(
     // Draw the "rub the forehead to smile" trigger zone (the FOREHEAD_* box) over the avatar
     // so it can be calibrated by eye. Dev-only; leave off in production.
     debugForehead = false,
+    // Dev/preview: sub-sample each avatar's rendered grid down to a coarser display grid
+    // to feel how it tracks at fewer poses (and load only those frames). Number => square
+    // N×N; { x, y } => rectangular. null/undefined or a size >= the rendered grid keeps
+    // the full source grid (production default).
+    previewGrid = null,
   },
   ref,
 ) {
   const containerRef = useRef(null);
+  // Dev grid-size override set from the debug GridPanel; when null the `previewGrid` prop
+  // (seeded by ?grid=) wins. Lets sizes be hot-swapped live to feel their load speed.
+  const [gridOverride, setGridOverride] = useState(null);
+  // Stats from the last completed grid load, shown in the GridPanel ({ grid, frames, ms }).
+  const [loadStats, setLoadStats] = useState(null);
+  const effPreviewGrid = gridOverride ?? previewGrid;
+  // Stable primitive form of the effective grid so the load effect re-runs on a value change
+  // (e.g. 5 -> 3) but not on a new object identity with the same dimensions.
+  const previewGridKey =
+    effPreviewGrid == null
+      ? ""
+      : typeof effPreviewGrid === "number"
+        ? `${effPreviewGrid}`
+        : `${effPreviewGrid.x}x${effPreviewGrid.y}`;
   // Mutable Three.js handles kept outside React's render cycle.
   const three = useRef(null);
   // Holds the latest playGesture closure so the (mount-stable) imperative handle always
@@ -812,30 +835,43 @@ function EyeBallzViewerInner(
     if (!photo) return;
     let cancelled = false;
 
+    const t0 = performance.now(); // load-speed readout for the debug GridPanel
+
     (async () => {
       const h = three.current;
       if (!h) return;
       const token = ++h.loadToken;
 
-      const { steps } = generateSteps({
+      // Generate the full rendered grid (filenames must match the source resolution's
+      // angles), then optionally thin it to a coarser preview grid. `gridX`/`gridY` are
+      // the *display* dimensions — used for interaction granularity and indexing — while
+      // each cell keeps its real on-disk filename.
+      const source = generateSteps({
         X_STEPS: photo.xSteps,
         Y_STEPS: photo.ySteps,
         PREFIX: photo.prefix,
       });
+      const pg =
+        typeof effPreviewGrid === "number"
+          ? { x: effPreviewGrid, y: effPreviewGrid }
+          : effPreviewGrid;
+      const grid = pg ? subsampleSteps(source, pg.x, pg.y) : source;
+      const dispSteps = grid.steps;
+      const gridX = grid.X_STEPS;
+      const gridY = grid.Y_STEPS;
 
       // Expression name -> color subfolder under expressions/. Avatars without an
       // `expressions` map load a single `default` color grid (flat-folder behavior).
       const exprFolders = photo.expressions ?? { default: null };
 
       const loader = new TextureLoader();
-      const all = steps.flat();
+      const all = dispSteps.flat();
       const batchSize = 10;
 
       // Probe each expression's color folder by loading one representative (center)
       // frame; only grids whose files actually exist get preloaded, so a missing
       // variant (e.g. smileBlink) is simply skipped instead of erroring.
-      const center =
-        steps[Math.floor(photo.ySteps / 2)][Math.floor(photo.xSteps / 2)];
+      const center = dispSteps[Math.floor(gridY / 2)][Math.floor(gridX / 2)];
       const present = {};
       await Promise.all(
         Object.entries(exprFolders).map(async ([name, folder]) => {
@@ -862,6 +898,10 @@ function EyeBallzViewerInner(
       // Dispose the previous avatar's grids (color sets + shared depth) before loading.
       disposeExpr(h);
       for (const [name] of toLoad) h.expr[name] = new Map();
+
+      // Count the textures actually fetched this run (shared depth + each color grid) for
+      // the debug load-speed readout. Starts with the one shared depth set.
+      let frameCount = all.length;
 
       // --- Shared depth set: loaded once, keyed by filename, reused by every grid. ---
       for (let i = 0; i < all.length; i += batchSize) {
@@ -911,6 +951,7 @@ function EyeBallzViewerInner(
         // load just their top N rows — the look-up poses — to skip ~60% of the textures.
         const rowLimit = photo.topRowsOnly?.[name];
         const frames = rowLimit ? all.filter((s) => s.y < rowLimit) : all;
+        frameCount += frames.length;
         for (let i = 0; i < frames.length; i += batchSize) {
           if (cancelled || token !== h.loadToken) return;
           await Promise.all(
@@ -941,11 +982,11 @@ function EyeBallzViewerInner(
         }
         // Reveal the avatar the moment the base expression's grid finishes loading.
         if (!revealed && name === baseName) {
-          h.steps = steps;
-          h.xSteps = photo.xSteps;
-          h.ySteps = photo.ySteps;
-          h.xIndex = Math.floor(photo.xSteps / 2);
-          h.yIndex = Math.floor(photo.ySteps / 2);
+          h.steps = dispSteps;
+          h.xSteps = gridX;
+          h.ySteps = gridY;
+          h.xIndex = Math.floor(gridX / 2);
+          h.yIndex = Math.floor(gridY / 2);
           // Reset the mobile look tween so a freshly loaded avatar starts centered
           // and doesn't carry a stale sweep from the previous one.
           h.look.animating = false;
@@ -954,21 +995,34 @@ function EyeBallzViewerInner(
           h.blinking = false;
           h.baseExpression = baseName;
           h.displayExpression = baseName;
-          applyTexture(h, steps[h.yIndex][h.xIndex]);
+          applyTexture(h, dispSteps[h.yIndex][h.xIndex]);
           revealed = true;
+          // Signal ready the moment the base grid (+ shared depth) is up — that's all
+          // the user sees. The remaining expression grids (blink/smile/smileBlink) keep
+          // loading behind the revealed avatar; the blink loop and forehead easter-egg
+          // tolerate a not-yet-loaded variant (applyTexture/blinkVariantOf no-op on a
+          // missing cell), so there's no need to gate first paint on them. Neutral+depth
+          // are already HTTP-cached by the loader, so this is just a GPU upload away.
+          onReadyRef.current?.();
         }
       }
 
-      // Every grid (depth + all expressions) is now loaded and GPU-uploaded — the
-      // avatar is fully warm. Let a parent drop its loading overlay with no upload jank.
-      if (!cancelled && token === h.loadToken) onReadyRef.current?.();
+      // The remaining expression grids have now finished warming behind the avatar; no
+      // second ready signal — the parent already dropped the overlay at reveal above.
+      if (!cancelled && token === h.loadToken) {
+        setLoadStats({
+          grid: `${gridX}×${gridY}`,
+          frames: frameCount,
+          ms: Math.round(performance.now() - t0),
+        });
+      }
     })();
 
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeKey, photos]);
+  }, [activeKey, photos, previewGridKey]);
 
   // ---- Status -> base expression. Swap the resident grid at the live (x,y) cell. --
   useEffect(() => {
@@ -1304,6 +1358,19 @@ function EyeBallzViewerInner(
     }
   };
 
+  // Windowed mode keeps the debug controls inline (their absolute coords are relative to the
+  // draggable window). Embedded/non-windowed, portal them onto <body> in a flow-laid HUD:
+  // `.hero-avatar`'s transform would otherwise trap even fixed-position panels inside the
+  // small avatar box, collapsing them onto each other. The portal escapes that so all panels
+  // stay visible (see .eye-ballz-debug in the CSS).
+  const renderDebug = (controls) =>
+    windowed
+      ? controls
+      : createPortal(
+          <div className="eye-ballz-debug">{controls}</div>,
+          document.body,
+        );
+
   return (
     <div
       ref={containerRef}
@@ -1409,7 +1476,7 @@ function EyeBallzViewerInner(
           ))}
         </>
       )}
-      {isDebug && (
+      {isDebug && renderDebug(
         <>
           <input
             className="eye-ballz-depth"
@@ -1454,6 +1521,11 @@ function EyeBallzViewerInner(
           />
           <TiltPanel tilt={settings.tilt} onChange={updateTilt} />
           <CRTPanel crt={settings.crt} onChange={updateCrt} />
+          <GridPanel
+            value={effPreviewGrid}
+            onChange={setGridOverride}
+            stats={loadStats}
+          />
 
           <div className="eye-ballz-panel eye-ballz-panel--export">
             <span className="eye-ballz-title">settings</span>
@@ -1573,6 +1645,40 @@ const labelOf = (name) =>
     .replace(/([A-Z])/g, " $1")
     .replace(/^./, (c) => c.toUpperCase())
     .trim();
+
+// Dev-only: hot-swap the avatar's preview grid size and read back the last load's frame
+// count + time, so coarser grids' faster loads can be felt without editing the URL.
+const GRID_PRESETS = [3, 5, 7, 10]; // 10 = the full rendered source grid
+function GridPanel({ value, onChange, stats }) {
+  // The active preset for a square value (number, or {x,y} with x===y); null otherwise.
+  const active =
+    typeof value === "number"
+      ? value
+      : value && value.x === value.y
+        ? value.x
+        : null;
+  return (
+    <div className="eye-ballz-panel eye-ballz-panel--grid">
+      <span className="eye-ballz-title">grid size</span>
+      <div className="eye-ballz-buttons">
+        {GRID_PRESETS.map((n) => (
+          <button
+            key={n}
+            className={`eye-ballz-btn${active === n ? " active" : ""}`}
+            onClick={() => onChange({ x: n, y: n })}
+          >
+            {n}×{n}
+          </button>
+        ))}
+      </div>
+      <span className="eye-ballz-stat">
+        {stats
+          ? `${stats.grid} · ${stats.frames} frames · ${stats.ms} ms`
+          : "load a size to time it"}
+      </span>
+    </div>
+  );
+}
 
 function ExpressionPanel({
   expressions,

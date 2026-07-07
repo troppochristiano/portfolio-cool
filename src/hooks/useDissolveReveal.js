@@ -206,7 +206,7 @@ export function useDissolveReveal({
 
         ctx.fillStyle = fill;
         ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
-        ctx.fillStyle = "#000";
+        ctx.fillStyle = "#fff";
         ctx.fillText(chars[i], x + CELL_SIZE / 2, y + CELL_SIZE / 2 + 0.5);
       }
     },

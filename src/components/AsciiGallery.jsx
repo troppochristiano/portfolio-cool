@@ -5,6 +5,7 @@ import {
   CSS3DObject,
 } from "three/examples/jsm/renderers/CSS3DRenderer.js";
 import AsciiPlayer from "./AsciiPlayer.jsx";
+import { setInteracting } from "../lib/galleryBus.js";
 
 // A curved wall of floating ASCII players, ported from the Three.js video gallery
 // (REFERENCE CODE/cg-threejs-video-gallery) — same camera parallax, per-plane
@@ -13,7 +14,7 @@ import AsciiPlayer from "./AsciiPlayer.jsx";
 
 // Human-facing label for a figure, e.g. "GunInverted" -> "GUNINVERTED".
 function labelFor(name) {
-  return String(name).toUpperCase();
+  return String(name + ".json");
 }
 
 // Configuration parameters (proportions unchanged from the reference). Length-based
@@ -31,9 +32,21 @@ const SCALE = PLANE_PX / BASE_IMAGE_WIDTH;
 // the floating hover label.
 const FRAMED = false;
 
+// Wall density. Each plane is a retained CSS3D compositor layer transformed every
+// frame, so on phones (where most columns sit off-screen anyway) a smaller grid
+// roughly halves per-frame transform writes and layer count — the biggest mobile
+// win. Evaluated once at module load; tune the 5 below after seeing it on a device.
+function pickGridSize() {
+  if (typeof window === "undefined") return 7;
+  const coarseOrSmall =
+    window.matchMedia?.("(pointer: coarse)").matches || window.innerWidth < 768;
+  return coarseOrSmall ? 5 : 7;
+}
+const GRID = pickGridSize();
+
 const params = {
-  rows: 7,
-  columns: 7,
+  rows: GRID,
+  columns: GRID,
   curvature: 5, // dimensionless shape factor — not scaled
   spacing: 10 * SCALE,
   depth: 7.5 * SCALE,
@@ -86,6 +99,9 @@ export function AsciiGallery({ figures, onReady }) {
     let targetX = 0;
     let targetY = 0;
     const lookAtTarget = new THREE.Vector3(0, 0, 0);
+    // Below this, the camera target has effectively stopped easing and the
+    // oscillation amplitude is invisible — treat the wall as at rest.
+    const IDLE_EPS = 0.0005;
 
     // grab/drag navigation: while a pointer is held, accumulate its delta into mouseX/mouseY
     // (the same normalized target the absolute mousemove drives). Works for mouse and touch.
@@ -93,6 +109,11 @@ export function AsciiGallery({ figures, onReady }) {
     let lastX = 0;
     let lastY = 0;
     const DRAG_SPEED = 1.5; // how far a full-viewport drag moves the normalized target
+    // While a drag is in flight (plus a short settle window after release) the ASCII
+    // players pause their frame rewrites so they don't compete with the CSS3D
+    // re-composite. SETTLE_MS lets the wall ease back to rest before art resumes.
+    let settleTimer = 0;
+    const SETTLE_MS = 250;
 
     // hover state (driven by DOM pointer events — CSS3D objects aren't raycastable)
     let currentHover = null;
@@ -202,6 +223,12 @@ export function AsciiGallery({ figures, onReady }) {
       lastX = event.clientX;
       lastY = event.clientY;
       mount.classList.add("is-grabbing");
+      // Pause ASCII playback for the duration of the interaction.
+      if (settleTimer) {
+        clearTimeout(settleTimer);
+        settleTimer = 0;
+      }
+      setInteracting(true);
     }
 
     function onPointerMove(event) {
@@ -226,6 +253,12 @@ export function AsciiGallery({ figures, onReady }) {
     function onPointerUp() {
       isDragging = false;
       mount.classList.remove("is-grabbing");
+      // Let the wall settle back to rest before resuming the ASCII rewrites.
+      if (settleTimer) clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => {
+        settleTimer = 0;
+        setInteracting(false);
+      }, SETTLE_MS);
     }
 
     function onResize() {
@@ -242,8 +275,21 @@ export function AsciiGallery({ figures, onReady }) {
       if (document.hidden) return;
 
       // update camera target
+      const prevTX = targetX;
+      const prevTY = targetY;
       targetX += (mouseX - targetX) * 0.05;
       targetY += (mouseY - targetY) * 0.05;
+
+      // Identical for every plane — compute once here, not 49× inside the loop.
+      const mouseDistance = Math.sqrt(targetX * targetX + targetY * targetY);
+
+      // Idle skip: once the target has stopped easing AND the oscillation amplitude
+      // (∝ mouseDistance) is negligible, the wall is at rest — skip all per-plane
+      // math and the CSS3D render until the next input. rAF stays alive (cheap).
+      const eased =
+        Math.abs(targetX - prevTX) > IDLE_EPS ||
+        Math.abs(targetY - prevTY) > IDLE_EPS;
+      if (!eased && mouseDistance < IDLE_EPS) return;
 
       lookAtTarget.x = targetX * params.lookAtRange;
       lookAtTarget.y = -targetY * params.lookAtRange;
@@ -251,6 +297,8 @@ export function AsciiGallery({ figures, onReady }) {
         (lookAtTarget.x * lookAtTarget.x) / (params.depth * params.curvature);
 
       const time = performance.now() * 0.001;
+      const tx3 = targetX * 3;
+      const ty3 = targetY * 3;
 
       // update each plane (parallax + oscillation), identical to the reference
       objects.forEach((object) => {
@@ -263,9 +311,8 @@ export function AsciiGallery({ figures, onReady }) {
           phaseOffset,
         } = object.userData;
 
-        const mouseDistance = Math.sqrt(targetX * targetX + targetY * targetY);
-        const parallaxX = targetX * parallaxFactor * 3 * randomOffset.x;
-        const parallaxY = targetY * parallaxFactor * 3 * randomOffset.y;
+        const parallaxX = tx3 * parallaxFactor * randomOffset.x;
+        const parallaxY = ty3 * parallaxFactor * randomOffset.y;
         // Position offsets are in (unscaled) reference units, so scale them to pixel
         // space once; rotations are radians and stay dimensionless.
         const oscillation = Math.sin(time + phaseOffset) * mouseDistance * 0.1;
@@ -324,10 +371,15 @@ export function AsciiGallery({ figures, onReady }) {
 
     buildGallery();
 
-    // First render, then signal ready on the next tick.
+    // First render, then fade the wall in + signal ready on the next tick. The
+    // `is-ready` class drives the opacity transition (global.css) so the ambient wall
+    // eases in behind the already-revealed hero rather than popping.
     camera.lookAt(lookAtTarget);
     renderer.render(scene, camera);
-    requestAnimationFrame(() => onReadyRef.current?.());
+    requestAnimationFrame(() => {
+      mount.classList.add("is-ready");
+      onReadyRef.current?.();
+    });
 
     document.addEventListener("mousemove", onMouseMove);
     window.addEventListener("resize", onResize);
@@ -344,6 +396,8 @@ export function AsciiGallery({ figures, onReady }) {
     // teardown — idempotent so StrictMode's dev remount doesn't duplicate the wall
     return () => {
       cancelAnimationFrame(rafId);
+      if (settleTimer) clearTimeout(settleTimer);
+      setInteracting(false);
       document.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("resize", onResize);
       mount.removeEventListener("pointerdown", onPointerDown);

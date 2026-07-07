@@ -291,6 +291,10 @@
   transform: translateX(-50%);
   width: 200px;
   z-index: 10;
+  /* Opt back in to clicks: when embedded, the host may set the viewer's container to
+     pointer-events:none (e.g. .hero-avatar, so the cursor tracks through to the scene
+     behind). Without this the debug controls inherit `none` and can't be used. */
+  pointer-events: auto;
 }
 
 .eye-ballz-ascii-toggle,
@@ -299,6 +303,7 @@
   top: 20px;
   right: 20px;
   z-index: 20;
+  pointer-events: auto; /* see .eye-ballz-depth — opt back in under a none parent */
   padding: 8px 14px;
   font-family: inherit;
   font-size: 13px;
@@ -326,9 +331,36 @@
   background: rgba(255, 255, 255, 0.3);
 }
 
+/* Embedded debug HUD: portaled onto <body> (so it escapes .hero-avatar's transform) and
+   flowed as a column-wrap, so every panel stays visible and non-overlapping at any size —
+   instead of the absolute coordinates that only fit the ~800px standalone viewer. */
+.eye-ballz-debug {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-flow: column wrap;
+  align-content: flex-start;
+  gap: 8px;
+  padding: 8px;
+  pointer-events: none; /* gaps stay click-through so the ASCII wall behind still drags */
+  overflow: hidden;
+}
+/* Drop each control's absolute placement so it flows; re-enable clicks per control. The
+   `div` prefix lifts specificity above the per-panel `.eye-ballz-panel{position:absolute}`
+   (and `--ascii/--crt/...` offset) rules so the reset actually wins. */
+div.eye-ballz-debug > * {
+  position: static;
+  inset: auto;
+  transform: none;
+  margin: 0;
+  pointer-events: auto;
+}
+
 .eye-ballz-panel {
   position: absolute;
   z-index: 20;
+  pointer-events: auto; /* see .eye-ballz-depth — opt back in under a none parent */
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -360,6 +392,17 @@
 .eye-ballz-panel--crt {
   top: 20px;
   left: 240px;
+}
+
+/* Dev grid-size switcher — its own column right of the CRT panel. */
+.eye-ballz-panel--grid {
+  top: 20px;
+  left: 460px;
+}
+
+.eye-ballz-panel--grid .eye-ballz-stat {
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
 }
 
 .eye-ballz-panel--export {

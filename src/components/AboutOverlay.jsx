@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDissolveReveal } from "../hooks/useDissolveReveal";
 
 // Placeholder Works entries — modeled on the henriheymans.com "Recognitions & Awards"
@@ -44,13 +44,35 @@ const SOCIALS = [
 // bottom→top on open and dissolves top→bottom on close, revealing the hero behind. The same
 // hook owns the scroll-to-open scrub and the pull-to-close-at-top scrub, so the old one-shot
 // wheel-open (in App) and the 690px pull-to-close indicator are no longer needed.
-export function AboutOverlay({ open, onOpenChange, ready = true }) {
+export function AboutOverlay({
+  open,
+  onOpenChange,
+  ready = true,
+  scrollTarget = null,
+  onScrolled,
+}) {
   // Set of open accordion indices — rows toggle independently.
   const [openWorks, setOpenWorks] = useState(() => new Set());
   const overlayRef = useRef(null);
   const scrollRef = useRef(null);
   const canvasRef = useRef(null);
   const contentRef = useRef(null);
+  // Section id queued by a header shortcut; consumed once the overlay is open + scrollable.
+  const pendingScrollRef = useRef(null);
+
+  // Scroll the queued section into view. Only effective once settleOpen has flipped the
+  // scroll container to overflow-y:auto; rAF lets that layout settle first.
+  const scrollToSection = useCallback(() => {
+    const id = pendingScrollRef.current;
+    if (!id) return;
+    pendingScrollRef.current = null;
+    requestAnimationFrame(() => {
+      document
+        .getElementById(id)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    onScrolled?.();
+  }, [onScrolled]);
 
   const { playOpen, playClose, getState } = useDissolveReveal({
     overlayRef,
@@ -65,8 +87,12 @@ export function AboutOverlay({ open, onOpenChange, ready = true }) {
     openTouchZone: () =>
       document.querySelector(".about-trigger-group")?.getBoundingClientRect()
         .top ?? null,
-    // Keep App's aboutOpen in sync when a scrub (not a click) drives the change.
-    onSettle: (state) => onOpenChange(state === "open"),
+    // Keep App's aboutOpen in sync when a scrub (not a click) drives the change. Once fully
+    // open, run any pending header-shortcut scroll (queued before the ~1.2s build finished).
+    onSettle: (state) => {
+      onOpenChange(state === "open");
+      if (state === "open") scrollToSection();
+    },
   });
 
   // Drive the dissolve from the `open` prop (ABOUT button / Escape / close button). Skip when
@@ -81,6 +107,14 @@ export function AboutOverlay({ open, onOpenChange, ready = true }) {
       if (getState() !== "closed") playClose();
     }
   }, [open, playOpen, playClose, getState]);
+
+  // Header shortcut while the overlay is already open: scroll immediately. When still
+  // closed, just queue it — the onSettle handler scrolls once the build finishes.
+  useEffect(() => {
+    if (!scrollTarget) return;
+    pendingScrollRef.current = scrollTarget;
+    if (getState() === "open") scrollToSection();
+  }, [scrollTarget, getState, scrollToSection]);
 
   const toggleWork = (i) => {
     setOpenWorks((prev) => {

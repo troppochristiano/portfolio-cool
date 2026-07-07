@@ -2,6 +2,7 @@
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+    letter-spacing: -0.03;
 }
 
 html,
@@ -85,6 +86,15 @@ body {
     cursor: grab;
     /* Let pointer drags pan the wall instead of the browser scrolling/zooming the page. */
     touch-action: none;
+    /* Ambient background: the hero reveals without it, then the wall fades in once its
+       first CSS3D render lands (`.is-ready`). Opacity-only, so it never affects the
+       initial layout/measurement the renderer does before signaling ready. */
+    opacity: 0;
+    transition: opacity 0.6s ease;
+}
+
+.ascii-gallery.is-ready {
+    opacity: 1;
 }
 
 .ascii-gallery.is-grabbing,
@@ -119,6 +129,9 @@ body {
     will-change: transform;
     background-color: #050505;
     backface-visibility: hidden;
+    /* Isolate each plane: one player's per-frame innerHTML rewrite can't invalidate
+       its siblings' layout or paint. Keeps the 49-player wall from thrashing. */
+    contain: layout paint;
 }
 
 /* Code-side framed look: a "screen" around each player with a caption bar at the bottom
@@ -147,6 +160,9 @@ body {
     -moz-osx-font-smoothing: grayscale;
 }
 
+/* Fixed header, shown over the hero only — the About overlay (z-index 20) covers it. The
+   bar itself ignores pointer events so the top strip still drags the ascii gallery; only
+   the pills are interactive. */
 .nav {
     position: fixed;
     top: 0;
@@ -154,18 +170,38 @@ body {
     width: 100vw;
     padding: 2em;
     display: flex;
-    justify-content: center;
+    justify-content: space-between;
+    align-items: flex-start;
     z-index: 2;
+    pointer-events: none;
 }
 
-.nav p {
+.nav__links {
+    display: flex;
+    gap: 8px;
+}
+
+/* Shared neon pill (matches .about-trigger). */
+.nav__link {
+    pointer-events: auto;
+    cursor: pointer;
+    border: none;
+    font: inherit;
     text-transform: uppercase;
     font-size: 12px;
     font-weight: 600;
-    padding: 4px;
+    letter-spacing: 0.04em;
+    padding: 4px 8px;
+    color: #fff;
     background-color: #0000ff;
+    text-decoration: none;
+    transition: opacity 0.15s ease;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+}
+
+.nav__link:hover {
+    opacity: 0.85;
 }
 
 /* The eye-ballz avatar replaces the reference title text as the centerpiece. */
@@ -217,7 +253,7 @@ body {
 .about-trigger-group {
     position: fixed;
     left: 50%;
-    top: calc(50% + min(240px, 40vw, 35vh) + 20px);
+    top: calc(50% + min(240px, 40vw, 35vh) + 160px);
     transform: translateX(-50%);
     z-index: 2;
     display: flex;
@@ -242,14 +278,14 @@ body {
     font-size: 14px;
     line-height: 1;
     font-weight: 700;
-    color: #0000ff;
+    color: #fff;
     animation: about-caret-bob 1.6s ease-in-out infinite;
 }
 
 @keyframes about-caret-bob {
     0%,
     100% {
-        opacity: 0.4;
+        opacity: 0.5;
         transform: translateY(2px);
     }
     50% {
@@ -269,7 +305,7 @@ body {
     font-weight: 600;
     letter-spacing: 0.04em;
     padding: 6px 12px;
-    color: #000;
+    color: #fff;
     background-color: #0000ff;
     transition: opacity 0.15s ease;
     -webkit-font-smoothing: antialiased;
@@ -359,7 +395,7 @@ body {
     font-weight: 600;
     letter-spacing: 0.04em;
     padding: 6px 12px;
-    color: #000;
+    color: #fff;
     background-color: #0000ff;
     transition: opacity 0.15s ease;
     -webkit-font-smoothing: antialiased;
@@ -379,9 +415,11 @@ body {
 
 /* (Pull-to-close indicator removed — the dissolve band is the close feedback now.) */
 
-/* Each section reads as a distinct scrollable panel. */
+/* Each section reads as a distinct scrollable panel. scroll-margin-top keeps a
+   header-shortcut scroll from landing the heading behind the fixed nav. */
 .about-section {
     padding: 48px 0;
+    scroll-margin-top: 96px;
 }
 
 .about-section + .about-section {
@@ -393,7 +431,7 @@ body {
     font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.08em;
-    color: #0000ff;
+    color: #fff;
     margin-bottom: 28px;
 }
 
@@ -441,6 +479,7 @@ body {
 .works-row__title {
     font-size: clamp(18px, 2.4vw, 26px);
     font-weight: 600;
+    color: #fff;
     letter-spacing: -0.01em;
 }
 
@@ -457,7 +496,7 @@ body {
     line-height: 1;
     width: 1ch;
     text-align: center;
-    color: #0000ff;
+    color: #fff;
 }
 
 /* Height/opacity transition keeps it dependency-free. Closed = collapsed. */

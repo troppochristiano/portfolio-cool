@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { EyeBallzViewer, generateSteps } from "./eye-ballz-viewer";
+import {
+  EyeBallzViewer,
+  generateSteps,
+  subsampleSteps,
+} from "./eye-ballz-viewer";
 import { photos } from "./photos";
 import { Nav } from "./components/Nav";
 import { AsciiGallery } from "./components/AsciiGallery";
@@ -28,36 +32,46 @@ const urlFor = (prefix, step, exprFolder) => ({
 });
 
 // The ASCII figures in public/data — one floating player per clip across the wall.
-const FIGURES = [
-  "4x3",
-  "4x3Big",
-  "4x3Full",
-  "3x9l0s10n",
-  "Gun",
-  "GunInverted",
-  "GunLight",
-  "V4n7am",
-  "s09r4n0",
-];
+// Only the clips that actually ship in public/data are listed; stale names just 404
+// on every load and waste a round-trip that competes with the avatar preload.
+const FIGURES = ["4x3Big", "3x9l0s10n", "GunInverted", "V4n7am", "s09r4n0"];
+
+// Dev/preview knob: `?grid=5` renders the avatar on a 5×5 sub-sample of the rendered
+// 10×10 grid (coarser head tracking, ~¼ the frames), `?grid=5x3` for a rectangle.
+// Absent/invalid → null → the full source grid (production behavior, unchanged).
+const PREVIEW_GRID = (() => {
+  if (typeof window === "undefined") return null;
+  const raw = new URLSearchParams(window.location.search).get("grid");
+  if (!raw) return null;
+  const [x, y = x] = raw.split("x").map((n) => parseInt(n, 10));
+  return Number.isInteger(x) && x > 0 && Number.isInteger(y) && y > 0
+    ? { x, y }
+    : null;
+})();
 
 export default function App() {
-  // Staged reveal so all GPU warm-up (shader compile + texture uploads) happens behind
-  // the overlay: preload HTTP assets -> mount scene under overlay -> wait until both the
-  // avatar and the gallery report GPU-warm -> fade the overlay. Avoids post-reveal jank.
+  // Staged reveal so the hero's GPU warm-up (shader compile + texture uploads) happens
+  // behind the overlay: preload HTTP assets -> mount scene under overlay -> wait until the
+  // avatar reports GPU-warm -> fade the overlay. Avoids post-reveal jank on the focal
+  // point. The ambient ASCII wall fades itself in afterward and isn't part of this gate.
   const [preloaded, setPreloaded] = useState(false);
   const [avatarReady, setAvatarReady] = useState(false);
-  const [galleryReady, setGalleryReady] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
   const [figures, setFigures] = useState(null);
   const [aboutOpen, setAboutOpen] = useState(false);
+  // Section the About overlay should scroll to once open (set by the header shortcuts).
+  const [aboutTarget, setAboutTarget] = useState(null);
   // Show the "scroll to open" hint only where wheel-to-open is active (fine pointer) and
   // only until the overlay has been opened at least once.
   const [showScrollHint, setShowScrollHint] = useState(false);
-  const warm = (avatarReady && galleryReady) || timedOut;
+  // Reveal as soon as the hero avatar is warm — it's the focal point. The floating
+  // ASCII wall is ambient background, so it no longer holds the overlay hostage to its
+  // ~3.3MB of figure JSON; it fades itself in a beat later behind the hero.
+  const warm = avatarReady || timedOut;
 
-  // Fetch + parse the ASCII figures once on mount. They download behind the loader
-  // overlay (which shows "Preparing…" after the avatar grids finish); the gallery
-  // mounts and reports ready once they resolve.
+  // Fetch + parse the ASCII figures once on mount. They download in the background and
+  // the wall mounts + fades itself in once they resolve — independent of the hero reveal,
+  // so this ~3.3MB never sits on the "Preparing…" critical path.
   useEffect(() => {
     let alive = true;
     // allSettled (not all): a single missing/bad file is skipped instead of taking down
@@ -109,11 +123,16 @@ export default function App() {
   const imageUrls = useMemo(() => {
     const urls = [];
     for (const p of photoConfigs) {
-      const { steps } = generateSteps({
+      const source = generateSteps({
         X_STEPS: p.xSteps,
         Y_STEPS: p.ySteps,
         PREFIX: p.prefix,
       });
+      // Warm only the frames the active grid size needs (mirrors the viewer's sub-sample),
+      // so the loader bar stays honest at smaller preview grids.
+      const { steps } = PREVIEW_GRID
+        ? subsampleSteps(source, PREVIEW_GRID.x, PREVIEW_GRID.y)
+        : source;
       const neutral = p.expressions?.neutral;
       for (const step of steps.flat()) {
         const { photo, depth } = urlFor(p.prefix, step, neutral);
@@ -132,12 +151,17 @@ export default function App() {
       />
       {preloaded && (
         <>
-          <Nav />
+          <Nav
+            onHome={() => setAboutOpen(false)}
+            onNavigate={(id) => {
+              setAboutTarget(id);
+              setAboutOpen(true);
+            }}
+          />
           {figures && figures.length > 0 && (
-            <AsciiGallery
-              figures={figures}
-              onReady={() => setGalleryReady(true)}
-            />
+            // The wall fades itself in once its first CSS3D render lands; it no longer
+            // gates the reveal, so no onReady wiring is needed here.
+            <AsciiGallery figures={figures} />
           )}
           <div className="hero-avatar">
             <EyeBallzViewer
@@ -146,7 +170,8 @@ export default function App() {
               status="neutral"
               autoBlink
               transparent
-              debug={false}
+              previewGrid={PREVIEW_GRID}
+              // debug={true}
               // Show the forehead "rub to smile" trigger box for calibration. Set to false
               // once the FOREHEAD_* constants in EyeBallzViewer.jsx feel right.
               // debugForehead={true}
@@ -172,6 +197,8 @@ export default function App() {
             open={aboutOpen}
             onOpenChange={setAboutOpen}
             ready={warm}
+            scrollTarget={aboutTarget}
+            onScrolled={() => setAboutTarget(null)}
           />
         </>
       )}

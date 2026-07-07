@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { isInteracting } from '../lib/galleryBus.js';
 
 /**
- * Plays a `figure.json` exported by the ascii video converter. The data shape is
+ * Plays a `figure.json` exported by the ascii media converter. The data shape is
  * `{ cols, rows, fps, color, cellPx?, frames }` where each frame is a string —
  * plain text, or HTML `<span style="color:…">` runs when `color` is true.
  *
@@ -55,11 +56,18 @@ export default function AsciiPlayer({
     if (reduce || frames.length <= 1) return;
 
     const interval = 1000 / (data.fps || 12);
+    // While the user is actively orienting the 3D wall, throttle playback to a low
+    // fps instead of stopping it — the art keeps moving but the (expensive)
+    // innerHTML/textContent rewrites stop competing with the CSS3D re-composite.
+    // Math.max never speeds a figure up if its own fps is already below this.
+    const INTERACTING_FPS = 6;
+    const interactingInterval = Math.max(interval, 1000 / INTERACTING_FPS);
     let raf = 0;
     let i = 0;
     let last = performance.now();
     const tick = (now) => {
-      if (now - last >= interval) {
+      const gate = isInteracting() ? interactingInterval : interval;
+      if (now - last >= gate) {
         last = now;
         const next = i + 1;
         if (next >= frames.length && !loop) return; // hold on the last frame
