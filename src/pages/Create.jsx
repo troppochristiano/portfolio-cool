@@ -9,6 +9,7 @@ import {
   formatBytes,
 } from '../create/asciify.js';
 import { downloadJson, downloadPng, downloadWebm, webmMimeType } from '../create/exportMedia.js';
+import { FONT_STACKS, STYLE_DEFAULTS, buildStyle } from '../create/styleOptions.js';
 import UploadModal from '../components/UploadModal.jsx';
 import './Create.css';
 
@@ -69,6 +70,11 @@ export default function Create() {
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [loop, setLoop] = useState(true);
+  // trim: only [start, end] of the clip previews-in-loop and bakes.
+  // null = full clip (and the state new clips reset to).
+  const [trim, setTrim] = useState(null);
+  const trimBarRef = useRef(null);
+  const trimDragRef = useRef(null); // 'in' | 'out' while a handle drags
   const [dragOver, setDragOver] = useState(false);
   const [videoName, setVideoName] = useState('');
   const [imageName, setImageName] = useState('');
@@ -94,6 +100,13 @@ export default function Create() {
 
   // settings
   const [cols, setCols] = useState(110);
+  // typography + colors — display styling that rides into the baked figure's
+  // optional `style` block (validated server-side on upload).
+  const [fontKey, setFontKey] = useState(STYLE_DEFAULTS.font);
+  const [letterSpacing, setLetterSpacing] = useState(STYLE_DEFAULTS.letterSpacing); // em
+  const [lineHeight, setLineHeight] = useState(STYLE_DEFAULTS.lineHeight);
+  const [fgColor, setFgColor] = useState(STYLE_DEFAULTS.color);
+  const [bgColor, setBgColor] = useState(STYLE_DEFAULTS.background);
   // resolution: 'auto' locks rows to the source aspect; 'custom' sets rows freely
   // (the frame stretches to the forced grid). customRows is the explicit height.
   const [resMode, setResMode] = useState('auto');
@@ -101,7 +114,12 @@ export default function Create() {
   const [cellPx, setCellPx] = useState(11);
   const [fps, setFps] = useState(15);
   const [gamma, setGamma] = useState(1);
+  const [contrast, setContrast] = useState(1);
   const [invert, setInvert] = useState(true);
+  // edge detection: replace (or isolate) cells on strong luma gradients with
+  // direction glyphs — see detectEdges in asciify.js.
+  const [edgeMode, setEdgeMode] = useState('off'); // 'off' | 'overlay' | 'only'
+  const [edgeThreshold, setEdgeThreshold] = useState(0.25);
   const [cellAspect, setCellAspect] = useState(2);
   const [rampKey, setRampKey] = useState('classic');
   const [blockAvg, setBlockAvg] = useState(false);
@@ -118,6 +136,7 @@ export default function Create() {
     resolution: true,
     playback: true,
     characters: true,
+    typography: false,
     effects: false,
   });
   const toggleBlock = (id) => setOpenBlocks((o) => ({ ...o, [id]: !o[id] }));
@@ -143,7 +162,11 @@ export default function Create() {
   const rows = resMode === 'custom'
     ? Math.max(1, customRows)
     : computeRows(effW, effH, cols, cellAspect);
-  const frameEstimate = Math.max(0, Math.round(duration * fps));
+  // Effective trim range (whole clip when untrimmed) — what previews loop
+  // over and what the bake samples.
+  const trimStart = trim?.start ?? 0;
+  const trimEnd = trim?.end ?? duration;
+  const frameEstimate = Math.max(0, Math.round((trimEnd - trimStart) * fps));
 
   // The image source is always renderable — a blank white canvas is a valid still.
   const hasSource = sourceType === 'video' ? hasVideo : true;
@@ -159,8 +182,12 @@ export default function Create() {
 
   // keep the rAF loop reading current settings without re-subscribing
   useEffect(() => {
-    settingsRef.current = { cols, rows, ramp, invert, gamma, blockAvg, dither, keyMode, keyThreshold, keyColor, crop };
-  }, [cols, rows, ramp, invert, gamma, blockAvg, dither, keyMode, keyThreshold, keyColor, crop]);
+    settingsRef.current = {
+      cols, rows, ramp, invert, gamma, contrast, blockAvg, dither,
+      edge: { mode: edgeMode, threshold: edgeThreshold },
+      keyMode, keyThreshold, keyColor, crop,
+    };
+  }, [cols, rows, ramp, invert, gamma, contrast, blockAvg, dither, edgeMode, edgeThreshold, keyMode, keyThreshold, keyColor, crop]);
 
   // ── image layers ──────────────────────────────────────────────
   // photo (bottom, opaque unless cut) + strokes (top) → composite. The
@@ -341,6 +368,7 @@ export default function Create() {
       setError('');
       if (sourceTypeRef.current === 'video') setDims({ w: v.videoWidth, h: v.videoHeight });
       setDuration(v.duration || 0);
+      setTrim(null); // a new clip starts untrimmed
     };
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
@@ -368,6 +396,32 @@ export default function Create() {
   // don't have to re-subscribe on every switch.
   const sourceTypeRef = useRef(sourceType);
   useEffect(() => { sourceTypeRef.current = sourceType; }, [sourceType]);
+
+  // ── trim playback ─────────────────────────────────────────────
+  // While trimmed, playback lives inside [start, end]: reaching the out point
+  // loops back (or pauses when loop is off), and pressing play from outside
+  // the range jumps to the in point first.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !trim) return;
+    const onTime = () => {
+      if (v.currentTime >= trim.end) {
+        if (loop) v.currentTime = trim.start;
+        else v.pause();
+      }
+    };
+    const onPlay = () => {
+      if (v.currentTime < trim.start || v.currentTime >= trim.end) {
+        v.currentTime = trim.start;
+      }
+    };
+    v.addEventListener('timeupdate', onTime);
+    v.addEventListener('play', onPlay);
+    return () => {
+      v.removeEventListener('timeupdate', onTime);
+      v.removeEventListener('play', onPlay);
+    };
+  }, [trim, loop]);
 
   // ── live preview rAF loop (no React state per frame) ──────────
   useEffect(() => {
@@ -489,14 +543,54 @@ export default function Create() {
   };
   const onScrub = (e) => {
     const v = videoRef.current;
-    v.currentTime = Number(e.target.value);
+    // stay inside the trim range so the scrubber can't wander into cut footage
+    v.currentTime = Math.min(Math.max(trimStart, Number(e.target.value)), Math.max(trimStart, trimEnd - 1e-3));
   };
   const stepFrame = (dir) => {
     const v = videoRef.current;
     if (!v || !duration) return;
     v.pause();
     const t = v.currentTime + dir / fps;
-    v.currentTime = Math.min(Math.max(0, t), Math.max(0, duration - 1e-3));
+    v.currentTime = Math.min(Math.max(trimStart, t), Math.max(trimStart, trimEnd - 1e-3));
+  };
+
+  // ── trim bar (in/out handles on a custom track) ───────────────
+  const MIN_TRIM = 0.2; // seconds — handles can't cross closer than this
+  const trimPosOf = (e) => {
+    const rect = trimBarRef.current.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)) * duration;
+  };
+  const applyTrimDrag = (t) => {
+    setTrim((prev) => {
+      const s = prev?.start ?? 0;
+      const en = prev?.end ?? duration;
+      let next;
+      if (trimDragRef.current === 'in') next = { start: Math.min(t, en - MIN_TRIM), end: en };
+      else next = { start: s, end: Math.max(t, s + MIN_TRIM) };
+      next.start = Math.max(0, next.start);
+      next.end = Math.min(duration, next.end);
+      // dragged back to the full clip → untrimmed
+      return next.start <= 0.005 && next.end >= duration - 0.005 ? null : next;
+    });
+  };
+  const onTrimDown = (e) => {
+    if (!duration) return;
+    e.preventDefault();
+    const t = trimPosOf(e);
+    const s = trim?.start ?? 0;
+    const en = trim?.end ?? duration;
+    // grab whichever handle is closer to the press
+    trimDragRef.current = Math.abs(t - s) <= Math.abs(t - en) ? 'in' : 'out';
+    e.currentTarget.setPointerCapture(e.pointerId);
+    applyTrimDrag(t);
+  };
+  const onTrimMove = (e) => {
+    if (!trimDragRef.current) return;
+    e.preventDefault();
+    applyTrimDrag(trimPosOf(e));
+  };
+  const onTrimUp = () => {
+    trimDragRef.current = null;
   };
 
   // ── drawing (on the composite canvas, into the layers) ────────
@@ -712,14 +806,69 @@ export default function Create() {
     const rect = draftRect(cropStartRef.current, overlayPos(e));
     cropStartRef.current = null;
     setCropDraft(null);
-    setCropMode(false);
-    // ignore accidental clicks — a crop needs real area
+    // ignore accidental clicks — a crop needs real area. Crop mode stays on:
+    // the committed rect grows handles for Paint-style adjustment, and the
+    // crop button becomes "✓ done".
     if (rect.w > 0.02 && rect.h > 0.02) {
       setCrop(rect);
       setBaked(null);
       setMode('live');
     }
   };
+
+  // ── crop editing session (move + 8 resize handles) ────────────
+  // While crop mode is on and a rect exists, a .crop-editor overlay lets the
+  // rect be dragged (move) or resized from any edge/corner — every change
+  // calls setCrop immediately, so the ASCII preview follows live.
+  const MIN_CROP = 0.02;
+  const cropEditRef = useRef(null); // { role, start:{x,y}, rect } during a drag
+  const stagePos = (e) => {
+    const rect = mediaBoxRef.current.getBoundingClientRect();
+    const clamp01 = (v) => Math.min(1, Math.max(0, v));
+    return {
+      x: clamp01((e.clientX - rect.left) / rect.width),
+      y: clamp01((e.clientY - rect.top) / rect.height),
+    };
+  };
+  const applyCropEdit = (r, role, dx, dy) => {
+    if (role === 'move') {
+      return {
+        x: Math.min(Math.max(0, r.x + dx), 1 - r.w),
+        y: Math.min(Math.max(0, r.y + dy), 1 - r.h),
+        w: r.w,
+        h: r.h,
+      };
+    }
+    let x0 = r.x, y0 = r.y, x1 = r.x + r.w, y1 = r.y + r.h;
+    if (role.includes('w')) x0 = Math.min(Math.max(0, x0 + dx), x1 - MIN_CROP);
+    if (role.includes('e')) x1 = Math.max(Math.min(1, x1 + dx), x0 + MIN_CROP);
+    if (role.includes('n')) y0 = Math.min(Math.max(0, y0 + dy), y1 - MIN_CROP);
+    if (role.includes('s')) y1 = Math.max(Math.min(1, y1 + dy), y0 + MIN_CROP);
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  };
+  const onCropEditDown = (role) => (e) => {
+    e.preventDefault();
+    e.stopPropagation(); // don't fall through to the marquee overlay
+    e.currentTarget.setPointerCapture(e.pointerId);
+    cropEditRef.current = { role, start: stagePos(e), rect: { ...crop } };
+    if (mode === 'baked') setMode('live'); // editing invalidates the baked view
+  };
+  const onCropEditMove = (e) => {
+    const ed = cropEditRef.current;
+    if (!ed) return;
+    e.preventDefault();
+    const pos = stagePos(e);
+    setCrop(applyCropEdit(ed.rect, ed.role, pos.x - ed.start.x, pos.y - ed.start.y));
+  };
+  const onCropEditUp = () => {
+    cropEditRef.current = null;
+  };
+  // handle roles + their anchor positions on the rect (as percentages)
+  const CROP_HANDLES = [
+    ['nw', 0, 0], ['n', 50, 0], ['ne', 100, 0],
+    ['e', 100, 50], ['se', 100, 100], ['s', 50, 100],
+    ['sw', 0, 100], ['w', 0, 50],
+  ];
 
   // ── bake ──────────────────────────────────────────────────────
   const seekTo = (v, t) =>
@@ -736,9 +885,19 @@ export default function Create() {
     const name = fileName
       ? fileName.replace(/\.[^.]+$/, '')
       : isStill ? 'drawing' : 'untitled';
+    // The typography/colors controls become the optional `style` block —
+    // omitted entirely at defaults so plain bakes stay byte-identical.
+    const style = buildStyle({
+      font: fontKey,
+      letterSpacing,
+      lineHeight,
+      background: bgColor,
+      color: fgColor,
+    });
     const result = {
       cols, rows, fps, color: false, cellPx,
       name, createdAt: new Date().toISOString(),
+      ...(style ? { style } : {}),
       frames,
     };
     setBaked(result);
@@ -773,10 +932,11 @@ export default function Create() {
     setMode('live');
     setBakeProgress(0);
 
-    const total = Math.max(1, Math.round(duration * fps));
+    // Only the trimmed range is sampled (the whole clip when untrimmed).
+    const total = Math.max(1, Math.round((trimEnd - trimStart) * fps));
     const frames = [];
     for (let f = 0; f < total; f++) {
-      await seekTo(v, f / fps);
+      await seekTo(v, trimStart + f / fps);
       frames.push(sampleFrame(ctx, canvas, v, settings));
       setBakeProgress(Math.round(((f + 1) / total) * 100));
       // yield so the progress bar can paint
@@ -1001,9 +1161,56 @@ export default function Create() {
               </div>
             </SettingsBlock>
 
+            <SettingsBlock label="typography" open={openBlocks.typography} onToggle={() => toggleBlock('typography')}>
+              <div className="field-label">font</div>
+              <div className="keymodes">
+                {Object.keys(FONT_STACKS).map((k) => (
+                  <button
+                    key={k}
+                    className={`keymode ${fontKey === k ? 'is-active' : ''}`}
+                    onClick={() => setFontKey(k)}
+                  >
+                    {k}
+                  </button>
+                ))}
+              </div>
+              <Slider label="char spacing" value={letterSpacing} min={0} max={0.5} step={0.01}
+                      onChange={setLetterSpacing} suffix="em" fixed={2} />
+              <Slider label="line height" value={lineHeight} min={0.7} max={1.6} step={0.05}
+                      onChange={setLineHeight} fixed={2} />
+              <div className="keycolor">
+                <span className="keycolor-label">text</span>
+                <input
+                  type="color"
+                  className="keycolor-swatch"
+                  value={fgColor}
+                  onChange={(e) => setFgColor(e.target.value)}
+                  aria-label="text color"
+                />
+                <span className="keycolor-label">background</span>
+                <input
+                  type="color"
+                  className="keycolor-swatch"
+                  value={bgColor}
+                  onChange={(e) => setBgColor(e.target.value)}
+                  aria-label="background color"
+                />
+                <button
+                  className="keymode"
+                  onClick={() => { setFgColor(STYLE_DEFAULTS.color); setBgColor(STYLE_DEFAULTS.background); }}
+                  title="back to white on black"
+                >
+                  reset
+                </button>
+              </div>
+              <p className="hint">these travel with the figure — the gallery and hero show it styled</p>
+            </SettingsBlock>
+
             <SettingsBlock label="effects" open={openBlocks.effects} onToggle={() => toggleBlock('effects')}>
               <Slider label="gamma" value={gamma} min={0.4} max={2.4} step={0.1}
                       onChange={setGamma} fixed={1} />
+              <Slider label="contrast" value={contrast} min={0.5} max={2} step={0.05}
+                      onChange={setContrast} fixed={2} />
               <label className="toggle">
                 <input type="checkbox" checked={invert} onChange={(e) => setInvert(e.target.checked)} />
                 invert <span className="muted">(dark ink on light bg)</span>
@@ -1024,6 +1231,22 @@ export default function Create() {
                   </button>
                 ))}
               </div>
+              <div className="field-label">edge detection</div>
+              <div className="keymodes">
+                {[['off', 'off'], ['overlay', 'overlay'], ['only', 'edges only']].map(([k, label]) => (
+                  <button
+                    key={k}
+                    className={`keymode ${edgeMode === k ? 'is-active' : ''}`}
+                    onClick={() => setEdgeMode(k)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {edgeMode !== 'off' && (
+                <Slider label="edge threshold" value={edgeThreshold} min={0.05} max={0.8} step={0.01}
+                        onChange={setEdgeThreshold} fixed={2} />
+              )}
             </SettingsBlock>
           </aside>
 
@@ -1063,9 +1286,9 @@ export default function Create() {
                       <button
                         className={`keymode ${cropMode ? 'is-active' : ''}`}
                         onClick={() => { setCropMode((m) => !m); setPicking(false); }}
-                        title="drag a rectangle on the preview to convert only that region"
+                        title="drag a rectangle on the preview, then adjust it with the handles — the ascii follows live"
                       >
-                        ▦ crop
+                        {cropMode ? '✓ done' : '▦ crop'}
                       </button>
                     )}
                     {crop && (
@@ -1125,6 +1348,32 @@ export default function Create() {
                         onPointerCancel={onOverlayUp}
                       />
                     )}
+                    {/* Paint-style crop editor: move the rect, resize from any
+                        handle — hidden while a fresh marquee is being drawn */}
+                    {cropMode && crop && !cropDraft && hasMedia && (
+                      <div
+                        className="crop-editor"
+                        style={{
+                          left: `${crop.x * 100}%`,
+                          top: `${crop.y * 100}%`,
+                          width: `${crop.w * 100}%`,
+                          height: `${crop.h * 100}%`,
+                        }}
+                        onPointerDown={onCropEditDown('move')}
+                        onPointerMove={onCropEditMove}
+                        onPointerUp={onCropEditUp}
+                        onPointerCancel={onCropEditUp}
+                      >
+                        {CROP_HANDLES.map(([role, lx, ty]) => (
+                          <div
+                            key={role}
+                            className={`crop-handle crop-handle--${role}`}
+                            style={{ left: `${lx}%`, top: `${ty}%` }}
+                            onPointerDown={onCropEditDown(role)}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {sourceType === 'video' && !hasVideo && (
@@ -1171,6 +1420,49 @@ export default function Create() {
                       >
                         ⟳ loop
                       </button>
+                    </div>
+
+                    {/* ── trim: only [in, out] previews-in-loop and bakes ── */}
+                    <div className="trim-row">
+                      <span className="field-label">trim</span>
+                      <div
+                        className="trimbar"
+                        ref={trimBarRef}
+                        onPointerDown={onTrimDown}
+                        onPointerMove={onTrimMove}
+                        onPointerUp={onTrimUp}
+                        onPointerCancel={onTrimUp}
+                        role="slider"
+                        aria-label="trim range"
+                      >
+                        <div
+                          className="trimbar__range"
+                          style={{
+                            left: `${duration ? (trimStart / duration) * 100 : 0}%`,
+                            width: `${duration ? ((trimEnd - trimStart) / duration) * 100 : 100}%`,
+                          }}
+                        />
+                        <div
+                          className="trimbar__played"
+                          style={{ left: `${duration ? (Math.min(currentTime, duration) / duration) * 100 : 0}%` }}
+                        />
+                        <div
+                          className="trimbar__handle"
+                          style={{ left: `${duration ? (trimStart / duration) * 100 : 0}%` }}
+                        />
+                        <div
+                          className="trimbar__handle"
+                          style={{ left: `${duration ? (trimEnd / duration) * 100 : 100}%` }}
+                        />
+                      </div>
+                      <span className="time-readout">
+                        {fmtTime(trimStart)}–{fmtTime(trimEnd)} ({(trimEnd - trimStart).toFixed(1)}s)
+                      </span>
+                      {trim && (
+                        <button className="tbtn" onClick={() => setTrim(null)} title="use the whole clip">
+                          ✕
+                        </button>
+                      )}
                     </div>
                     <label className="relink">
                       <input type="file" accept="video/*" onChange={(e) => loadFile(e.target.files?.[0])} hidden />
@@ -1290,13 +1582,21 @@ export default function Create() {
                   </span>
                 )}
               </div>
-              <div className={`screen ${keyMode !== 'off' ? 'is-keying' : ''}`} ref={screenRef}>
+              <div
+                className={`screen ${keyMode !== 'off' ? 'is-keying' : ''}`}
+                ref={screenRef}
+                style={bgColor !== STYLE_DEFAULTS.background ? { background: bgColor } : undefined}
+              >
                 {hasSource ? (
                   <pre
                     ref={previewRef}
                     className="preview"
                     style={{
                       fontSize: previewFontSize,
+                      fontFamily: FONT_STACKS[fontKey],
+                      letterSpacing: letterSpacing ? `${letterSpacing}em` : undefined,
+                      lineHeight,
+                      color: fgColor,
                       transform: previewScale !== 1 ? `scale(${previewScale})` : undefined,
                     }}
                     aria-hidden="true"
@@ -1379,6 +1679,10 @@ export default function Create() {
             className="preview mini-preview"
             style={{
               fontSize: previewFontSize,
+              fontFamily: FONT_STACKS[fontKey],
+              letterSpacing: letterSpacing ? `${letterSpacing}em` : undefined,
+              lineHeight,
+              color: fgColor,
               transform: `scale(${miniScale})`,
             }}
             aria-hidden="true"
@@ -1448,8 +1752,10 @@ function sampleFrame(ctx, canvas, source, s) {
     ramp: s.ramp,
     invert: s.invert,
     gamma: s.gamma,
+    contrast: s.contrast,
     key: { mode: s.keyMode, threshold: s.keyThreshold, color: s.keyColor },
     dither: s.dither,
+    edge: s.edge,
   });
 }
 

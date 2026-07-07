@@ -192,6 +192,23 @@
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
 }
 
+/* Paint-style crop editing session: the rect is draggable (move) and has 8
+   resize handles. Sits above the marquee overlay so handle drags win. */
+.create-page .crop-editor {
+  position: absolute; z-index: 3;
+  cursor: move; touch-action: none;
+}
+.create-page .crop-handle {
+  position: absolute; width: 11px; height: 11px;
+  background: var(--phosphor); border: 1.5px solid #fff;
+  transform: translate(-50%, -50%);
+  touch-action: none;
+}
+.create-page .crop-handle--nw, .create-page .crop-handle--se { cursor: nwse-resize; }
+.create-page .crop-handle--ne, .create-page .crop-handle--sw { cursor: nesw-resize; }
+.create-page .crop-handle--n, .create-page .crop-handle--s { cursor: ns-resize; }
+.create-page .crop-handle--e, .create-page .crop-handle--w { cursor: ew-resize; }
+
 .create-page .filename { font-size: 0.78rem; color: var(--muted); margin-top: 0.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── transport ── */
@@ -210,6 +227,34 @@
   white-space: nowrap; font-variant-numeric: tabular-nums;
 }
 .create-page .scrub { flex: 1; min-width: 120px; }
+
+/* ── trim bar (in/out handles under the scrubber) ── */
+.create-page .trim-row {
+  display: flex; align-items: center; gap: 0.6rem;
+  margin-top: 0.5rem; flex-wrap: wrap;
+}
+.create-page .trim-row .field-label { flex: none; }
+.create-page .trim-row .time-readout { flex: none; }
+.create-page .trimbar {
+  position: relative; flex: 1; min-width: 140px; height: 16px;
+  background: var(--faint); cursor: pointer;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.create-page .trimbar__range {
+  position: absolute; top: 0; bottom: 0;
+  background: rgba(0, 0, 255, 0.35);
+  border-top: 1px solid var(--phosphor); border-bottom: 1px solid var(--phosphor);
+  pointer-events: none;
+}
+.create-page .trimbar__played {
+  position: absolute; top: 0; bottom: 0; width: 1.5px;
+  background: #fff; pointer-events: none;
+}
+.create-page .trimbar__handle {
+  position: absolute; top: -3px; bottom: -3px; width: 9px;
+  background: var(--phosphor); border: 1px solid #fff;
+  transform: translateX(-50%); cursor: ew-resize; pointer-events: none;
+}
 .create-page .relink { display: inline-block; margin-top: 0.6rem; font-size: 0.78rem; color: var(--muted); cursor: pointer; }
 .create-page .relink:hover { color: var(--ink); }
 .create-page .source-error {
