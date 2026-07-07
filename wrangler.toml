@@ -1,0 +1,32 @@
+# Cloudflare Pages project config. The static site builds to dist/ and the
+# API lives in functions/ (Pages Functions). Bindings below are available to
+# every function as env.DB / env.FIGURES.
+#
+# One-time setup (see also .dev.vars for local secrets):
+#   npx wrangler d1 create ascii-figures   → paste database_id below
+#   npx wrangler r2 bucket create ascii-figures
+#   npx wrangler pages secret put TURNSTILE_SECRET
+#   npx wrangler pages secret put ADMIN_SECRET
+#   npx wrangler pages secret put IP_SALT
+#
+# Optional — email alert when an upload lands in the moderation queue
+# (see functions/api/_lib/notify.js for the resend.com setup):
+#   npx wrangler pages secret put RESEND_API_KEY
+#   npx wrangler pages secret put NOTIFY_EMAIL
+#
+# schema.sql creates the full table on a fresh DB. If the remote DB was created
+# before the hero flag existed, also run once:
+#   npx wrangler d1 execute ascii-figures --remote \
+#     --command "ALTER TABLE figures ADD COLUMN hero INTEGER NOT NULL DEFAULT 0"
+name = "portfolio"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-06-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ascii-figures"
+database_id = "712cc395-60e3-462b-91bd-3cc6bb9c3bcc"
+
+[[r2_buckets]]
+binding = "FIGURES"
+bucket_name = "ascii-figures"

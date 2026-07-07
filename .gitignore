@@ -26,3 +26,16 @@ Thumbs.db
 *.log
 .vscode/
 .idea/
+
+# Cloudflare local dev
+.dev.vars
+.wrangler/
+
+# Claude Code local config
+.claude/
+
+# Env files — never commit these (site key is public, but keep the habit and
+# guard against secrets getting pasted in by mistake)
+.env
+.env.*
+!.env.example
