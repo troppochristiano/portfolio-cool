@@ -140,6 +140,8 @@
 .create-page .dropzone:hover, .create-page .dropzone.is-over { border-color: var(--phosphor); color: var(--ink); }
 .create-page .dropzone-art { font-family: var(--mono); font-size: 1.4rem; letter-spacing: 0.2em; color: var(--ink); }
 .create-page .hint { font-size: 0.72rem; color: var(--muted); }
+/* secondary path inside the image dropzone (blank-paper drawing mode) */
+.create-page .dropzone-alt { margin-top: 0.6rem; }
 
 /* ── source panel (main column) ── */
 .create-page .source-toolbar {

@@ -63,6 +63,10 @@ export default function Create() {
   // 'video' | 'image' — which input feeds the converter. The image source is
   // one canvas the user can both load a photo into and draw on.
   const [sourceType, setSourceType] = useState('video');
+  // Upload-first intro for the image source: landing straight on blank paper
+  // hides the fact that photos can be uploaded, so a dropzone shows first and
+  // "start with blank paper" (or loading a photo) dismisses it.
+  const [imageIntro, setImageIntro] = useState(true);
   const [hasVideo, setHasVideo] = useState(false);
   const [hasPhoto, setHasPhoto] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
@@ -136,8 +140,8 @@ export default function Create() {
     resolution: true,
     playback: true,
     characters: true,
-    typography: false,
-    effects: false,
+    typography: true,
+    effects: true,
   });
   const toggleBlock = (id) => setOpenBlocks((o) => ({ ...o, [id]: !o[id] }));
 
@@ -340,6 +344,7 @@ export default function Create() {
       // the aspect change anyway (hinted in the UI)
       resizeLayers(w, h, img);
       setHasPhoto(true);
+      setImageIntro(false);
       setImageName(file.name);
       setDims({ w, h });
       setCrop(null);
@@ -912,7 +917,11 @@ export default function Create() {
   const bake = async () => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    const settings = { cols, rows, ramp, invert, gamma, blockAvg, dither, keyMode, keyThreshold, keyColor, crop };
+    // Single source of truth — the same settings object the live preview
+    // reads (kept in sync by its effect), so bake output always matches the
+    // preview exactly. A hand-rolled copy here once silently dropped the
+    // newer keys (contrast, edge) and baked without them.
+    const settings = settingsRef.current;
 
     // Photos and drawings are a single still — sample once.
     if (isStill) {
@@ -983,9 +992,12 @@ export default function Create() {
   const readoutW = hasSource && outputPx ? outputPx.w : Math.round(cols * cellPx * 0.6);
   const readoutH = hasSource && outputPx ? outputPx.h : rows * cellPx;
 
-  const hasMedia = sourceType === 'video' ? hasVideo : true;
+  // Image source shows the upload-first intro until a photo lands or the user
+  // opts into blank paper — the canvas/crop/draw chrome waits behind it.
+  const showImageIntro = sourceType === 'image' && !hasPhoto && imageIntro;
+  const hasMedia = sourceType === 'video' ? hasVideo : !showImageIntro;
   // Drawing is on for blank paper always, and for a photo only when "draw on photo" is on.
-  const drawEnabled = sourceType === 'image' && (!hasPhoto || drawOnPhoto);
+  const drawEnabled = sourceType === 'image' && !showImageIntro && (!hasPhoto || drawOnPhoto);
   const overlayActive = hasMedia && (cropMode || picking);
 
   // Tool modes + shade swatches + size slider — rendered both in the rail and in
@@ -1317,7 +1329,7 @@ export default function Create() {
                     <canvas
                       ref={compositeRef}
                       className={`draw-pad ${!drawEnabled ? 'is-locked' : ''} ${drawEnabled && tool !== 'fill' ? 'brush-active' : ''}`}
-                      style={{ display: sourceType === 'image' ? 'block' : 'none' }}
+                      style={{ display: sourceType === 'image' && !showImageIntro ? 'block' : 'none' }}
                       onPointerDown={onDrawDown}
                       onPointerEnter={moveBrushCursor}
                       onPointerMove={onCanvasMove}
@@ -1387,6 +1399,23 @@ export default function Create() {
                       <div className="dropzone-art">{'[  +  ]'}</div>
                       <div>drop a video here<br />or click to choose</div>
                       <div className="hint">mp4 · mov · webm — never leaves your browser</div>
+                    </label>
+                  )}
+
+                  {/* image source: photo upload first — blank paper is an opt-in */}
+                  {showImageIntro && (
+                    <label className={`dropzone ${dragOver ? 'is-over' : ''}`}>
+                      <input type="file" accept="image/*" onChange={(e) => loadImage(e.target.files?.[0])} hidden />
+                      <div className="dropzone-art">{'[  +  ]'}</div>
+                      <div>drop a photo here<br />or click to choose</div>
+                      <div className="hint">jpg · png · webp — never leaves your browser</div>
+                      <button
+                        type="button"
+                        className="btn dropzone-alt"
+                        onClick={(e) => { e.preventDefault(); setImageIntro(false); }}
+                      >
+                        ✎ or start with blank paper
+                      </button>
                     </label>
                   )}
                 </div>
@@ -1472,7 +1501,7 @@ export default function Create() {
                 )}
 
                 {/* ── image tools: photo + drawing share one canvas ── */}
-                {sourceType === 'image' && (
+                {sourceType === 'image' && !showImageIntro && (
                   <div className="draw-tools">
                     {/* with a photo loaded, choose photo-only vs drawing over it */}
                     {hasPhoto && (

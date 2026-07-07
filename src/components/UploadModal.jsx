@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { uploadFigure } from '../lib/api.js';
+import { resolveStyle } from '../create/styleOptions.js';
 
 // Share-to-gallery dialog for the converter. Collects a figure name, the
 // author's name and (for animations) a thumbnail frame, runs Cloudflare
@@ -104,8 +105,11 @@ export default function UploadModal({ baked, onClose }) {
     }
   };
 
-  // Fit the thumbnail preview into the modal column (~0.6 advance ratio).
+  // Fit the thumbnail preview into the modal column (~0.6 advance ratio), and
+  // render it with the figure's style block so the scrubber shows exactly
+  // what the gallery will.
   const previewFont = Math.max(1.5, Math.min(8, 300 / (baked.cols * 0.6)));
+  const st = resolveStyle(baked.style);
 
   return (
     <div
@@ -176,7 +180,18 @@ export default function UploadModal({ baked, onClose }) {
                 />
               </div>
             )}
-            <pre className="upmodal-thumb" style={{ fontSize: `${previewFont}px` }} aria-hidden="true">
+            <pre
+              className="upmodal-thumb"
+              style={{
+                fontSize: `${previewFont}px`,
+                fontFamily: st.fontFamily,
+                letterSpacing: st.letterSpacing ? `${st.letterSpacing}em` : undefined,
+                lineHeight: st.lineHeight,
+                color: st.color,
+                background: st.background,
+              }}
+              aria-hidden="true"
+            >
               {baked.frames[isAnim ? thumbFrame : 0]}
             </pre>
 

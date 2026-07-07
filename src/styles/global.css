@@ -341,20 +341,29 @@ body {
        paints this black when open as a fallback for browsers without overscroll-behavior). */
     overscroll-behavior: none;
     /* Reserve the scrollbar gutter in both overflow states so the content doesn't shift
-       when the hook flips hidden→auto on open. Thin, dark, not the default white bar. */
+       when the hook flips hidden→auto on open. (Bar styling is global now.) */
     scrollbar-gutter: stable;
+}
+
+/* ── scrollbars, site-wide ─────────────────────────────────────── */
+/* The About overlay's thin dark bar, applied to every scroller in the
+   project (create page + rail, gallery, admin, dialogs). */
+* {
     scrollbar-width: thin;
     scrollbar-color: #333 transparent;
 }
 
-.about-overlay__scroll::-webkit-scrollbar {
+*::-webkit-scrollbar {
     width: 8px;
+    height: 8px;
 }
-.about-overlay__scroll::-webkit-scrollbar-thumb {
+
+*::-webkit-scrollbar-thumb {
     background: #333;
     border-radius: 4px;
 }
-.about-overlay__scroll::-webkit-scrollbar-track {
+
+*::-webkit-scrollbar-track {
     background: transparent;
 }
 
