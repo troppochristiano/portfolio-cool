@@ -5,8 +5,7 @@
 // line-height-1 metrics as AsciiPlayer, so the pixels match what the site
 // shows. Everything runs in the browser — the backend never does media work.
 
-const FONT_STACK =
-  'ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
+import { resolveStyle } from './styleOptions.js';
 
 // Keep canvases well under every browser's limits while staying crisp.
 const MAX_CANVAS_W = 3840;
@@ -31,30 +30,47 @@ export function downloadJson(data, filename) {
 
 // Size the font so the frame fills a decent export resolution regardless of
 // the on-screen cellPx (monospace advance ≈ 0.6 × font size), then set up a
-// canvas + measured metrics for it.
+// canvas + measured metrics for it. Honors the figure's optional `style`
+// block: font stack, letter spacing, line height, background/text colors.
 function makeCanvas(data, { background, foreground } = {}) {
   const { cols, rows } = data;
+  const st = resolveStyle(data.style);
   const px = Math.max(
     4,
     Math.min(24, Math.floor(MAX_CANVAS_W / (cols * 0.62)), Math.floor(MAX_CANVAS_H / rows)),
   );
+  const rowStep = px * st.lineHeight;
+  const spacingPx = st.letterSpacing * px;
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  ctx.font = `${px}px ${FONT_STACK}`;
-  const advance = ctx.measureText('@').width;
+  ctx.font = `${px}px ${st.fontFamily}`;
+  const advance = ctx.measureText('@').width + spacingPx;
   canvas.width = Math.ceil(cols * advance);
-  canvas.height = rows * px;
+  canvas.height = Math.ceil(rows * rowStep);
   // Canvas state resets when width/height are assigned — set everything after.
-  ctx.font = `${px}px ${FONT_STACK}`;
+  ctx.font = `${px}px ${st.fontFamily}`;
   ctx.textBaseline = 'top';
-  const bg = background ?? '#000';
-  const fg = foreground ?? '#fff';
+  const bg = background ?? st.background;
+  const fg = foreground ?? st.color;
+  // Vertically center each glyph row inside its (possibly taller) line box,
+  // matching CSS line-height behavior.
+  const yPad = (rowStep - px) / 2;
   const drawFrame = (frame) => {
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = fg;
     const lines = frame.split('\n');
-    for (let y = 0; y < lines.length; y++) ctx.fillText(lines[y], 0, y * px);
+    for (let y = 0; y < lines.length; y++) {
+      const top = y * rowStep + yPad;
+      if (spacingPx > 0) {
+        // Canvas has no reliable cross-browser letter-spacing — draw per
+        // character on the computed advance (export-only cost).
+        const line = lines[y];
+        for (let x = 0; x < line.length; x++) ctx.fillText(line[x], x * advance, top);
+      } else {
+        ctx.fillText(lines[y], 0, top);
+      }
+    }
   };
   return { canvas, drawFrame };
 }

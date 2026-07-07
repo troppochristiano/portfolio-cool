@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { isInteracting } from '../lib/galleryBus.js';
+import { resolveStyle, STYLE_DEFAULTS } from '../create/styleOptions.js';
 
 /**
  * Plays a `figure.json` exported by the ascii media converter. The data shape is
@@ -114,6 +115,21 @@ export default function AsciiPlayer({
   const sized = width != null || fit;
   const px = (sized ? autoPx : null) ?? fontSize ?? data?.cellPx ?? 12;
 
+  // Optional creator styling from figure.json (font key → whitelisted stack,
+  // clamped numbers, hex colors — resolveStyle is defensive, so a hand-edited
+  // JSON can't inject anything). Defaults stay `undefined` so the player keeps
+  // inheriting color/background from its host (wall plane, dialog, card).
+  const figStyle = useMemo(() => {
+    const s = resolveStyle(data?.style);
+    return {
+      fontFamily: s.fontFamily,
+      lineHeight: s.lineHeight,
+      letterSpacing: s.letterSpacing ? `${s.letterSpacing}em` : 0,
+      color: s.color !== STYLE_DEFAULTS.color ? s.color : undefined,
+      background: s.background !== STYLE_DEFAULTS.background ? s.background : undefined,
+    };
+  }, [data]);
+
   return (
     <pre
       ref={ref}
@@ -123,12 +139,10 @@ export default function AsciiPlayer({
       aria-hidden={label ? undefined : true}
       style={{
         // Mirror the converter's .preview so the grid aligns identically.
-        fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace',
         whiteSpace: 'pre',
-        lineHeight: 1,
-        letterSpacing: 0,
         margin: 0,
         fontSize: `${px}px`,
+        ...figStyle,
         ...style,
       }}
     />

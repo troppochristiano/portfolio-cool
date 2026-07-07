@@ -8,11 +8,14 @@ import '../pages/Gallery.css';
 // /gallery grid and the admin library (which passes `fetchData` with the
 // bearer header and a `badges` slot for status/hero markers).
 
+// The thumb inherits the figure's style block so the grid shows each card
+// the way its creator styled it (font, colors) without fetching the full JSON.
 const thumbData = (item) => ({
   cols: item.thumbCols,
   rows: item.thumbRows,
   fps: 1,
   color: false,
+  ...(item.style ? { style: item.style } : {}),
   frames: [item.thumb],
 });
 
@@ -41,7 +44,10 @@ export default function FigureCard({ item, onSelect, badges, fetchData }) {
       onBlur={() => setHovering(false)}
       onClick={() => onSelect(item)}
     >
-      <div className="gallery-card__screen">
+      <div
+        className="gallery-card__screen"
+        style={item.style?.background ? { background: item.style.background } : undefined}
+      >
         <AsciiPlayer data={hovering && full ? full : thumbData(item)} fit loop />
       </div>
       {badges && <div className="gallery-card__badges">{badges}</div>}
