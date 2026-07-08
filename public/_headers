@@ -1,0 +1,23 @@
+# Cloudflare Pages cache policy.
+#
+# Texture/asset filenames under /outputs are pose-addressed, NOT content-hashed:
+# a future re-render of the face MUST ship under a new prefix (e.g. meBW2) or
+# the year-long immutable cache below will serve stale frames.
+
+/outputs/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/photos/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/videos/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/data/*
+  Cache-Control: public, max-age=86400
+
+/index.html
+  Cache-Control: no-cache

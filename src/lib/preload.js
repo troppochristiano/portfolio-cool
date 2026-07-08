@@ -7,6 +7,9 @@
 export function preloadImage(url) {
   return new Promise((resolve) => {
     const img = new Image();
+    // Off-DOM images are deprioritized by the browser, but these gate the hero
+    // reveal — they ARE the critical bytes.
+    img.fetchPriority = "high";
     img.onload = () => resolve();
     img.onerror = () => resolve();
     img.src = url;

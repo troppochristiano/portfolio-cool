@@ -6,7 +6,22 @@ import react from "@vitejs/plugin-react";
 // public/ and are served as static assets.
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        // Stable vendor chunks: three.js only loads with the lazy viewer/wall
+        // chunks, and app-code changes don't bust the cached vendor bundles.
+        manualChunks: {
+          three: ["three"],
+          vendor: ["react", "react-dom", "react-router-dom"],
+          gsap: ["gsap"],
+        },
+      },
+    },
+  },
   server: {
+    // Honor a tool-assigned port (e.g. preview harnesses set PORT); default unchanged.
+    port: Number(process.env.PORT) || 5173,
     open: true,
     host: true,
     // The figures API is a Cloudflare Pages Function. During dev it runs in

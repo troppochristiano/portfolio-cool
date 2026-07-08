@@ -66,6 +66,10 @@ class PhraseAsciiEffect {
 			oCanvas.width = iWidth;
 			oCanvas.height = iHeight;
 
+			// A resize changes the cell's inline width/height, so the next frame must
+			// write even if the glyphs come out identical.
+			strLastFrame = null;
+
 			oImg = renderer.domElement;
 
 			if ( oImg.style.backgroundColor ) {
@@ -108,7 +112,9 @@ class PhraseAsciiEffect {
 
 		}
 
-		const oCtx = oCanvas.getContext( '2d' );
+		// willReadFrequently keeps the canvas CPU-side: getImageData runs every frame,
+		// and a GPU-backed canvas would stall on the readback sync each time.
+		const oCtx = oCanvas.getContext( '2d', { willReadFrequently: true } );
 		if ( ! oCtx.getImageData ) {
 
 			return;
@@ -178,6 +184,11 @@ class PhraseAsciiEffect {
 
 
 		// convert img element to ascii
+
+		// Last frame's generated markup: with the subtle ambient wave most frames
+		// quantize to the exact same glyph grid, so a string compare (cheap) skips the
+		// innerHTML rewrite + reflow (expensive) whenever nothing visible changed.
+		let strLastFrame = null;
 
 		function asciifyImage( oAscii ) {
 
@@ -268,6 +279,9 @@ class PhraseAsciiEffect {
 				strChars += '<br/>';
 
 			}
+
+			if ( strChars === strLastFrame ) return;
+			strLastFrame = strChars;
 
 			oAscii.innerHTML = `<tr><td style="display:block;width:${width}px;height:${height}px;overflow:hidden">${strChars}</td></tr>`;
 

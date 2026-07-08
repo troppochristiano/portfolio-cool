@@ -93,11 +93,13 @@ export function applyShader(material, uniforms) {
              texture2D(map, duv).a
            );
            diffuseColor *= sampledDiffuseColor;
+           // Depth key: the background reads ~0 in the depth map, so drop fragments below
+           // the threshold. Catches the inpainted gray smudges/halo the luminance key
+           // (below) misses. Inside USE_MAP: vMapUv only exists once a map is bound, and
+           // the warm-up compile (no map yet) must not fail on it.
+           if (uHasDepth > 0.5 && texture2D(uDepthMap, vMapUv).r < uDepthKey) discard;
          #endif
          if (dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)) > ${WHITE_KEY_THRESHOLD}) discard;
-         // Depth key: the background reads ~0 in the depth map, so drop fragments below the
-         // threshold. Catches the inpainted gray smudges/halo the luminance key (above) misses.
-         if (uHasDepth > 0.5 && texture2D(uDepthMap, vMapUv).r < uDepthKey) discard;
          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0) - diffuseColor.rgb, uInvert);`
       );
   };

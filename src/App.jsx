@@ -1,13 +1,28 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import gsap from "gsap";
 import {
-  EyeBallzViewer,
-  generateSteps,
-  subsampleSteps,
-} from "./eye-ballz-viewer";
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import gsap from "gsap";
+// Steps stay a static import (pure math, no three.js) so the preload URL list
+// builds immediately. The viewer and wall pull in all of three.js, so they load
+// as split chunks — kicked off eagerly here (not on first render) to download in
+// parallel with the multi-second texture preload instead of after it.
+import { generateSteps, subsampleSteps } from "./eye-ballz-viewer/steps.js";
+const eyeBallzImport = import("./eye-ballz-viewer");
+const EyeBallzViewer = lazy(() =>
+  eyeBallzImport.then((m) => ({ default: m.EyeBallzViewer })),
+);
+const asciiGalleryImport = import("./components/AsciiGallery");
+const AsciiGallery = lazy(() =>
+  asciiGalleryImport.then((m) => ({ default: m.AsciiGallery })),
+);
 import { photos } from "./photos";
 import { Nav } from "./components/Nav";
-import { AsciiGallery } from "./components/AsciiGallery";
 import { IntroOverlay } from "./components/IntroOverlay";
 import { AboutOverlay } from "./components/AboutOverlay";
 import FigureDialog from "./components/FigureDialog";
@@ -32,7 +47,7 @@ const urlFor = (prefix, step, exprFolder) => ({
   photo: exprFolder
     ? `/outputs/${prefix}/expressions/${exprFolder}/${step.filename}`
     : `/outputs/${prefix}/${step.filename}`,
-  depth: `/outputs/${prefix}/depth/${step.filename}.depth.png`,
+  depth: `/outputs/${prefix}/depth/${step.filename}.depth.webp`,
 });
 
 // The ASCII figures in public/data — one floating player per clip across the wall.
@@ -267,7 +282,9 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const tasks = preloadUrls.map((u) => () => preloadImage(u));
-    runPool(tasks, 12).then(() => {
+    // 24-wide: Cloudflare serves HTTP/2+ over one multiplexed connection, so a
+    // wider pool just keeps the pipe full across ~200 small files.
+    runPool(tasks, 24).then(() => {
       if (!cancelled) setPreloaded(true);
     });
     return () => {
@@ -308,7 +325,9 @@ export default function App() {
         />
       )}
       {preloaded && (
-        <>
+        // Chunks were fetched in parallel with the texture preload above, so this
+        // Suspense almost never actually suspends; null keeps the intro clean if it does.
+        <Suspense fallback={null}>
           {figures && figures.length > 0 && (
             // The wall builds (and lazy-fetches its figures) behind the intro, then
             // roams into place when the intro reaches the "roam" phase.
@@ -350,7 +369,7 @@ export default function App() {
               />
             </div>
           )}
-        </>
+        </Suspense>
       )}
       {/* UI chrome appears only once the intro is over, with a soft fade-in. */}
       {preloaded && introDone && (

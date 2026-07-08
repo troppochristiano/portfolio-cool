@@ -101,7 +101,7 @@ const defaultUrlFor = (prefix, step, exprFolder) => ({
     : `./outputs/${prefix}/${step.filename}`,
   // Depth/displacement is shared across all expressions (head geometry is identical),
   // so it lives once under the avatar's prefix folder regardless of expression.
-  depth: `./outputs/${prefix}/depth/${step.filename}.depth.png`,
+  depth: `./outputs/${prefix}/depth/${step.filename}.depth.webp`,
 });
 
 /**
@@ -321,6 +321,7 @@ function EyeBallzViewerInner(
     } else {
       h.easeNextLook = true;
     }
+    h.needsRender = true; // demand rendering: pose reset must reach the screen
   }, [animMode]);
 
   // Imperative control surface for parent code (chat replies, events, etc.): trigger a
@@ -363,6 +364,9 @@ function EyeBallzViewerInner(
         h.uniforms.uGlitch.value = base.glitch + (0.12 - base.glitch) * a;
         h.uniforms.uNoise.value = base.noise + (0.06 - base.noise) * a;
         h.uniforms.uRGBShift.value = base.rgbShift + (0.02 - base.rgbShift) * a;
+        // The loop renders on its own while these are nonzero; this catches the tween's
+        // final step back to an all-zero baseline so the clean frame reaches the screen.
+        h.needsRender = true;
       },
     }),
     [],
@@ -426,6 +430,10 @@ function EyeBallzViewerInner(
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
+    // Demand rendering: user orbit input (and damping inertia) re-dirties the frame.
+    controls.addEventListener("change", () => {
+      if (three.current) three.current.needsRender = true;
+    });
 
     const handles = {
       renderer,
@@ -492,6 +500,12 @@ function EyeBallzViewerInner(
       lastFrameTime: 0,
       loadToken: 0,
       disposed: false,
+      // Demand rendering: the loop only calls renderer.render() when something changed.
+      // Every mutation site (texture swap, settings push, resize, controls, intro
+      // distortion) sets this; continuous motion (gesture/look/tilt/time-driven
+      // distortion) is detected per-frame in the loop instead.
+      needsRender: true,
+      lastRenderTime: 0,
     };
     three.current = handles;
 
@@ -523,6 +537,7 @@ function EyeBallzViewerInner(
         : a.bgColor;
       h.container.appendChild(effect.domElement);
       h.asciiEffect = effect;
+      h.needsRender = true; // fresh ASCII DOM is empty until the next render
     };
 
     renderer.setAnimationLoop(() => {
@@ -537,8 +552,13 @@ function EyeBallzViewerInner(
       const maxY = tilt.enabled ? (tilt.maxTiltY * Math.PI) / 180 : 0;
       const tx = h.tiltTargetY * maxY; // rotate.y follows horizontal cursor
       const ty = h.tiltTargetX * maxX; // rotate.x follows vertical cursor
-      h.mesh.rotation.y += (tx - h.mesh.rotation.y) * 0.1;
-      h.mesh.rotation.x += (ty - h.mesh.rotation.x) * 0.1;
+      const tiltActive =
+        Math.abs(tx - h.mesh.rotation.y) > 1e-4 ||
+        Math.abs(ty - h.mesh.rotation.x) > 1e-4;
+      if (tiltActive) {
+        h.mesh.rotation.y += (tx - h.mesh.rotation.y) * 0.1;
+        h.mesh.rotation.x += (ty - h.mesh.rotation.x) * 0.1;
+      }
 
       // Scripted gesture (nod yes/no): sweep the grid look-cell along the gesture's
       // keyframe path so the face turns through the pre-rendered frames. Owns the look
@@ -589,10 +609,35 @@ function EyeBallzViewerInner(
         foreheadSmileRef.current(false);
       }
 
-      if (h.asciiEnabled && h.asciiEffect) {
-        h.asciiEffect.render(scene, camera);
-      } else {
-        renderer.render(scene, camera);
+      // Render only when something can have changed on screen: a continuous animation
+      // is running, a mutation site flagged needsRender, or the 500ms safety fallback
+      // fires (belt-and-suspenders against a missed dirty site — an idle frame is the
+      // common case and costs nothing). animMode covers the whole site intro, where
+      // choreography (fade-in, distortion decay, gestures) overlaps unpredictably.
+      const distorting =
+        h.uniforms.uWaveAmp.value !== 0 ||
+        h.uniforms.uSwirl.value !== 0 ||
+        h.uniforms.uGlitch.value !== 0 ||
+        h.uniforms.uNoise.value !== 0 ||
+        h.uniforms.uRGBShift.value !== 0;
+      const now = performance.now();
+      // Interaction/choreography renders every frame; the ambient distortion (the
+      // default settings ship a subtle waveAmp so the face never fully freezes) only
+      // needs ~30fps — the ASCII grid quantizes to glyphs, so faster is invisible.
+      // Fully static scenes just heartbeat at 2fps as a missed-dirty-site safety net.
+      const hardActive =
+        h.animMode || h.gesture || h.look.animating || tiltActive || h.needsRender;
+      const shouldRender = hardActive
+        ? true
+        : now - h.lastRenderTime >= (distorting ? 1000 / 30 : 500);
+      if (shouldRender) {
+        h.needsRender = false;
+        h.lastRenderTime = now;
+        if (h.asciiEnabled && h.asciiEffect) {
+          h.asciiEffect.render(scene, camera);
+        } else {
+          renderer.render(scene, camera);
+        }
       }
       controls.update();
     });
@@ -736,6 +781,7 @@ function EyeBallzViewerInner(
       camera.updateProjectionMatrix();
       renderer.setSize(w, hgt);
       three.current?.asciiEffect?.setSize(w, hgt);
+      if (three.current) three.current.needsRender = true; // setSize cleared the canvas
     };
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -847,6 +893,7 @@ function EyeBallzViewerInner(
     h.canvas.style.opacity = settings.ascii.enabled
       ? String(settings.ascii.backplate ?? 0)
       : "";
+    h.needsRender = true; // demand rendering: repaint with the new settings
   }, [settings, transparent]);
 
   // ---- Notify parent of settings changes. ----------------------------------------
@@ -975,6 +1022,17 @@ function EyeBallzViewerInner(
 
       let revealed = false;
       for (const [name, folder] of ordered) {
+        // Once the avatar is revealed the remaining grids (blink/smile/smileBlink) are
+        // nice-to-haves — wait for an idle slot so they don't compete with the intro
+        // roam (gallery figure fetches, GSAP choreography) for bandwidth and decode.
+        if (revealed) {
+          await new Promise((r) =>
+            "requestIdleCallback" in window
+              ? requestIdleCallback(r, { timeout: 4000 })
+              : setTimeout(r, 1500),
+          );
+          if (cancelled || token !== h.loadToken) return;
+        }
         const colors = h.expr[name];
         // Some expressions (e.g. smile/smileBlink, only shown by the forehead easter-egg)
         // load just their top N rows — the look-up poses — to skip ~60% of the textures.
@@ -1634,6 +1692,7 @@ function applyTexture(h, step) {
     h.mapState = maps;
     h.material.needsUpdate = true;
   }
+  h.needsRender = true; // demand rendering: a map swap must reach the screen
 }
 
 // Pick the base expression to show for a given status, honoring what's loaded. Accepts

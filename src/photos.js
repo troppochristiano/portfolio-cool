@@ -66,7 +66,7 @@ export const photos = {
   //   },
   // },
   meBW: {
-    filename: "photos/IMG_6750BW_HIGHCONTRAST.JPG",
+    filename: "photos/IMG_6750BW_HIGHCONTRAST.webp",
     PREFIX: "meBW",
     X_STEPS: 10,
     Y_STEPS: 10,
