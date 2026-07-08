@@ -98,7 +98,7 @@ export default function FigureDialog({ figure, onClose, admin }) {
         </div>
 
         <div className="figdialog__stage">
-          {data && <AsciiPlayer data={data} fit loop label={name} />}
+          {data && <AsciiPlayer data={data} fit contain loop label={name} />}
           {!data && !failed && <span className="figdialog__note">loading…</span>}
           {failed && <span className="figdialog__note">couldn't load this figure.</span>}
         </div>

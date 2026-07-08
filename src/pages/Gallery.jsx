@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import FigureCard from '../components/FigureCard.jsx';
-import FigureDialog from '../components/FigureDialog.jsx';
-import { getGalleryPage } from '../lib/api.js';
-import './Gallery.css';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import FigureCard from "../components/FigureCard.jsx";
+import FigureDialog from "../components/FigureDialog.jsx";
+import { getGalleryPage } from "../lib/api.js";
+import "./Gallery.css";
 
 // Community gallery: an infinite-scroll grid of approved figures. Cards render
 // the tiny text thumbnail stored in D1 (a few KB each — no R2 reads for the
@@ -56,7 +56,7 @@ export default function Gallery() {
       (entries) => {
         if (entries.some((e) => e.isIntersecting) && cursor) loadMore(cursor);
       },
-      { rootMargin: '600px' },
+      { rootMargin: "600px" },
     );
     io.observe(el);
     return () => io.disconnect();
@@ -70,8 +70,8 @@ export default function Gallery() {
         </Link>
         <h1 className="gallery-title">community gallery</h1>
         <p className="gallery-tagline">
-          figures baked with the <Link to="/create">converter</Link> and shared by visitors —
-          hover to play, click for details.
+          figures baked with the <Link to="/create">converter</Link> and shared
+          by visitors
         </p>
       </header>
 
@@ -89,13 +89,21 @@ export default function Gallery() {
         <p className="gallery-empty">
           {failed
             ? "the gallery couldn't be reached — try again later."
-            : 'nothing here yet — be the first to share a figure from the converter.'}
+            : "nothing here yet — be the first to share a figure from the converter."}
         </p>
       )}
 
-      {!exhausted && <div ref={sentinelRef} className="gallery-sentinel" aria-hidden="true" />}
+      {!exhausted && (
+        <div
+          ref={sentinelRef}
+          className="gallery-sentinel"
+          aria-hidden="true"
+        />
+      )}
 
-      {selected && <FigureDialog figure={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <FigureDialog figure={selected} onClose={() => setSelected(null)} />
+      )}
     </div>
   );
 }

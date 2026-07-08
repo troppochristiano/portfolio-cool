@@ -35,11 +35,15 @@ const ERROR_TEXT = {
   turnstile_failed: 'the human check failed — close and try again.',
   too_large: 'this figure is too large to upload (3 MB max) — lower the resolution or fps and rebake.',
   turnstile_load_failed: 'could not load the verification widget — check your connection.',
+  unauthorized: 'admin secret rejected — unlock the moderation page again.',
 };
 const errorText = (code) =>
   ERROR_TEXT[code] || `upload rejected (${code || 'unknown error'}).`;
 
-export default function UploadModal({ baked, onClose }) {
+// With adminSecret set (the /admin/create route) the dialog is the same form,
+// but Turnstile never loads and the upload authenticates with the bearer
+// secret instead — the server then waives the daily/capacity limits.
+export default function UploadModal({ baked, adminSecret = null, onClose }) {
   const isAnim = baked.frames.length > 1;
   const [name, setName] = useState(baked.name || '');
   const [author, setAuthor] = useState('');
@@ -50,8 +54,9 @@ export default function UploadModal({ baked, onClose }) {
   const widgetRef = useRef(null);
 
   // Turnstile widget lifecycle: render on open, remove on close.
+  // Admin uploads authenticate with the bearer secret — no widget at all.
   useEffect(() => {
-    if (!SITE_KEY) return;
+    if (!SITE_KEY || adminSecret) return;
     let widgetId = null;
     let alive = true;
     loadTurnstile()
@@ -70,7 +75,7 @@ export default function UploadModal({ baked, onClose }) {
       alive = false;
       if (widgetId !== null) window.turnstile?.remove(widgetId);
     };
-  }, []);
+  }, [adminSecret]);
 
   // Escape closes (except mid-submit).
   useEffect(() => {
@@ -82,7 +87,7 @@ export default function UploadModal({ baked, onClose }) {
   }, [phase, onClose]);
 
   const canSubmit =
-    phase === 'form' && name.trim() && author.trim() && token;
+    phase === 'form' && name.trim() && author.trim() && (adminSecret || token);
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -90,7 +95,8 @@ export default function UploadModal({ baked, onClose }) {
     setError('');
     try {
       await uploadFigure({
-        token,
+        token: adminSecret ? undefined : token,
+        secret: adminSecret || undefined,
         name: name.trim(),
         author: author.trim(),
         thumbFrame: isAnim ? thumbFrame : 0,
@@ -139,7 +145,7 @@ export default function UploadModal({ baked, onClose }) {
           </div>
         ) : (
           <div className="upmodal-body">
-            {!SITE_KEY && (
+            {!SITE_KEY && !adminSecret && (
               <p className="upmodal-error">
                 uploads aren't configured (missing VITE_TURNSTILE_SITE_KEY).
               </p>
@@ -217,8 +223,8 @@ export default function UploadModal({ baked, onClose }) {
               )}
             </div>
 
-            {/* Turnstile mounts here (invisible/managed) */}
-            <div ref={widgetRef} className="upmodal-turnstile" />
+            {/* Turnstile mounts here (invisible/managed) — never for admin */}
+            {!adminSecret && <div ref={widgetRef} className="upmodal-turnstile" />}
 
             {error && <p className="upmodal-error">{error}</p>}
 
@@ -231,7 +237,9 @@ export default function UploadModal({ baked, onClose }) {
               </button>
             </div>
             <p className="hint">
-              uploads are reviewed by hand before they appear in the gallery.
+              {adminSecret
+                ? 'admin upload — no human check, no daily limit; it still lands in the review queue.'
+                : 'uploads are reviewed by hand before they appear in the gallery.'}
             </p>
           </div>
         )}

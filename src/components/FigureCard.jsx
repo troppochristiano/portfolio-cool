@@ -51,7 +51,9 @@ export default function FigureCard({ item, onSelect, badges, fetchData }) {
         className="gallery-card__screen"
         style={item.style?.background ? { background: item.style.background } : undefined}
       >
-        <AsciiPlayer data={hovering && full ? full : thumbData(item)} fit loop />
+        {/* contain: letterbox inside the 4:3 screen instead of overflowing it
+            (portrait figures used to get cropped by the screen's overflow) */}
+        <AsciiPlayer data={hovering && full ? full : thumbData(item)} fit contain loop />
       </div>
       {badges && <div className="gallery-card__badges">{badges}</div>}
       <div className="gallery-card__caption">

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { isInteracting } from '../lib/galleryBus.js';
+import { isBusy, isRoaming } from '../lib/galleryBus.js';
 import { resolveStyle, STYLE_DEFAULTS } from '../create/styleOptions.js';
 
 /**
@@ -11,16 +11,29 @@ import { resolveStyle, STYLE_DEFAULTS } from '../create/styleOptions.js';
  * 1000/fps, color→innerHTML / plain→textContent, single static frame under
  * reduced-motion) matches the converter's own "baked" preview exactly.
  *
- * Sizing precedence: `width` / `fit` (compute a font size to hit a pixel width) →
- * else `fontSize` → else the tuned `data.cellPx` → else 12.
+ * Sizing: the <pre> always renders at a safe base font (`fontSize` → `data.cellPx`
+ * → 12) and `width`/`fit` are hit with a CSS transform on top of that, inside a
+ * wrapper whose layout box is set to the scaled size. Solving for a font size
+ * instead (the old approach) breaks on real phones: high-res figures need
+ * sub-pixel fonts, and mobile text-inflation/minimum-font clamps blow the <pre>
+ * up to the clamped font's width. Transforms are immune to those clamps, so the
+ * layout box is exact on every device.
  *
  * Props:
  *   data      parsed figure.json
- *   width     render exactly this many px wide (scales the font to fit)
- *   fit       fill the parent element's width; re-fits on resize
- *   fontSize  fixed px size of one cell (used when width/fit are unset)
+ *   width     render exactly this many px wide (transform-scales to fit)
+ *   maxHeight optional height cap used with `width` — scales down further if the
+ *             figure would exceed it (keeps extreme-portrait figures bounded)
+ *   fit       fill the parent element's content-box width; re-fits on resize
+ *   contain   with `fit`: also fit the parent's content-box height (letterbox
+ *             inside the box instead of overflowing it)
+ *   fontSize  fixed px size of one cell (base font; also the only sizing when
+ *             width/fit are unset)
  *   loop      repeat after the last frame (default true)
- *   className extra class on the <pre>
+ *   paused    render frame 0 and never animate — no rAF loop at all. Used by
+ *             the hero wall on phones, where dozens of autoplaying players are
+ *             the main scroll/first-visit cost; the info dialog still plays.
+ *   className extra class on the <pre> (or the edge-stack wrapper)
  *   style     extra inline styles merged over the base (e.g. color, background)
  *   label     accessible name; when given the art is exposed via aria-label,
  *             otherwise it stays aria-hidden (decorative)
@@ -28,9 +41,12 @@ import { resolveStyle, STYLE_DEFAULTS } from '../create/styleOptions.js';
 export default function AsciiPlayer({
   data,
   width,
+  maxHeight,
   fit = false,
+  contain = false,
   fontSize,
   loop = true,
+  paused = false,
   className,
   style,
   label,
@@ -38,7 +54,9 @@ export default function AsciiPlayer({
   const ref = useRef(null);
   const edgeRef = useRef(null); // overlay <pre> for a tinted edge layer (optional)
   const wrapperRef = useRef(null); // grid stack that holds both <pre>s when edges exist
-  const [autoPx, setAutoPx] = useState(null);
+  const outerRef = useRef(null); // sizing box around the (transform-scaled) content
+  // { scale, w, h } — transform scale plus the content's natural layout size.
+  const [box, setBox] = useState(null);
 
   // A figure carries a separate edge layer only when its creator chose a
   // distinct edge color. Each entry pairs 1:1 with `frames`; blanks are spaces,
@@ -65,20 +83,30 @@ export default function AsciiPlayer({
 
     write(0);
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduce || frames.length <= 1) return;
+    if (paused || reduce || frames.length <= 1) return;
 
     const interval = 1000 / (data.fps || 12);
-    // While the user is actively orienting the 3D wall, throttle playback to a low
-    // fps instead of stopping it — the art keeps moving but the (expensive)
-    // innerHTML/textContent rewrites stop competing with the CSS3D re-composite.
-    // Math.max never speeds a figure up if its own fps is already below this.
-    const INTERACTING_FPS = 6;
-    const interactingInterval = Math.max(interval, 1000 / INTERACTING_FPS);
+    // While the CSS3D wall is re-compositing every frame (a user drag OR the
+    // intro roam), throttle playback to a low fps instead of stopping it — the
+    // art keeps moving but the (expensive) innerHTML/textContent rewrites stop
+    // competing with the re-composite. Math.max never speeds a figure up if its
+    // own fps is already below this.
+    const BUSY_FPS = 6;
+    const busyInterval = Math.max(interval, 1000 / BUSY_FPS);
     let raf = 0;
     let i = 0;
     let last = performance.now();
     const tick = (now) => {
-      const gate = isInteracting() ? interactingInterval : interval;
+      // The intro roam owns the frame budget outright: hold the current frame
+      // (rAF stays alive so playback resumes the moment the wall settles).
+      // Drags keep the gentler busy rate below — the wall is at rest-ish and
+      // fully visible then, so a frozen wall would read as broken.
+      if (isRoaming()) {
+        last = now;
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      const gate = isBusy() ? busyInterval : interval;
       if (now - last >= gate) {
         last = now;
         const next = i + 1;
@@ -90,32 +118,54 @@ export default function AsciiPlayer({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [data, loop, hasEdges]);
+  }, [data, loop, hasEdges, paused]);
 
-  // ── pixel sizing (width / fit) ──
+  const sized = width != null || fit;
+
+  // ── transform sizing (width / fit) ──
   // Declared after playback so frame 0 is already written when we measure. The
-  // <pre> never wraps (white-space: pre), so its width is linear in font size:
-  // ratio = offsetWidth / appliedFontSize is invariant, which lets us solve for
-  // the font size that hits a target width in one step — no resize feedback loop.
+  // <pre> never wraps and offsetWidth/Height ignore transforms, so the natural
+  // size is stable across re-measures — no feedback loop.
   useEffect(() => {
-    const el = ref.current;
-    if (!el || (width == null && !fit)) {
-      setAutoPx(null);
+    if (!sized) {
+      setBox(null);
       return;
     }
-    // When an edge overlay is present the <pre> sits inside a grid wrapper, so
-    // the box we fit into is the wrapper's parent — otherwise it's the <pre>'s.
-    const container = (wrapperRef.current || el).parentElement;
-    const basePx = fontSize ?? data?.cellPx ?? 12;
+    const content = wrapperRef.current || ref.current;
+    if (!content) return;
+    const container = outerRef.current?.parentElement;
     const measure = () => {
-      const natW = el.offsetWidth;
-      if (!natW) return;
-      const appliedPx = parseFloat(el.style.fontSize) || basePx;
-      const ratio = natW / appliedPx; // px of width per 1px of font
-      const target = width != null ? width : container?.clientWidth;
-      if (!target) return;
-      const next = target / ratio;
-      setAutoPx((prev) => (prev == null || Math.abs(prev - next) > 0.1 ? next : prev));
+      const natW = content.offsetWidth;
+      const natH = content.offsetHeight;
+      if (!natW || !natH) return;
+      let targetW;
+      let targetH = null;
+      if (width != null) {
+        targetW = width;
+        targetH = maxHeight ?? null;
+      } else {
+        if (!container) return;
+        // Fit the container's content box (its padding is not ours to fill).
+        const cs = getComputedStyle(container);
+        targetW =
+          container.clientWidth -
+          parseFloat(cs.paddingLeft) -
+          parseFloat(cs.paddingRight);
+        if (contain) {
+          targetH =
+            container.clientHeight -
+            parseFloat(cs.paddingTop) -
+            parseFloat(cs.paddingBottom);
+        }
+      }
+      if (!targetW || targetW <= 0) return;
+      let next = targetW / natW;
+      if (targetH != null && targetH > 0) next = Math.min(next, targetH / natH);
+      setBox((prev) =>
+        prev && prev.w === natW && prev.h === natH && Math.abs(prev.scale - next) < 0.001
+          ? prev
+          : { scale: next, w: natW, h: natH },
+      );
     };
     measure();
     if (fit && container) {
@@ -123,10 +173,10 @@ export default function AsciiPlayer({
       ro.observe(container);
       return () => ro.disconnect();
     }
-  }, [data, width, fit, fontSize]);
+  }, [data, width, maxHeight, fit, contain, fontSize, sized]);
 
-  const sized = width != null || fit;
-  const px = (sized ? autoPx : null) ?? fontSize ?? data?.cellPx ?? 12;
+  // Base font is never sub-pixel — the transform does the shrinking.
+  const px = fontSize ?? data?.cellPx ?? 12;
 
   // Optional creator styling from figure.json (font key → whitelisted stack,
   // clamped numbers, hex colors — resolveStyle is defensive, so a hand-edited
@@ -145,13 +195,30 @@ export default function AsciiPlayer({
     };
   }, [data]);
 
+  // The transform lands on the outermost content element: the grid wrapper when
+  // an edge layer exists, else the <pre> itself.
+  const scaleStyle =
+    sized && box
+      ? { transform: `scale(${box.scale})`, transformOrigin: 'top left' }
+      : sized
+        ? { transformOrigin: 'top left' }
+        : null;
+
   const preStyle = {
     // Mirror the converter's .preview so the grid aligns identically.
     whiteSpace: 'pre',
     margin: 0,
+    // Shrink-wrap to the art: a block <pre> would otherwise take its parent's
+    // width and the sizing measurement below would read the box, not the art.
+    width: 'max-content',
     fontSize: `${px}px`,
+    // Mobile text inflation (iOS text-size-adjust, Android font boosting) must
+    // never touch the art — it would desync the grid from the measured size.
+    WebkitTextSizeAdjust: 'none',
+    textSizeAdjust: 'none',
     ...figStyle,
     edgeColor: undefined, // not a CSS property — never leak it onto the element
+    ...(hasEdges ? null : scaleStyle),
     ...style,
   };
 
@@ -162,20 +229,25 @@ export default function AsciiPlayer({
       role={label ? 'img' : undefined}
       aria-label={label}
       aria-hidden={label ? undefined : true}
-      style={hasEdges ? { ...preStyle, gridArea: '1 / 1' } : preStyle}
+      style={hasEdges ? { ...preStyle, transform: undefined, gridArea: '1 / 1' } : preStyle}
     />
   );
 
-  if (!hasEdges) return basePre;
-
-  // Two-layer render: base ramp and the tinted edge glyphs share one grid cell
-  // so they overlap pixel-for-pixel while carrying their own colors. Only the
-  // base pre is measured/animated for sizing; the overlay mirrors its metrics.
-  return (
+  const content = hasEdges ? (
+    // Two-layer render: base ramp and the tinted edge glyphs share one grid cell
+    // so they overlap pixel-for-pixel while carrying their own colors. Only the
+    // base pre is animated; the overlay mirrors its metrics. The wrapper is what
+    // gets measured and scaled, so both layers move as one.
     <div
       ref={wrapperRef}
       className={className}
-      style={{ display: 'grid', placeItems: 'center', ...(style?.background ? { background: style.background } : null) }}
+      style={{
+        display: 'grid',
+        placeItems: 'center',
+        width: 'max-content',
+        ...(style?.background ? { background: style.background } : null),
+        ...scaleStyle,
+      }}
     >
       {basePre}
       <pre
@@ -183,12 +255,35 @@ export default function AsciiPlayer({
         aria-hidden="true"
         style={{
           ...preStyle,
+          transform: undefined,
           gridArea: '1 / 1',
           color: figStyle.edgeColor,
           background: undefined, // transparent so the base layer shows through
           pointerEvents: 'none',
         }}
       />
+    </div>
+  ) : (
+    basePre
+  );
+
+  if (!sized) return content;
+
+  // Sizing box: its layout size is the scaled size, so hosts (wall planes,
+  // cards, dialogs) see exactly the target dimensions — independent of any
+  // device font quirks. Hidden until the first measure so the natural-size
+  // content never flashes.
+  return (
+    <div
+      ref={outerRef}
+      style={{
+        width: box ? box.w * box.scale : width ?? undefined,
+        height: box ? box.h * box.scale : undefined,
+        overflow: 'hidden',
+        visibility: box ? undefined : 'hidden',
+      }}
+    >
+      {content}
     </div>
   );
 }

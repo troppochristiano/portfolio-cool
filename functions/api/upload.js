@@ -8,6 +8,7 @@
 import { json, error, methodNotAllowed } from './_lib/http.js';
 import { validateUpload, makeThumb } from './_lib/validate.js';
 import { verifyTurnstile } from './_lib/turnstile.js';
+import { isAdmin } from './_lib/auth.js';
 import { ipHash } from './_lib/ip.js';
 import { notifyPendingUpload } from './_lib/notify.js';
 
@@ -37,13 +38,24 @@ export async function onRequestPost({ request, env, waitUntil }) {
       return error('invalid_json', 'body is not valid JSON', 400);
     }
 
+    // Admin uploads (bearer ADMIN_SECRET, sent by /admin/create) skip the bot
+    // gate and every rate/capacity limit. A bearer that doesn't verify is
+    // rejected outright — never silently downgraded to the public path, so a
+    // stale secret can't burn Turnstile tokens or the daily cap.
+    const hasBearer = (request.headers.get('Authorization') || '').startsWith('Bearer ');
+    const admin = hasBearer && (await isAdmin(request, env));
+    if (hasBearer && !admin) {
+      return error('unauthorized', 'invalid admin secret', 401);
+    }
+
     // Bot gate — verified server-side, tokens are single-use.
-    if (!(await verifyTurnstile(body.token, request, env))) {
+    if (!admin && !(await verifyTurnstile(body.token, request, env))) {
       return error('turnstile_failed', 'human verification failed — reload and try again', 403);
     }
 
     // Rate limits: per-IP daily cap plus global capacity caps so storage can
-    // never be flooded even from many IPs.
+    // never be flooded even from many IPs. (counts.pending also feeds the
+    // notify email below, so the query runs for admins too.)
     const hash = await ipHash(request, env);
     const counts = await env.DB.prepare(
       `SELECT
@@ -52,10 +64,10 @@ export async function onRequestPost({ request, env, waitUntil }) {
          (SELECT COUNT(*) FROM figures WHERE status = 'pending') AS pending,
          (SELECT COUNT(*) FROM figures) AS total`,
     ).bind(hash).first();
-    if (counts.byIp >= MAX_PER_IP_PER_DAY) {
+    if (!admin && counts.byIp >= MAX_PER_IP_PER_DAY) {
       return error('rate_limited', 'upload limit reached — try again tomorrow', 429);
     }
-    if (counts.pending >= MAX_PENDING || counts.total >= MAX_TOTAL) {
+    if (!admin && (counts.pending >= MAX_PENDING || counts.total >= MAX_TOTAL)) {
       return error('capacity', 'the gallery queue is full right now — try again later', 429);
     }
 

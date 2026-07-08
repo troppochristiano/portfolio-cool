@@ -141,8 +141,17 @@ export function IntroOverlay({ phase, onFormed, onDispersed }) {
     });
 
     let rafId = 0;
+    // Phones: redraw at most 30fps. GSAP keeps tweening the particle positions
+    // at its own tick — only the canvas repaint (clear + ~425 fillText on a
+    // DPR-2 full-screen canvas) is capped, halving its cost exactly while the
+    // avatar is warming/rendering behind the swarm.
+    const coarse = window.matchMedia?.("(pointer: coarse)").matches;
+    let lastDraw = 0;
     const draw = () => {
       rafId = requestAnimationFrame(draw);
+      const now0 = performance.now();
+      if (coarse && now0 - lastDraw < 1000 / 30) return;
+      lastDraw = now0;
       const w = window.innerWidth;
       const h = window.innerHeight;
       ctx.clearRect(0, 0, w, h);

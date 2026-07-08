@@ -9,6 +9,7 @@ import "./styles/global.css";
 // separate page and the admin queue is only ever visited by the site owner.
 const Gallery = lazy(() => import("./pages/Gallery"));
 const Admin = lazy(() => import("./pages/Admin"));
+const AdminCreate = lazy(() => import("./pages/AdminCreate"));
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
@@ -33,6 +34,16 @@ createRoot(document.getElementById("root")).render(
           element={
             <Suspense fallback={null}>
               <Admin />
+            </Suspense>
+          }
+        />
+        {/* The same converter as /create, unlocked with the admin secret —
+            uploads skip Turnstile and the daily limit. */}
+        <Route
+          path="/admin/create"
+          element={
+            <Suspense fallback={null}>
+              <AdminCreate />
             </Suspense>
           }
         />

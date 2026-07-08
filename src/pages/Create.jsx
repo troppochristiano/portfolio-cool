@@ -61,7 +61,9 @@ const fmtTime = (s) => {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 };
 
-export default function Create() {
+// With an adminSecret (the /admin/create route), the tool is identical except
+// the share dialog: no Turnstile and the server waives the upload limits.
+export default function Create({ adminSecret = null }) {
   const videoRef = useRef(null);
   const photoCanvasRef = useRef(null); // offscreen: the uploaded photo (or white paper); cut erases here
   const strokeCanvasRef = useRef(null); // offscreen: brush strokes; eraser erases here only
@@ -1392,10 +1394,12 @@ export default function Create() {
     <div className="create-page" ref={pageRef}>
       <div className="app">
         <header className="masthead">
-          <Link to="/" className="home-link">
-            ← Christian Bianchi
+          <Link to={adminSecret ? "/admin" : "/"} className="home-link">
+            {adminSecret ? "← moderation" : "← Christian Bianchi"}
           </Link>
-          <h1 className="title">ascii media converter</h1>
+          <h1 className="title">
+            ascii media converter{adminSecret ? " · admin" : ""}
+          </h1>
           {/* <p className="tagline">
             drop a clip or a photo — or draw one — tune the grid → bake to
             frames → export json for the web
@@ -1714,7 +1718,11 @@ export default function Create() {
                                     : "drag a rectangle on the preview to crop"
                               }
                             >
-                              {cropMode ? "✓ done" : crop ? "▦ edit crop" : "▦ crop"}
+                              {cropMode
+                                ? "✓ done"
+                                : crop
+                                  ? "▦ edit crop"
+                                  : "▦ crop"}
                             </button>
                             {crop && (
                               <button
@@ -1825,30 +1833,34 @@ export default function Create() {
                       {/* Paint-style crop editor: move the rect, resize from any
                         handle — hidden while a fresh marquee is being drawn or
                         the eyedropper needs the click (even inside the rect) */}
-                      {cropMode && crop && !cropDraft && hasMedia && !picking && (
-                        <div
-                          className="crop-editor"
-                          style={{
-                            left: `${crop.x * 100}%`,
-                            top: `${crop.y * 100}%`,
-                            width: `${crop.w * 100}%`,
-                            height: `${crop.h * 100}%`,
-                          }}
-                          onPointerDown={onCropEditDown("move")}
-                          onPointerMove={onCropEditMove}
-                          onPointerUp={onCropEditUp}
-                          onPointerCancel={onCropEditUp}
-                        >
-                          {CROP_HANDLES.map(([role, lx, ty]) => (
-                            <div
-                              key={role}
-                              className={`crop-handle crop-handle--${role}`}
-                              style={{ left: `${lx}%`, top: `${ty}%` }}
-                              onPointerDown={onCropEditDown(role)}
-                            />
-                          ))}
-                        </div>
-                      )}
+                      {cropMode &&
+                        crop &&
+                        !cropDraft &&
+                        hasMedia &&
+                        !picking && (
+                          <div
+                            className="crop-editor"
+                            style={{
+                              left: `${crop.x * 100}%`,
+                              top: `${crop.y * 100}%`,
+                              width: `${crop.w * 100}%`,
+                              height: `${crop.h * 100}%`,
+                            }}
+                            onPointerDown={onCropEditDown("move")}
+                            onPointerMove={onCropEditMove}
+                            onPointerUp={onCropEditUp}
+                            onPointerCancel={onCropEditUp}
+                          >
+                            {CROP_HANDLES.map(([role, lx, ty]) => (
+                              <div
+                                key={role}
+                                className={`crop-handle crop-handle--${role}`}
+                                style={{ left: `${lx}%`, top: `${ty}%` }}
+                                onPointerDown={onCropEditDown(role)}
+                              />
+                            ))}
+                          </div>
+                        )}
                     </div>
 
                     {sourceType === "video" && !hasVideo && (
@@ -2051,9 +2063,6 @@ export default function Create() {
                             onChange={(e) => setDrawOnPhoto(e.target.checked)}
                           />
                           draw on photo{" "}
-                          <span className="muted">
-                            (overlay your drawing on the photo)
-                          </span>
                         </label>
                       )}
                       {drawEnabled && drawControls}
@@ -2093,11 +2102,11 @@ export default function Create() {
                           {imageName}
                         </div>
                       )}
-                      <p className="hint">
+                      {/* <p className="hint">
                         {drawEnabled
                           ? `draw over the ${hasPhoto ? "photo" : "blank paper"} — shade = brightness · fill buckets a region · erase removes ink · cut removes photo (transparent)${hasPhoto ? " · replacing the photo clears the drawing" : ""}`
                           : "converting the photo only — turn on “draw on photo” to overlay your drawing"}
-                      </p>
+                      </p>*/}
                     </div>
                   )}
 
@@ -2111,6 +2120,8 @@ export default function Create() {
                   {hasMedia && (
                     <SourceSection
                       label="background removal"
+                      status={keyMode === "off" ? "off" : keyMode}
+                      statusOn={keyMode !== "off"}
                       open={openBlocks.key}
                       onToggle={() => toggleBlock("key")}
                     >
@@ -2183,6 +2194,8 @@ export default function Create() {
                   {hasMedia && (
                     <SourceSection
                       label="edge detection"
+                      status={edgeMode === "only" ? "edges only" : edgeMode}
+                      statusOn={edgeMode !== "off"}
                       open={openBlocks.edges}
                       onToggle={() => toggleBlock("edges")}
                     >
@@ -2227,7 +2240,9 @@ export default function Create() {
                               disabled={edgeColor === null}
                               title="match the text color"
                             >
-                              {edgeColor === null ? "matches text" : "match text"}
+                              {edgeColor === null
+                                ? "matches text"
+                                : "match text"}
                             </button>
                           </div>
                         </>
@@ -2237,6 +2252,9 @@ export default function Create() {
                 </div>
               </section>
 
+              {/* monitor + bake/export bar share a column so the actions sit
+                  right under the ASCII view and pin with it on desktop */}
+              <div className="monitor-col">
               <div className="monitor" ref={monitorRef}>
                 <div
                   className={`statusline ${mode === "baked" ? "is-baked" : ""}`}
@@ -2324,10 +2342,9 @@ export default function Create() {
                   <div className="scanline" aria-hidden="true" />
                 </div>
               </div>
-            </div>
 
-            {/* ── bake + export bar ── */}
-            <div className="actions">
+              {/* ── bake + export bar ── */}
+              <div className="actions">
               <button
                 className="btn primary"
                 onClick={bake}
@@ -2380,11 +2397,13 @@ export default function Create() {
                       ? `heads up: ~${frameEstimate} frames is a lot — lower fps or trim`
                       : "bake to measure output size"}
               </div>
-              {baking && (
-                <div className="progress">
-                  <span style={{ width: `${bakeProgress}%` }} />
+                {/* always in flow — appearing/disappearing used to add a wrapped
+                    row to the actions bar and jolt the layout on every bake */}
+                <div className={`progress ${baking ? "is-active" : ""}`}>
+                  <span style={{ width: baking ? `${bakeProgress}%` : 0 }} />
                 </div>
-              )}
+              </div>
+              </div>
             </div>
           </main>
         </div>
@@ -2477,6 +2496,34 @@ export default function Create() {
                   restore photo
                 </button>
               )}
+              {/* same arm → confirm crop flow as the windowed draw toolbar: the
+                  overlay/handles live inside .stage-media, which fullscreens
+                  with the stage, so the existing pointer math works unchanged */}
+              <button
+                className={`btn ${cropMode ? "primary" : ""}`}
+                onClick={() => {
+                  if (cropMode) {
+                    setCropMode(false); // confirm → back to drawing
+                  } else {
+                    setCropMode(true); // arm / re-open the editor
+                    setPicking(false);
+                  }
+                }}
+                title={
+                  cropMode
+                    ? "confirm the crop and return to drawing"
+                    : crop
+                      ? "edit the crop region"
+                      : "drag a rectangle to crop"
+                }
+              >
+                {cropMode ? "✓ done" : crop ? "▦ edit crop" : "▦ crop"}
+              </button>
+              {crop && !cropMode && (
+                <button className="btn" onClick={resetCrop} title="clear the crop">
+                  ✕ reset crop
+                </button>
+              )}
               <button
                 className="btn primary"
                 onClick={() => setDrawFullscreen(false)}
@@ -2488,7 +2535,11 @@ export default function Create() {
         )}
 
         {shareOpen && baked && (
-          <UploadModal baked={baked} onClose={() => setShareOpen(false)} />
+          <UploadModal
+            baked={baked}
+            adminSecret={adminSecret}
+            onClose={() => setShareOpen(false)}
+          />
         )}
         {pngOpen && baked && (
           <PngFrameModal
@@ -2576,11 +2627,18 @@ function SettingsBlock({ label, open, onToggle, children }) {
 }
 
 /** A collapsible sub-section inside the source panel (keyzone styling). */
-function SourceSection({ label, open, onToggle, children }) {
+function SourceSection({ label, status, statusOn, open, onToggle, children }) {
   return (
     <div className="keyzone">
       <button className="zone-toggle" aria-expanded={open} onClick={onToggle}>
         <span className="field-label">{label}</span>
+        {/* current state surfaced in the header so a collapsed section still
+            tells you it exists and what it's set to */}
+        {status && (
+          <span className={`zone-status${statusOn ? " is-on" : ""}`}>
+            {status}
+          </span>
+        )}
         <span className="caret" aria-hidden="true">
           {open ? "▾" : "▸"}
         </span>

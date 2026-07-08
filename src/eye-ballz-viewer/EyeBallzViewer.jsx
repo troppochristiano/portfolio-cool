@@ -30,6 +30,14 @@ import "./EyeBallzViewer.css";
 
 const FPS = 24;
 
+// Touch device — evaluated once. Phones get a flat 30fps cap on all active
+// renders (see the render gate): the render+asciify pass is the single
+// heaviest per-frame cost on mobile, and above ~30fps the ASCII grid
+// quantizes the difference away anyway.
+const COARSE_POINTER =
+  typeof window !== "undefined" &&
+  window.matchMedia?.("(pointer: coarse)").matches;
+
 // Device pixel ratio to render at. Cap at 2 so high-DPI displays don't rasterize 4–9× the
 // pixels for no visible gain. When ASCII is on the WebGL canvas is invisible (opacity:0)
 // and only sampled by AsciiEffect at its low character resolution, so 1 is plenty.
@@ -42,7 +50,9 @@ const pixelRatioFor = (asciiEnabled, backplate = 0) =>
 // yields fewer columns and a coarser face at the same resolution. To keep detail roughly
 // constant across screens, scale the resolution up as the container shrinks below this
 // reference width (the desktop cap), never below the base value, and capped so tiny screens
-// don't blow up the per-frame asciify cost.
+// don't blow up the per-frame asciify cost. (A mobile-only density cut was tried
+// and reverted — the flat 30fps render cap is what fixes phone lag; the grid
+// density itself wasn't the bottleneck and the face is the site's centerpiece.)
 const ASCII_REF_WIDTH = 480;
 const ASCII_MAX_RESOLUTION = 0.5;
 const effectiveAsciiResolution = (baseRes, containerWidth) =>
@@ -637,8 +647,20 @@ function EyeBallzViewerInner(
       // Fully static scenes just heartbeat at 2fps as a missed-dirty-site safety net.
       const hardActive =
         h.animMode || h.gesture || h.look.animating || tiltActive || h.needsRender;
+      // Phones: cap EVERY active render at 30fps — look-around easing, tilt,
+      // gestures, the intro choreography, and texture-swap dirty flags alike.
+      // A render here is not just WebGL: the asciify pass does a synchronous
+      // getImageData readback + glyph-string rebuild, and at the display's
+      // native 60–120Hz that alone janks the page. The ASCII glyph grid
+      // quantizes away anything above ~30fps, and pointer-driven grid swaps
+      // are already throttled to 24Hz, so nothing visible is lost — a capped
+      // frame keeps its needsRender flag and lands ≤33ms later. Desktop
+      // renders every frame exactly as before.
+      const phoneCapped = COARSE_POINTER
+        ? now - h.lastRenderTime >= 1000 / 30
+        : true;
       const shouldRender = hardActive
-        ? true
+        ? phoneCapped
         : now - h.lastRenderTime >= (distorting ? 1000 / 30 : 500);
       if (shouldRender) {
         h.needsRender = false;

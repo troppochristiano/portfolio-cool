@@ -45,12 +45,20 @@ export function getFigureData(url) {
   return p;
 }
 
-/** Submit a baked figure for moderation. */
-export function uploadFigure({ token, name, author, thumbFrame, figure }) {
+/** Submit a baked figure for moderation. With `secret` (admin create tool)
+ *  the request authenticates via bearer instead of a Turnstile token and the
+ *  server skips the rate/capacity limits. */
+export function uploadFigure({ token, name, author, thumbFrame, figure, secret }) {
   return getJson('/api/upload', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token, name, author, thumbFrame, figure }),
+    headers: {
+      'Content-Type': 'application/json',
+      ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
+    },
+    body: JSON.stringify({
+      ...(secret ? {} : { token }),
+      name, author, thumbFrame, figure,
+    }),
   });
 }
 

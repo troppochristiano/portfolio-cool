@@ -153,6 +153,18 @@
     gap: 8px;
 }
 
+.admin-head__actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* the "+ create" link wears the button skin */
+a.admin-btn {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+}
+
 .admin-btn {
     background: transparent;
     border: 1px solid #0000ff;

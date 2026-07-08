@@ -9,6 +9,7 @@ import {
   adminApprove,
   adminReject,
 } from '../lib/api.js';
+import { SECRET_KEY } from '../lib/adminSecret.js';
 import './Admin.css';
 
 // Moderation — an unlinked route with two views:
@@ -19,8 +20,6 @@ import './Admin.css';
 //             moderation actions (hero toggle, hide/approve, delete).
 // The admin secret is pasted once and kept in localStorage; the server does
 // the actual gatekeeping (a wrong secret just gets 401s).
-
-const SECRET_KEY = 'ascii_admin_secret';
 
 const typeOf = (item) => ((item.framesCount ?? 1) > 1 ? 'clip' : 'photo');
 
@@ -211,7 +210,10 @@ export default function Admin() {
             library {library ? `(${library.length})` : ''}
           </button>
         </div>
-        <button className="admin-btn" onClick={forget}>lock</button>
+        <div className="admin-head__actions">
+          <Link className="admin-btn" to="/admin/create">+ create</Link>
+          <button className="admin-btn" onClick={forget}>lock</button>
+        </div>
       </header>
 
       {tab === 'queue' && (

@@ -6,7 +6,8 @@ import {
   CSS3DObject,
 } from "three/examples/jsm/renderers/CSS3DRenderer.js";
 import AsciiPlayer from "./AsciiPlayer.jsx";
-import { setInteracting } from "../lib/galleryBus.js";
+import { setInteracting, setRoaming } from "../lib/galleryBus.js";
+import { downsampleFigure } from "../lib/downsampleFigure.js";
 import { getFigureData } from "../lib/api.js";
 
 // A curved wall of floating ASCII players, ported from the Three.js video gallery
@@ -34,17 +35,31 @@ const SCALE = PLANE_PX / BASE_IMAGE_WIDTH;
 // the floating hover label.
 const FRAMED = false;
 
+// Touch device or small viewport — evaluated once at module load. Drives both
+// the wall density and the per-plane player size below.
+const COARSE_OR_SMALL =
+  typeof window !== "undefined" &&
+  (window.matchMedia?.("(pointer: coarse)").matches || window.innerWidth < 768);
+
 // Wall density. Each plane is a retained CSS3D compositor layer transformed every
 // frame, so on phones (where most columns sit off-screen anyway) a smaller grid
-// roughly halves per-frame transform writes and layer count — the biggest mobile
-// win. Evaluated once at module load; tune the 5 below after seeing it on a device.
-function pickGridSize() {
-  if (typeof window === "undefined") return 7;
-  const coarseOrSmall =
-    window.matchMedia?.("(pointer: coarse)").matches || window.innerWidth < 768;
-  return coarseOrSmall ? 5 : 7;
-}
-const GRID = pickGridSize();
+// cuts per-frame transform writes and layer count — the biggest mobile win.
+// 4×4 (16 planes, was 5×5): the intro roam still stuttered on real devices at 25.
+const GRID = COARSE_OR_SMALL ? 4 : 7;
+
+// Rendered size of each plane's ascii player. Separate from PLANE_PX so wall
+// geometry (SCALE, spacing, camera) stays untouched: on phones the planes just
+// render smaller within their slots, and MAX_PLAYER_H keeps extreme-portrait
+// figures from towering over the viewport. Display size is cheap now that the
+// glyph count is capped (WALL_MAX_COLS below) — these are taste knobs.
+const PLAYER_W = COARSE_OR_SMALL ? 150 : 220;
+const MAX_PLAYER_H = COARSE_OR_SMALL ? 280 : 400;
+
+// The wall displays a downsampled copy of each figure (client-side twin of the
+// gallery's server-side thumbs): high-res figures were the look-around jank —
+// panning a 280-col <pre> into view forces a huge text-layer raster. 96 cols
+// is indistinguishable at plane size; hover swaps the full figure in.
+const WALL_MAX_COLS = 96;
 
 const params = {
   rows: GRID,
@@ -105,9 +120,14 @@ export function AsciiGallery({
     let introActive = introMode;
     const spin = { value: 0 };
     let introTl = null;
+    // Throttle every AsciiPlayer to the busy fps for the whole intro (the wall
+    // is invisible or roaming until settle) so their textContent rewrites don't
+    // compete with the swarm canvas / roam re-composite on the main thread.
+    if (introMode) setRoaming(true);
     const finishIntro = () => {
       if (!introActive) return;
       introActive = false;
+      setRoaming(false);
       mount.classList.remove("is-intro");
       onSettledRef.current?.();
     };
@@ -418,34 +438,47 @@ export function AsciiGallery({
           phaseOffset,
         } = object.userData;
 
-        const parallaxX = tx3 * parallaxFactor * randomOffset.x;
-        const parallaxY = ty3 * parallaxFactor * randomOffset.y;
-        // Position offsets are in (unscaled) reference units, so scale them to pixel
-        // space once; rotations are radians and stay dimensionless.
-        const oscillation = Math.sin(time + phaseOffset) * mouseDistance * 0.1;
+        let px, py, pz, rx, ry, rz;
+        if (introActive) {
+          // Mouse input is ignored until the roam settles (targetX/Y stay 0), so
+          // parallax and oscillation are zero — settle straight into the base
+          // pose and skip their per-plane math while the roam is hot.
+          px = basePosition.x;
+          py = basePosition.y;
+          pz = basePosition.z;
+          rx = baseRotation.x;
+          ry = baseRotation.y;
+          rz = baseRotation.z;
+        } else {
+          const parallaxX = tx3 * parallaxFactor * randomOffset.x;
+          const parallaxY = ty3 * parallaxFactor * randomOffset.y;
+          // Position offsets are in (unscaled) reference units, so scale them to pixel
+          // space once; rotations are radians and stay dimensionless.
+          const oscillation = Math.sin(time + phaseOffset) * mouseDistance * 0.1;
 
-        const px =
-          basePosition.x + (parallaxX + oscillation * randomOffset.x) * SCALE;
-        const py =
-          basePosition.y + (parallaxY + oscillation * randomOffset.y) * SCALE;
-        const pz =
-          basePosition.z +
-          oscillation * randomOffset.z * parallaxFactor * SCALE;
+          px =
+            basePosition.x + (parallaxX + oscillation * randomOffset.x) * SCALE;
+          py =
+            basePosition.y + (parallaxY + oscillation * randomOffset.y) * SCALE;
+          pz =
+            basePosition.z +
+            oscillation * randomOffset.z * parallaxFactor * SCALE;
 
-        const rx =
-          baseRotation.x +
-          targetY * rotationModifier.x * mouseDistance +
-          oscillation * rotationModifier.x * 0.2;
+          rx =
+            baseRotation.x +
+            targetY * rotationModifier.x * mouseDistance +
+            oscillation * rotationModifier.x * 0.2;
 
-        const ry =
-          baseRotation.y +
-          targetX * rotationModifier.y * mouseDistance +
-          oscillation * rotationModifier.y * 0.2;
+          ry =
+            baseRotation.y +
+            targetX * rotationModifier.y * mouseDistance +
+            oscillation * rotationModifier.y * 0.2;
 
-        const rz =
-          baseRotation.z +
-          targetX * targetY * rotationModifier.z * 2 +
-          oscillation * rotationModifier.z * 0.3;
+          rz =
+            baseRotation.z +
+            targetX * targetY * rotationModifier.z * 2 +
+            oscillation * rotationModifier.z * 0.3;
+        }
 
         const it = object.userData.intro;
         if (introActive && it) {
@@ -596,6 +629,7 @@ export function AsciiGallery({
       mount.classList.remove("is-intro");
       if (settleTimer) clearTimeout(settleTimer);
       setInteracting(false);
+      setRoaming(false);
       document.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("resize", onResize);
       mount.removeEventListener("pointerdown", onPointerDown);
@@ -636,7 +670,12 @@ export function AsciiGallery({
             ref={(el) => (planeRefs.current[i] = el)}
             className={`ascii-plane${FRAMED ? " is-framed" : ""}`}
           >
-            <LazyPlane desc={fig} index={i} />
+            <LazyPlane
+              desc={fig}
+              index={i}
+              hold={introState === "roam"}
+              paused={introState !== "done"}
+            />
             {FRAMED && (
               <div className="ascii-frame-label">{labelFor(fig.name)}</div>
             )}
@@ -652,19 +691,36 @@ export function AsciiGallery({
 // in api.js, so N planes sharing a figure download it once) after a small
 // per-plane stagger, then fades in — the wall populates plane by plane instead
 // of blocking on one big up-front download.
-function LazyPlane({ desc, index }) {
+//
+// `hold` is true while the roam timeline is flying the planes around: a fetch
+// whose stagger fires mid-roam is deferred until settle, so its JSON.parse and
+// first full-frame paint can't spike a frame of the animation. Planes that
+// loaded before the roam (the common case) are untouched.
+function LazyPlane({ desc, index, hold, paused }) {
   const [data, setData] = useState(null);
+  // Desktop hover swaps the full-resolution figure in (gallery-card pattern).
+  const [hovering, setHovering] = useState(false);
+  const rootRef = useRef(null);
+  const holdRef = useRef(hold);
+  holdRef.current = hold;
+  // A fetch deferred by `hold`, parked until the roam settles.
+  const deferredRef = useRef(null);
 
   useEffect(() => {
     setData(null);
+    deferredRef.current = null;
     let alive = true;
-    const delay = index * 60 + Math.random() * 400;
-    const timer = setTimeout(() => {
+    const startFetch = () => {
       getFigureData(desc.url)
         .then((d) => {
           if (alive) setData(d);
         })
         .catch(() => {}); // failed plane stays empty — ambient, not critical
+    };
+    const delay = index * 60 + Math.random() * 400;
+    const timer = setTimeout(() => {
+      if (holdRef.current) deferredRef.current = startFetch;
+      else startFetch();
     }, delay);
     return () => {
       alive = false;
@@ -672,9 +728,53 @@ function LazyPlane({ desc, index }) {
     };
   }, [desc, index]);
 
+  // Flush a parked fetch once the roam is over.
+  useEffect(() => {
+    if (!hold && deferredRef.current) {
+      const go = deferredRef.current;
+      deferredRef.current = null;
+      go();
+    }
+  }, [hold]);
+
+  // Downsampled display copy (computed once per figure) — see WALL_MAX_COLS.
+  const display = useMemo(
+    () => (data ? downsampleFigure(data, WALL_MAX_COLS) : null),
+    [data],
+  );
+
+  // Native listeners, not React synthetic: CSS3DRenderer reparents this div
+  // out of the React root (same reason the wall effect's tap/hover listeners
+  // are native). Skipped on touch — a tap opens the dialog anyway, no point
+  // re-rasterizing the full figure on the way there.
+  useEffect(() => {
+    if (COARSE_OR_SMALL) return;
+    const el = rootRef.current;
+    if (!el) return;
+    const enter = () => setHovering(true);
+    const leave = () => setHovering(false);
+    el.addEventListener("pointerenter", enter);
+    el.addEventListener("pointerleave", leave);
+    return () => {
+      el.removeEventListener("pointerenter", enter);
+      el.removeEventListener("pointerleave", leave);
+    };
+  }, []);
+
+  const shown = hovering && data ? data : display;
   return (
-    <div className={`plane-body${data ? " is-loaded" : ""}`}>
-      {data && <AsciiPlayer data={data} width={PLANE_PX} loop />}
+    <div ref={rootRef} className={`plane-body${data ? " is-loaded" : ""}`}>
+      {shown && (
+        // Stills until the intro settles, then everything autoplays — the
+        // downsampled copies keep per-plane glyph counts gallery-card sized.
+        <AsciiPlayer
+          data={shown}
+          width={PLAYER_W}
+          maxHeight={MAX_PLAYER_H}
+          paused={paused}
+          loop
+        />
+      )}
     </div>
   );
 }

@@ -187,9 +187,48 @@ body {
     pointer-events: none;
 }
 
+/* Right-side stack: the (mobile-only) menu toggle with the links under it.
+   Column + flex-end so the open menu drops down right-aligned under the pill. */
+.nav__menu {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+}
+
 .nav__links {
     display: flex;
     gap: 8px;
+}
+
+/* Mobile menu toggle — hidden on desktop where the links fit inline. */
+.nav__toggle {
+    display: none;
+}
+
+/* Narrow viewports: the four shortcuts don't fit next to the name (they used to
+   wrap over the hero) — collapse them behind a menu pill instead. 860px matches
+   the mobile breakpoint used across Create.css. */
+@media (max-width: 860px) {
+    .nav {
+        padding: 16px;
+        gap: 12px;
+    }
+
+    .nav__toggle {
+        display: inline-block;
+    }
+
+    .nav__links {
+        display: none;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+    }
+
+    .nav--open .nav__links {
+        display: flex;
+    }
 }
 
 /* Shared neon pill (matches .about-trigger). */
@@ -272,7 +311,15 @@ body {
 .about-trigger-group {
     position: fixed;
     left: 50%;
-    top: calc(50% + min(240px, 40vw, 35vh) + 160px);
+    top: calc(50% + min(240px, 40vw, 35vh) + 80px);
+    /* Crucial nav affordance — never let it slip below the fold. On short
+       windows the ideal "80px under the avatar" spot can pass the viewport
+       bottom, so clamp to it (76px covers caret + gap + pill with breathing
+       room). The plain calc() above stays as the no-dvh fallback. */
+    top: min(
+        calc(50% + min(240px, 40vw, 35vh) + 80px),
+        calc(100dvh - env(safe-area-inset-bottom, 0px) - 76px)
+    );
     transform: translateX(-50%);
     z-index: 2;
     display: flex;
@@ -602,19 +649,8 @@ body {
     opacity: 1;
 }
 
-/* ── corner pills (hero): avatar toggle + reroll ──────────────── */
-/* Same neon pill as .about-trigger, stacked in the bottom-right corner. */
-.corner-triggers {
-    position: fixed;
-    right: 16px;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
-    z-index: 2;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 6px;
-}
-
+/* ── corner pill (intro skip) ─────────────────────────────────── */
+/* Same neon pill as .about-trigger; positioned by .intro-skip. */
 .corner-pill {
     pointer-events: auto;
     cursor: pointer;
@@ -690,6 +726,9 @@ body {
 .figdialog__stage {
     background: #050505;
     min-height: 160px;
+    /* Bounded box: the player contain-fits inside it, so tall figures letterbox
+       instead of blowing the dialog past the viewport (they used to clip). */
+    max-height: min(55dvh, 420px);
     display: flex;
     align-items: center;
     justify-content: center;

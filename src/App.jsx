@@ -99,17 +99,11 @@ export default function App() {
   const [figures, setFigures] = useState(null);
   // Figure tapped on the wall → info dialog (name, author, downloads).
   const [dialogFigure, setDialogFigure] = useState(null);
-  // User toggle: hide the eyeballz avatar so the ASCII wall is unobstructed.
-  // Persisted so the choice survives reloads.
-  const [avatarHidden, setAvatarHidden] = useState(
-    () => localStorage.getItem("avatarHidden") === "1",
-  );
-  const toggleAvatar = () => {
-    setAvatarHidden((h) => {
-      localStorage.setItem("avatarHidden", h ? "0" : "1");
-      return !h;
-    });
-  };
+  // Hide the eyeballz avatar so the ASCII wall is unobstructed. The corner-pill
+  // toggle moved out of the hero (destined for a future settings section), so
+  // this is pinned to false for now — the plumbing below (intro skip, preload
+  // short-circuit, conditional mount) stays wired for when the control returns.
+  const [avatarHidden] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   // Section the About overlay should scroll to once open (set by the header shortcuts).
   const [aboutTarget, setAboutTarget] = useState(null);
@@ -173,6 +167,9 @@ export default function App() {
   // decays to the settings baseline over ~4s. The decay outlives the short "face"
   // phase (it keeps shimmering through disperse and into the roam), so the tween is
   // only killed on skip/unmount — and never leaves the face glitched.
+  // Phones decay faster: while any distortion uniform is non-zero the avatar keeps
+  // re-rendering (render + asciify) continuously, and that window overlaps the wall
+  // roam — 2.5s trims the contention without losing the reveal moment.
   const distortTweenRef = useRef(null);
   useEffect(() => {
     if (introPhase === "face" && !distortTweenRef.current) {
@@ -180,7 +177,7 @@ export default function App() {
       viewerRef.current?.setIntroDistortion(1);
       distortTweenRef.current = gsap.to(proxy, {
         v: 0,
-        duration: 4,
+        duration: window.matchMedia?.("(pointer: coarse)").matches ? 2.5 : 4,
         ease: "power2.out",
         onUpdate: () => viewerRef.current?.setIntroDistortion(proxy.v),
       });
@@ -197,8 +194,8 @@ export default function App() {
   // and a tiny metadata call (~2KB — no frame data) blends in random approved
   // community figures. Each plane then fetches its own JSON lazily inside the
   // wall, so nothing heavy ever sits on the reveal's critical path. Re-running
-  // this (the reroll button) produces a fresh random pick + a fresh random
-  // plane assignment; already-seen figure JSONs come straight from cache.
+  // this (a future reroll control in the settings section) produces a fresh
+  // random pick + plane assignment; seen figure JSONs come straight from cache.
   const loadPool = useCallback(async () => {
     let community = [];
     try {
@@ -382,25 +379,6 @@ export default function App() {
                 setAboutOpen(true);
               }}
             />
-            {/* Bottom-right pills: avatar visibility + wall reroll. */}
-            <div className="corner-triggers">
-              <button
-                type="button"
-                className="corner-pill"
-                onClick={toggleAvatar}
-                title={avatarHidden ? "show the avatar" : "hide the avatar to see the wall"}
-              >
-                {avatarHidden ? "☻ show face" : "☻ hide face"}
-              </button>
-              <button
-                type="button"
-                className="corner-pill"
-                onClick={loadPool}
-                title="load a new random set of figures"
-              >
-                ↻ reroll
-              </button>
-            </div>
             <div className="about-trigger-group">
               {showScrollHint && (
                 <span className="about-trigger-caret" aria-hidden="true">
