@@ -146,7 +146,7 @@
      instead of growing to the <pre>'s intrinsic width and overflowing. */
     .create-page .stage-row {
         display: flex;
-        flex-direction: column;
+        flex-direction: column-reverse;
         gap: 1rem;
         align-items: stretch;
     }
