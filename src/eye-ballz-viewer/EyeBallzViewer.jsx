@@ -53,6 +53,13 @@ const effectiveAsciiResolution = (baseRes, containerWidth) =>
       )
     : baseRes;
 
+// Displacement mesh density (segments per side). The depth maps are low-frequency:
+// A/B via screenshots showed even 128 is indistinguishable from 256 through the ASCII
+// output; 192 keeps headroom for the raw-canvas/backplate modes at ~44% less vertex
+// work than 256. Overridable for A/B testing via ?seg=128 (same pattern as App's ?grid).
+const PLANE_SEGMENTS =
+  Number(new URLSearchParams(window.location.search).get("seg")) || 192;
+
 // Smallest the floating window can be resized to (px), in `windowed` mode.
 const MIN_WINDOW = 240;
 const easeInOutCubic = (t) =>
@@ -401,7 +408,10 @@ function EyeBallzViewerInner(
     // (blank) in the ASCII effect instead of a black border of dense chars.
     const renderer = new WebGLRenderer({
       canvas,
-      antialias: true,
+      // MSAA only where it's visible: at DPR>=2 the capped-DPR supersampling already
+      // smooths edges (and in ASCII mode the canvas is downsampled to glyphs anyway),
+      // so skipping it frees fill rate on exactly the devices that need it.
+      antialias: window.devicePixelRatio < 2,
       alpha: true,
     });
     renderer.setSize(width, height);
@@ -424,7 +434,7 @@ function EyeBallzViewerInner(
 
     // 256×256 (~131k tris) is well past the perceptible threshold for the low-frequency
     // depth maps and the default ASCII output, at ¼ the vertex work of 512×512.
-    const geometry = new PlaneGeometry(1, 1, 256, 256);
+    const geometry = new PlaneGeometry(1, 1, PLANE_SEGMENTS, PLANE_SEGMENTS);
     const mesh = new Mesh(geometry, material);
     scene.add(mesh);
 
