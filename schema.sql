@@ -4,6 +4,12 @@
 --
 -- Apply:  npx wrangler d1 execute ascii-figures --local  --file=schema.sql
 --         npx wrangler d1 execute ascii-figures --remote --file=schema.sql
+--
+-- Migrating an EXISTING database (the CREATE above is IF NOT EXISTS, so it won't
+-- add new columns). Run once per environment — it errors "duplicate column" if
+-- already applied, which is safe to ignore:
+--   npx wrangler d1 execute ascii-figures --local  --command="ALTER TABLE figures ADD COLUMN edge_thumb TEXT"
+--   npx wrangler d1 execute ascii-figures --remote --command="ALTER TABLE figures ADD COLUMN edge_thumb TEXT"
 CREATE TABLE IF NOT EXISTS figures (
   id TEXT PRIMARY KEY,                 -- crypto.randomUUID(), doubles as the R2 key
   name TEXT NOT NULL,
@@ -18,6 +24,7 @@ CREATE TABLE IF NOT EXISTS figures (
   thumb TEXT NOT NULL,                 -- stride-downsampled frames[thumb_frame], <=80 cols
   thumb_cols INTEGER NOT NULL,
   thumb_rows INTEGER NOT NULL,
+  edge_thumb TEXT,                     -- same-stride downsample of the edge layer (NULL unless edge-colored)
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved')),
   hero INTEGER NOT NULL DEFAULT 0,     -- 1 = also appears on the hero wall (approved only)
   style TEXT,                          -- validated style block as JSON, NULL = default look

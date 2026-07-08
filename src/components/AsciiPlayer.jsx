@@ -36,7 +36,14 @@ export default function AsciiPlayer({
   label,
 }) {
   const ref = useRef(null);
+  const edgeRef = useRef(null); // overlay <pre> for a tinted edge layer (optional)
+  const wrapperRef = useRef(null); // grid stack that holds both <pre>s when edges exist
   const [autoPx, setAutoPx] = useState(null);
+
+  // A figure carries a separate edge layer only when its creator chose a
+  // distinct edge color. Each entry pairs 1:1 with `frames`; blanks are spaces,
+  // so stacking it over the base reproduces the converter's two-layer look.
+  const hasEdges = Array.isArray(data?.edgeFrames) && data.edgeFrames.length > 0;
 
   // ── playback ──
   useEffect(() => {
@@ -45,14 +52,18 @@ export default function AsciiPlayer({
     if (!el || !frames || frames.length === 0) return;
 
     const isColor = !!data.color;
-    const write = (frame) => {
+    const edgeFrames = hasEdges ? data.edgeFrames : null;
+    const write = (i) => {
+      const frame = frames[i];
       // Color frames are HTML (tinted spans) and must go through innerHTML;
       // plain frames use textContent so glyphs like < and & render literally.
       if (isColor) el.innerHTML = frame;
       else el.textContent = frame;
+      // The edge layer is always plain text → textContent (never innerHTML).
+      if (edgeRef.current) edgeRef.current.textContent = edgeFrames?.[i] ?? '';
     };
 
-    write(frames[0]);
+    write(0);
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (reduce || frames.length <= 1) return;
 
@@ -73,13 +84,13 @@ export default function AsciiPlayer({
         const next = i + 1;
         if (next >= frames.length && !loop) return; // hold on the last frame
         i = next % frames.length;
-        write(frames[i]);
+        write(i);
       }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [data, loop]);
+  }, [data, loop, hasEdges]);
 
   // ── pixel sizing (width / fit) ──
   // Declared after playback so frame 0 is already written when we measure. The
@@ -92,7 +103,9 @@ export default function AsciiPlayer({
       setAutoPx(null);
       return;
     }
-    const container = el.parentElement;
+    // When an edge overlay is present the <pre> sits inside a grid wrapper, so
+    // the box we fit into is the wrapper's parent — otherwise it's the <pre>'s.
+    const container = (wrapperRef.current || el).parentElement;
     const basePx = fontSize ?? data?.cellPx ?? 12;
     const measure = () => {
       const natW = el.offsetWidth;
@@ -127,24 +140,55 @@ export default function AsciiPlayer({
       letterSpacing: s.letterSpacing ? `${s.letterSpacing}em` : 0,
       color: s.color !== STYLE_DEFAULTS.color ? s.color : undefined,
       background: s.background !== STYLE_DEFAULTS.background ? s.background : undefined,
+      // The edge glyphs' own color (falls back to the text color in resolveStyle).
+      edgeColor: s.edgeColor,
     };
   }, [data]);
 
-  return (
+  const preStyle = {
+    // Mirror the converter's .preview so the grid aligns identically.
+    whiteSpace: 'pre',
+    margin: 0,
+    fontSize: `${px}px`,
+    ...figStyle,
+    edgeColor: undefined, // not a CSS property — never leak it onto the element
+    ...style,
+  };
+
+  const basePre = (
     <pre
       ref={ref}
-      className={className}
+      className={hasEdges ? undefined : className}
       role={label ? 'img' : undefined}
       aria-label={label}
       aria-hidden={label ? undefined : true}
-      style={{
-        // Mirror the converter's .preview so the grid aligns identically.
-        whiteSpace: 'pre',
-        margin: 0,
-        fontSize: `${px}px`,
-        ...figStyle,
-        ...style,
-      }}
+      style={hasEdges ? { ...preStyle, gridArea: '1 / 1' } : preStyle}
     />
+  );
+
+  if (!hasEdges) return basePre;
+
+  // Two-layer render: base ramp and the tinted edge glyphs share one grid cell
+  // so they overlap pixel-for-pixel while carrying their own colors. Only the
+  // base pre is measured/animated for sizing; the overlay mirrors its metrics.
+  return (
+    <div
+      ref={wrapperRef}
+      className={className}
+      style={{ display: 'grid', placeItems: 'center', ...(style?.background ? { background: style.background } : null) }}
+    >
+      {basePre}
+      <pre
+        ref={edgeRef}
+        aria-hidden="true"
+        style={{
+          ...preStyle,
+          gridArea: '1 / 1',
+          color: figStyle.edgeColor,
+          background: undefined, // transparent so the base layer shows through
+          pointerEvents: 'none',
+        }}
+      />
+    </div>
   );
 }

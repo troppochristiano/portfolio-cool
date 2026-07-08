@@ -81,7 +81,7 @@ function validateStyle(style) {
     }
     if (v !== 1) out.lineHeight = v;
   }
-  for (const key of ['background', 'color']) {
+  for (const key of ['background', 'color', 'edgeColor']) {
     if (style[key] !== undefined) {
       if (typeof style[key] !== 'string' || !HEX_COLOR.test(style[key])) {
         return fail('invalid_style_color', `${key} must be a #rrggbb hex color`);
@@ -167,6 +167,27 @@ export function validateUpload(body) {
     }
   }
 
+  // Optional edge layer: when a figure was made with a distinct edge color the
+  // tinted edge glyphs ride on their own frames. Same contract as `frames`
+  // (plain, whitelisted, exact shape, one entry per base frame) so it stays
+  // safe under textContent — no color:true / innerHTML path is ever opened.
+  let edgeFrames = fig.edgeFrames;
+  if (edgeFrames !== undefined && edgeFrames !== null) {
+    if (!Array.isArray(edgeFrames) || edgeFrames.length !== frames.length)
+      return fail('invalid_edge_frames', 'edgeFrames must match frames one-to-one');
+    for (let i = 0; i < edgeFrames.length; i++) {
+      const f = edgeFrames[i];
+      if (typeof f !== 'string') return fail('invalid_edge_frames', 'every edge frame must be a string');
+      total += f.length;
+      if (total > LIMITS.TOTAL_CHARS_MAX)
+        return fail('too_many_chars', `frames exceed ${LIMITS.TOTAL_CHARS_MAX} total characters`);
+      if (f.length !== expectedLen) return fail('invalid_edge_frame_shape', `edge frame ${i} has the wrong dimensions`);
+      if (BAD_CHAR.test(f)) return fail('invalid_edge_frame_chars', `edge frame ${i} contains disallowed characters`);
+    }
+  } else {
+    edgeFrames = null;
+  }
+
   const thumbFrame = body.thumbFrame ?? 0;
   if (!isInt(thumbFrame) || thumbFrame < 0 || thumbFrame >= frames.length)
     return fail('invalid_thumb_frame', 'thumbFrame must index an existing frame');
@@ -176,7 +197,10 @@ export function validateUpload(body) {
 
   return {
     ok: true,
-    value: { name, author, thumbFrame, cols, rows, fps, cellPx, frames, style: styleResult.value },
+    value: {
+      name, author, thumbFrame, cols, rows, fps, cellPx, frames,
+      edgeFrames, style: styleResult.value,
+    },
   };
 }
 
@@ -184,19 +208,24 @@ export function validateUpload(body) {
  * Downsample one validated frame to a small text thumbnail (nearest-neighbor
  * over the character grid, same stride both axes so aspect is preserved).
  */
-export function makeThumb(frame, cols, rows) {
+export function makeThumb(frame, cols, rows, edgeFrame) {
   const step = Math.max(1, Math.ceil(cols / LIMITS.THUMB_COLS_MAX));
-  const lines = frame.split('\n');
-  const out = [];
-  for (let y = 0; y < rows; y += step) {
-    const line = lines[y];
-    let row = '';
-    for (let x = 0; x < cols; x += step) row += line[x];
-    out.push(row);
-  }
+  const downsample = (src) => {
+    const lines = src.split('\n');
+    const out = [];
+    for (let y = 0; y < rows; y += step) {
+      const line = lines[y];
+      let row = '';
+      for (let x = 0; x < cols; x += step) row += line[x];
+      out.push(row);
+    }
+    return out.join('\n');
+  };
   return {
-    thumb: out.join('\n'),
+    thumb: downsample(frame),
     thumbCols: Math.ceil(cols / step),
     thumbRows: Math.ceil(rows / step),
+    // Same-stride downsample of the edge layer so the card thumb keeps its tint.
+    edgeThumb: edgeFrame ? downsample(edgeFrame) : null,
   };
 }

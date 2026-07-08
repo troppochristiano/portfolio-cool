@@ -32,7 +32,7 @@ export async function onRequestGet({ request, env }) {
       `SELECT id, name, author, cols, rows, fps, cell_px AS cellPx,
               frames_count AS framesCount, thumb_frame AS thumbFrame,
               thumb, thumb_cols AS thumbCols, thumb_rows AS thumbRows,
-              style, created_at AS createdAt
+              edge_thumb AS edgeThumb, style, created_at AS createdAt
        FROM figures WHERE ${where}
        ORDER BY created_at DESC, id DESC
        LIMIT ${limit + 1}`,

@@ -19,7 +19,7 @@ export async function onRequestGet({ request, env }) {
       `SELECT id, name, author, cols, rows, fps, cell_px AS cellPx,
               frames_count AS framesCount, size_bytes AS sizeBytes,
               thumb_frame AS thumbFrame, thumb, thumb_cols AS thumbCols,
-              thumb_rows AS thumbRows, style, status, hero, created_at AS createdAt
+              thumb_rows AS thumbRows, edge_thumb AS edgeThumb, style, status, hero, created_at AS createdAt
        FROM figures WHERE ${where}
        ORDER BY created_at ${status === 'pending' ? 'ASC' : 'DESC'}`,
     );

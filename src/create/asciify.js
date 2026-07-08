@@ -298,6 +298,36 @@ export function indicesToFrame(indices, cols, rows, glyphs) {
 }
 
 /**
+ * Like indicesToFrame, but splits edge glyphs onto their own layer so they can
+ * be tinted independently. Returns two same-shape plain-text frames:
+ *   base — ramp glyphs; edge cells (codes ≤ -2) rendered as ' '
+ *   edge — only edge glyphs; ramp/blank cells rendered as ' '
+ * Stacking base under edge reproduces indicesToFrame exactly (edges win on top),
+ * which is what the two-layer renderers rely on.
+ */
+export function indicesToLayers(indices, cols, rows, glyphs) {
+  const base = new Array(rows);
+  const edge = new Array(rows);
+  for (let y = 0; y < rows; y++) {
+    let b = '';
+    let e = '';
+    for (let x = 0; x < cols; x++) {
+      const idx = indices[y * cols + x];
+      if (idx < -1) {
+        b += ' ';
+        e += EDGE_GLYPHS[-2 - idx];
+      } else {
+        b += idx === -1 ? ' ' : glyphs[idx];
+        e += ' ';
+      }
+    }
+    base[y] = b;
+    edge[y] = e;
+  }
+  return { base: base.join('\n'), edge: edge.join('\n') };
+}
+
+/**
  * The whole chain in one call — what the live preview and the bake use.
  * data: Uint8ClampedArray from ctx.getImageData(...).data, srcW×srcH.
  * opts: { cols, rows, ramp, invert, gamma, contrast, key, dither, edge }.
@@ -315,6 +345,26 @@ export function convertFrame(data, srcW, srcH, opts) {
   const indices = quantizeLuma(luma, cols, rows, glyphs.length, dither);
   if (edgeMap) applyEdges(indices, edgeMap, edge.mode);
   return indicesToFrame(indices, cols, rows, glyphs);
+}
+
+/**
+ * Same pipeline as convertFrame, but returns the ramp output and the edge
+ * glyphs as two separate plain-text frames: { frame, edgeFrame }. Used when the
+ * edge color differs from the text color so each layer can be tinted on its own.
+ * Callers only invoke this when edge mode is on; with edges off the split is
+ * pointless (edgeFrame would be all spaces) — use convertFrame instead.
+ */
+export function convertFrameLayers(data, srcW, srcH, opts) {
+  const { cols, rows, ramp, invert, gamma, contrast = 1, key, dither = 'off', edge } = opts;
+  const glyphs = toGlyphs(ramp);
+  const luma = lumaGrid(data, srcW, srcH, cols, rows, key);
+  adjustLuma(luma, gamma, invert, contrast);
+  const edgeOn = edge && edge.mode && edge.mode !== 'off';
+  const edgeMap = edgeOn ? detectEdges(luma, cols, rows, edge.threshold ?? 0.25) : null;
+  const indices = quantizeLuma(luma, cols, rows, glyphs.length, dither);
+  if (edgeMap) applyEdges(indices, edgeMap, edge.mode);
+  const { base, edge: edgeLayer } = indicesToLayers(indices, cols, rows, glyphs);
+  return { frame: base, edgeFrame: edgeLayer };
 }
 
 /** Estimate gzipped size using the browser's CompressionStream. */

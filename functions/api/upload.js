@@ -61,19 +61,23 @@ export async function onRequestPost({ request, env, waitUntil }) {
 
     const result = validateUpload(body);
     if (!result.ok) return error(result.code, result.message, 400);
-    const { name, author, thumbFrame, cols, rows, fps, cellPx, frames, style } = result.value;
+    const { name, author, thumbFrame, cols, rows, fps, cellPx, frames, edgeFrames, style } = result.value;
 
     const id = crypto.randomUUID();
     const createdAt = new Date().toISOString();
     // Canonical stored document — exactly the figure.json player contract.
     // `style` is the validated visual block (font key / spacing / line height /
-    // colors); omitted entirely for default-look figures.
+    // colors); omitted entirely for default-look figures. `edgeFrames` is the
+    // optional tinted edge layer (present only for distinct-edge-color figures).
     const doc = JSON.stringify({
       cols, rows, fps, color: false, cellPx, name, author, createdAt,
       ...(style ? { style } : {}),
       frames,
+      ...(edgeFrames ? { edgeFrames } : {}),
     });
-    const { thumb, thumbCols, thumbRows } = makeThumb(frames[thumbFrame], cols, rows);
+    const { thumb, thumbCols, thumbRows, edgeThumb } = makeThumb(
+      frames[thumbFrame], cols, rows, edgeFrames?.[thumbFrame],
+    );
 
     await env.FIGURES.put(`figures/${id}.json`, doc, {
       httpMetadata: { contentType: 'application/json' },
@@ -82,11 +86,11 @@ export async function onRequestPost({ request, env, waitUntil }) {
       await env.DB.prepare(
         `INSERT INTO figures
            (id, name, author, cols, rows, fps, cell_px, frames_count, size_bytes,
-            thumb_frame, thumb, thumb_cols, thumb_rows, style, status, created_at, ip_hash)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 'pending', ?15, ?16)`,
+            thumb_frame, thumb, thumb_cols, thumb_rows, edge_thumb, style, status, created_at, ip_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 'pending', ?16, ?17)`,
       ).bind(
         id, name, author, cols, rows, fps, cellPx, frames.length, doc.length,
-        thumbFrame, thumb, thumbCols, thumbRows, style ? JSON.stringify(style) : null,
+        thumbFrame, thumb, thumbCols, thumbRows, edgeThumb, style ? JSON.stringify(style) : null,
         createdAt, hash,
       ).run();
     } catch (e) {

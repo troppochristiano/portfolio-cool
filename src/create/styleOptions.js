@@ -35,7 +35,7 @@ const HEX_RE = /^#[0-9a-f]{6}$/i;
  * Returns null when everything is at default (the block is omitted entirely,
  * keeping old figures and plain bakes byte-identical to before).
  */
-export function buildStyle({ font, letterSpacing, lineHeight, background, color }) {
+export function buildStyle({ font, letterSpacing, lineHeight, background, color, edgeColor }) {
   const out = {};
   if (font && font !== STYLE_DEFAULTS.font && FONT_STACKS[font]) out.font = font;
   if (Number.isFinite(letterSpacing) && letterSpacing > 0) out.letterSpacing = letterSpacing;
@@ -43,8 +43,13 @@ export function buildStyle({ font, letterSpacing, lineHeight, background, color 
   if (HEX_RE.test(background || '') && background.toLowerCase() !== STYLE_DEFAULTS.background) {
     out.background = background.toLowerCase();
   }
-  if (HEX_RE.test(color || '') && color.toLowerCase() !== STYLE_DEFAULTS.color) {
-    out.color = color.toLowerCase();
+  // The effective text color (validated `color`, else the default) — edgeColor
+  // only travels when it actually differs from it, so default-matched edges add
+  // nothing to the figure.
+  const textColor = HEX_RE.test(color || '') ? color.toLowerCase() : STYLE_DEFAULTS.color;
+  if (textColor !== STYLE_DEFAULTS.color) out.color = textColor;
+  if (HEX_RE.test(edgeColor || '') && edgeColor.toLowerCase() !== textColor) {
+    out.edgeColor = edgeColor.toLowerCase();
   }
   return Object.keys(out).length ? out : null;
 }
@@ -76,5 +81,11 @@ export function resolveStyle(style) {
     ),
     background: HEX_RE.test(s.background || '') ? s.background : STYLE_DEFAULTS.background,
     color: HEX_RE.test(s.color || '') ? s.color : STYLE_DEFAULTS.color,
+    // Edge glyphs fall back to the text color when no distinct edgeColor is set.
+    edgeColor: HEX_RE.test(s.edgeColor || '')
+      ? s.edgeColor
+      : HEX_RE.test(s.color || '')
+        ? s.color
+        : STYLE_DEFAULTS.color,
   };
 }

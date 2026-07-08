@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import gsap from "gsap";
 import {
   EyeBallzViewer,
   generateSteps,
@@ -7,10 +8,11 @@ import {
 import { photos } from "./photos";
 import { Nav } from "./components/Nav";
 import { AsciiGallery } from "./components/AsciiGallery";
-import { Loader } from "./components/Loader";
+import { IntroOverlay } from "./components/IntroOverlay";
 import { AboutOverlay } from "./components/AboutOverlay";
 import FigureDialog from "./components/FigureDialog";
 import { getRandomFigures } from "./lib/api";
+import { preloadImage, runPool } from "./lib/preload";
 
 // Map photos.js entries into the viewer's photo-config shape (same as the bundled demo),
 // pointing thumbnails at the public/photos copy.
@@ -65,11 +67,17 @@ const PREVIEW_GRID = (() => {
     : null;
 })();
 
+// Reduced motion: skip the cinematic intro entirely — a plain black cover fades
+// out once the scene is warm. Evaluated once; mid-session OS toggles are rare
+// and a reload picks the change up.
+const REDUCED_MOTION =
+  typeof window !== "undefined" &&
+  window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
 export default function App() {
   // Staged reveal so the hero's GPU warm-up (shader compile + texture uploads) happens
-  // behind the overlay: preload HTTP assets -> mount scene under overlay -> wait until the
-  // avatar reports GPU-warm -> fade the overlay. Avoids post-reveal jank on the focal
-  // point. The ambient ASCII wall fades itself in afterward and isn't part of this gate.
+  // behind the intro: preload HTTP assets -> mount scene hidden -> wait until the
+  // avatar reports GPU-warm -> reveal. Avoids post-reveal jank on the focal point.
   const [preloaded, setPreloaded] = useState(false);
   const [avatarReady, setAvatarReady] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
@@ -98,6 +106,77 @@ export default function App() {
   // ~3.3MB of figure JSON; it fades itself in a beat later behind the hero.
   // A hidden avatar can never report ready, so it must not hold the reveal either.
   const warm = avatarReady || timedOut || avatarHidden;
+
+  // Cinematic intro state machine. Phases: swarm forms the headline ("forming",
+  // doubling as the loading screen) -> face fades in behind it ("face") -> swarm
+  // scatters ("disperse") -> gallery planes roam then settle ("roam") -> "done".
+  // Reduced motion starts at "done" (plain cover fade instead).
+  const [introPhase, setIntroPhase] = useState(
+    REDUCED_MOTION ? "done" : "forming",
+  );
+  const [textFormed, setTextFormed] = useState(false);
+  // Reduced-motion cover: unmounted after its fade-out transition ends.
+  const [coverGone, setCoverGone] = useState(!REDUCED_MOTION);
+  const introDone = introPhase === "done";
+  const skipIntro = () => setIntroPhase("done");
+
+  // forming -> face once the headline is assembled AND the avatar is warm; with the
+  // avatar hidden there is no face phase — go straight to the scatter.
+  useEffect(() => {
+    if (introPhase !== "forming" || !textFormed) return;
+    if (avatarHidden) {
+      if (preloaded) setIntroPhase("disperse");
+    } else if (warm) {
+      setIntroPhase("face");
+    }
+  }, [introPhase, textFormed, warm, avatarHidden, preloaded]);
+
+  // face -> disperse once the avatar's 1s opacity fade has landed (plus a beat).
+  useEffect(() => {
+    if (introPhase !== "face") return;
+    const t = window.setTimeout(() => setIntroPhase("disperse"), 1400);
+    return () => window.clearTimeout(t);
+  }, [introPhase]);
+
+  // Imperative handle into the eyeballz viewer — the intro drives its look-around
+  // gesture and reveal distortion through the viewer's ref API. Neutral pose + mouse
+  // lockout come from the `animationMode` prop instead (see the viewer element below):
+  // while it's on, the face rests forward-facing and ignores the cursor entirely;
+  // flipping it off arms the viewer's eased return to mouse tracking.
+  const viewerRef = useRef(null);
+
+  // During the roam the face looks around — a scripted sweep through every extreme
+  // gaze pose (the viewer's own gesture engine), ending back at neutral. Skipping
+  // mid-sweep aborts the gesture so mouse-look isn't locked for its remainder.
+  useEffect(() => {
+    if (introPhase !== "roam") return;
+    viewerRef.current?.playGesture("lookAround");
+    return () => viewerRef.current?.stopGesture();
+  }, [introPhase]);
+
+  // Reveal glitch: the face fades in under heavy shader glitch/noise/rgb-shift that
+  // decays to the settings baseline over ~4s. The decay outlives the short "face"
+  // phase (it keeps shimmering through disperse and into the roam), so the tween is
+  // only killed on skip/unmount — and never leaves the face glitched.
+  const distortTweenRef = useRef(null);
+  useEffect(() => {
+    if (introPhase === "face" && !distortTweenRef.current) {
+      const proxy = { v: 1 };
+      viewerRef.current?.setIntroDistortion(1);
+      distortTweenRef.current = gsap.to(proxy, {
+        v: 0,
+        duration: 4,
+        ease: "power2.out",
+        onUpdate: () => viewerRef.current?.setIntroDistortion(proxy.v),
+      });
+    }
+    if (introDone && distortTweenRef.current) {
+      distortTweenRef.current.kill();
+      distortTweenRef.current = null;
+      viewerRef.current?.setIntroDistortion(0);
+    }
+  }, [introPhase, introDone]);
+  useEffect(() => () => distortTweenRef.current?.kill(), []);
 
   // Build the wall's descriptor pool: the static clips are known synchronously,
   // and a tiny metadata call (~2KB — no frame data) blends in random approved
@@ -131,12 +210,12 @@ export default function App() {
   // AboutOverlay): a downward wheel on the closed hero scrubs the overlay open. The old
   // one-shot deltaY>24 listener lived here; it's gone so the two don't fight.
 
-  // Reveal the "^" open hint once the scene is up (both pointer types — it signals the
-  // scroll/swipe-up-to-open gesture); hide it for good the first time the overlay opens.
+  // Reveal the "^" open hint once the intro is over (both pointer types — it signals
+  // the scroll/swipe-up-to-open gesture); hide it for good once the overlay opens.
   useEffect(() => {
-    if (!preloaded) return;
+    if (!introDone) return;
     setShowScrollHint(true);
-  }, [preloaded]);
+  }, [introDone]);
 
   useEffect(() => {
     if (aboutOpen) setShowScrollHint(false);
@@ -174,62 +253,93 @@ export default function App() {
     return urls;
   }, []);
 
-  // With the avatar hidden there's nothing to warm — hand the Loader an empty
-  // list so the reveal is instant. Memoized: a fresh [] every render would
-  // re-trigger the Loader's preload effect in a loop.
+  // With the avatar hidden there's nothing to warm — an empty list makes the
+  // preload instant. Memoized: a fresh [] every render would re-trigger the
+  // preload effect in a loop.
   const preloadUrls = useMemo(
     () => (avatarHidden ? [] : imageUrls),
     [avatarHidden, imageUrls],
   );
 
+  // Warm the avatar assets (formerly the Loader's job). Lives here — not in the
+  // intro overlay — so skipping the intro can never cancel the preload that gates
+  // the scene mount.
+  useEffect(() => {
+    let cancelled = false;
+    const tasks = preloadUrls.map((u) => () => preloadImage(u));
+    runPool(tasks, 12).then(() => {
+      if (!cancelled) setPreloaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [preloadUrls]);
+
   return (
     <>
-      <Loader
-        imageUrls={preloadUrls}
-        onPreloaded={() => setPreloaded(true)}
-        done={warm}
-      />
+      {/* Phases 1–3: swarm forms the headline, holds while the face fades in, then
+          scatters. Unmounts for good once the roam starts (or on skip). */}
+      {(introPhase === "forming" ||
+        introPhase === "face" ||
+        introPhase === "disperse") && (
+        <IntroOverlay
+          phase={introPhase === "disperse" ? "disperse" : "forming"}
+          onFormed={() => setTextFormed(true)}
+          onDispersed={() =>
+            setIntroPhase((p) => (p === "disperse" ? "roam" : p))
+          }
+        />
+      )}
+      {!introDone && (
+        <button
+          type="button"
+          className="corner-pill intro-skip"
+          onClick={skipIntro}
+        >
+          skip intro
+        </button>
+      )}
+      {/* Reduced motion: no swarm/roam — a plain cover that fades once warm. */}
+      {REDUCED_MOTION && !coverGone && (
+        <div
+          className={`intro-cover${warm ? " is-hidden" : ""}`}
+          onTransitionEnd={() => setCoverGone(true)}
+          aria-hidden="true"
+        />
+      )}
       {preloaded && (
         <>
-          <Nav
-            onHome={() => setAboutOpen(false)}
-            onNavigate={(id) => {
-              setAboutTarget(id);
-              setAboutOpen(true);
-            }}
-          />
           {figures && figures.length > 0 && (
-            // The wall fades itself in once its first CSS3D render lands; it no longer
-            // gates the reveal, so no onReady wiring is needed here.
-            <AsciiGallery figures={figures} onSelect={setDialogFigure} />
+            // The wall builds (and lazy-fetches its figures) behind the intro, then
+            // roams into place when the intro reaches the "roam" phase.
+            <AsciiGallery
+              figures={figures}
+              onSelect={setDialogFigure}
+              introState={
+                introDone ? "done" : introPhase === "roam" ? "roam" : "waiting"
+              }
+              onSettled={() =>
+                setIntroPhase((p) => (p === "roam" ? "done" : p))
+              }
+            />
           )}
-          {/* Bottom-right pills: avatar visibility + wall reroll. */}
-          <div className="corner-triggers">
-            <button
-              type="button"
-              className="corner-pill"
-              onClick={toggleAvatar}
-              title={avatarHidden ? "show the avatar" : "hide the avatar to see the wall"}
-            >
-              {avatarHidden ? "☻ show face" : "☻ hide face"}
-            </button>
-            <button
-              type="button"
-              className="corner-pill"
-              onClick={loadPool}
-              title="load a new random set of figures"
-            >
-              ↻ reroll
-            </button>
-          </div>
           {!avatarHidden && (
-            <div className="hero-avatar">
+            <div
+              className={`hero-avatar${
+                introPhase !== "forming" ? " is-revealed" : ""
+              }`}
+            >
               <EyeBallzViewer
+                ref={viewerRef}
                 photos={photoConfigs}
                 urlFor={urlFor}
                 status="neutral"
                 autoBlink
                 transparent
+                // Intro: hold the face neutral and ignore the cursor until the intro
+                // is over (the lookAround gesture still plays over this). Flipping to
+                // false hands control back to the mouse with an eased first move.
+                animationMode={!introDone}
                 previewGrid={PREVIEW_GRID}
                 // debug={true}
                 // Show the forehead "rub to smile" trigger box for calibration. Set to false
@@ -240,19 +350,52 @@ export default function App() {
               />
             </div>
           )}
-          <div className="about-trigger-group">
-            {showScrollHint && (
-              <span className="about-trigger-caret" aria-hidden="true">
-                ^
-              </span>
-            )}
-            <button
-              type="button"
-              className="about-trigger"
-              onClick={() => setAboutOpen(true)}
-            >
-              About
-            </button>
+        </>
+      )}
+      {/* UI chrome appears only once the intro is over, with a soft fade-in. */}
+      {preloaded && introDone && (
+        <>
+          <div className="ui-chrome">
+            <Nav
+              onHome={() => setAboutOpen(false)}
+              onNavigate={(id) => {
+                setAboutTarget(id);
+                setAboutOpen(true);
+              }}
+            />
+            {/* Bottom-right pills: avatar visibility + wall reroll. */}
+            <div className="corner-triggers">
+              <button
+                type="button"
+                className="corner-pill"
+                onClick={toggleAvatar}
+                title={avatarHidden ? "show the avatar" : "hide the avatar to see the wall"}
+              >
+                {avatarHidden ? "☻ show face" : "☻ hide face"}
+              </button>
+              <button
+                type="button"
+                className="corner-pill"
+                onClick={loadPool}
+                title="load a new random set of figures"
+              >
+                ↻ reroll
+              </button>
+            </div>
+            <div className="about-trigger-group">
+              {showScrollHint && (
+                <span className="about-trigger-caret" aria-hidden="true">
+                  ^
+                </span>
+              )}
+              <button
+                type="button"
+                className="about-trigger"
+                onClick={() => setAboutOpen(true)}
+              >
+                About
+              </button>
+            </div>
           </div>
           <AboutOverlay
             open={aboutOpen}

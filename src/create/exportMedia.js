@@ -52,14 +52,14 @@ function makeCanvas(data, { background, foreground } = {}) {
   ctx.textBaseline = 'top';
   const bg = background ?? st.background;
   const fg = foreground ?? st.color;
+  const edgeFg = st.edgeColor;
   // Vertically center each glyph row inside its (possibly taller) line box,
   // matching CSS line-height behavior.
   const yPad = (rowStep - px) / 2;
-  const drawFrame = (frame) => {
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = fg;
-    const lines = frame.split('\n');
+  // Paint one text layer with the current fillStyle (blanks are spaces, so
+  // stacking an edge layer over the base reproduces the on-screen two-layer look).
+  const paintLayer = (text) => {
+    const lines = text.split('\n');
     for (let y = 0; y < lines.length; y++) {
       const top = y * rowStep + yPad;
       if (spacingPx > 0) {
@@ -72,6 +72,16 @@ function makeCanvas(data, { background, foreground } = {}) {
       }
     }
   };
+  const drawFrame = (frame, edgeFrame) => {
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = fg;
+    paintLayer(frame);
+    if (edgeFrame) {
+      ctx.fillStyle = edgeFg;
+      paintLayer(edgeFrame);
+    }
+  };
   return { canvas, drawFrame };
 }
 
@@ -79,7 +89,8 @@ function makeCanvas(data, { background, foreground } = {}) {
 export function downloadPng(data, { frameIndex = 0, background, foreground } = {}) {
   return new Promise((resolve, reject) => {
     const { canvas, drawFrame } = makeCanvas(data, { background, foreground });
-    drawFrame(data.frames[Math.min(frameIndex, data.frames.length - 1)]);
+    const i = Math.min(frameIndex, data.frames.length - 1);
+    drawFrame(data.frames[i], data.edgeFrames?.[i]);
     canvas.toBlob((blob) => {
       if (!blob) return reject(new Error('png_failed'));
       downloadBlob(blob, `${safeName(data.name)}.png`);
@@ -109,7 +120,7 @@ export function downloadWebm(data, { background, foreground, onProgress } = {}) 
     const fps = Math.min(30, Math.max(1, data.fps || 12));
     const { canvas, drawFrame } = makeCanvas(data, { background, foreground });
 
-    drawFrame(data.frames[0]);
+    drawFrame(data.frames[0], data.edgeFrames?.[0]);
     const stream = canvas.captureStream(fps);
     const recorder = new MediaRecorder(stream, {
       mimeType: mime,
@@ -135,7 +146,7 @@ export function downloadWebm(data, { background, foreground, onProgress } = {}) 
         setTimeout(() => recorder.stop(), 250);
         return;
       }
-      drawFrame(data.frames[i]);
+      drawFrame(data.frames[i], data.edgeFrames?.[i]);
       onProgress?.(i / data.frames.length);
     }, 1000 / fps);
 

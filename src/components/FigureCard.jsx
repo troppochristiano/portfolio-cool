@@ -17,6 +17,9 @@ const thumbData = (item) => ({
   color: false,
   ...(item.style ? { style: item.style } : {}),
   frames: [item.thumb],
+  // Edge-colored figures ship a matching downsampled edge thumb; the player
+  // overlays it (tinted via style.edgeColor) so the card matches the figure.
+  ...(item.edgeThumb ? { edgeFrames: [item.edgeThumb] } : {}),
 });
 
 export default function FigureCard({ item, onSelect, badges, fetchData }) {

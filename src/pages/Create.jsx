@@ -4,6 +4,7 @@ import {
   SUPERSAMPLE,
   computeRows,
   convertFrame,
+  convertFrameLayers,
   hexToRgb,
   gzipSize,
   formatBytes,
@@ -20,6 +21,7 @@ import {
   buildStyle,
 } from "../create/styleOptions.js";
 import UploadModal from "../components/UploadModal.jsx";
+import PngFrameModal from "../components/PngFrameModal.jsx";
 import "./Create.css";
 
 const RAMP_PRESETS = {
@@ -66,7 +68,9 @@ export default function Create() {
   const compositeRef = useRef(null); // displayed <canvas> = photo + strokes; also the sample source
   const canvasRef = useRef(null); // offscreen sampler
   const previewRef = useRef(null); // <pre> the live ASCII is written to
+  const previewEdgeRef = useRef(null); // overlay <pre> for tinted edge glyphs (when split)
   const miniPreviewRef = useRef(null); // <pre> in the floating mobile mini-monitor
+  const miniPreviewEdgeRef = useRef(null); // overlay <pre> for the mini-monitor's edges
   const miniElRef = useRef(null); // the floating mini container (for drag)
   const miniPosRef = useRef(null); // dragged position {left, top} or null (default corner)
   const miniDragRef = useRef(null); // in-flight drag state
@@ -144,6 +148,10 @@ export default function Create() {
   // direction glyphs — see detectEdges in asciify.js.
   const [edgeMode, setEdgeMode] = useState("off"); // 'off' | 'overlay' | 'only'
   const [edgeThreshold, setEdgeThreshold] = useState(0.25);
+  // Edge glyph color. null = linked to the text color (the default look); a hex
+  // string means the user picked a distinct color, which splits edges onto their
+  // own tinted layer and rides into the figure as style.edgeColor.
+  const [edgeColor, setEdgeColor] = useState(null);
   const [cellAspect, setCellAspect] = useState(2);
   const [rampKey, setRampKey] = useState("classic");
   const [blockAvg, setBlockAvg] = useState(false);
@@ -155,13 +163,16 @@ export default function Create() {
   const [keyThreshold, setKeyThreshold] = useState(0.4);
   const [keyColor, setKeyColor] = useState("#3cba54");
 
-  // which settings categories are expanded
+  // which settings categories are expanded (key/edges live under the source
+  // preview, the rest are the rail blocks)
   const [openBlocks, setOpenBlocks] = useState({
     resolution: true,
     playback: true,
     characters: true,
     typography: true,
     effects: true,
+    key: true,
+    edges: true,
   });
   const toggleBlock = (id) => setOpenBlocks((o) => ({ ...o, [id]: !o[id] }));
 
@@ -177,6 +188,18 @@ export default function Create() {
   const [miniDismissed, setMiniDismissed] = useState(false); // user closed it (re-armed when the monitor scrolls back into view)
 
   const ramp = RAMP_PRESETS[rampKey] || RAMP_PRESETS.classic;
+  // The color edges actually render in (falls back to the text color when
+  // unlinked), and whether that warrants a separate tinted edge layer. Splitting
+  // only happens when edges are on AND their color truly differs from the text —
+  // otherwise the output is the single-string default, byte-for-byte.
+  const effectiveEdgeColor = edgeColor ?? fgColor;
+  const splitEdges =
+    edgeMode !== "off" &&
+    effectiveEdgeColor.toLowerCase() !== fgColor.toLowerCase();
+  // Whether the tinted edge overlay <pre> should exist: while editing when the
+  // live render is split, or while playing a baked figure that carries its own
+  // edge layer (its edgeFrames outlive later control changes).
+  const showEdgeLayer = splitEdges || (mode === "baked" && !!baked?.edgeFrames);
   // Photos/drawings are single stills — one frame, no transport.
   const isStill = sourceType !== "video";
   // The crop changes what's converted, so the aspect the rows derive from
@@ -216,7 +239,12 @@ export default function Create() {
       contrast,
       blockAvg,
       dither,
-      edge: { mode: edgeMode, threshold: edgeThreshold },
+      edge: {
+        mode: edgeMode,
+        threshold: edgeThreshold,
+        color: effectiveEdgeColor,
+      },
+      splitEdges,
       keyMode,
       keyThreshold,
       keyColor,
@@ -233,6 +261,8 @@ export default function Create() {
     dither,
     edgeMode,
     edgeThreshold,
+    effectiveEdgeColor,
+    splitEdges,
     keyMode,
     keyThreshold,
     keyColor,
@@ -508,6 +538,17 @@ export default function Create() {
     };
   }, [trim, loop]);
 
+  // Write the base glyphs (and, when split, the tinted edge overlay) to both
+  // the main monitor and the floating mini-monitor. The edge <pre>s are cleared
+  // when there's no edge layer so a stale overlay never lingers.
+  const writeLayers = useCallback((base, edge) => {
+    if (previewRef.current) previewRef.current.textContent = base;
+    if (miniPreviewRef.current) miniPreviewRef.current.textContent = base;
+    const e = edge ?? "";
+    if (previewEdgeRef.current) previewEdgeRef.current.textContent = e;
+    if (miniPreviewEdgeRef.current) miniPreviewEdgeRef.current.textContent = e;
+  }, []);
+
   // ── live preview rAF loop (no React state per frame) ──────────
   useEffect(() => {
     if (!hasSource || mode !== "live") return;
@@ -519,16 +560,16 @@ export default function Create() {
       const s = settingsRef.current;
       const src = activeSource();
       if (s && src && sourceReady(src) && s.rows > 0 && previewRef.current) {
-        const frame = sampleFrame(ctx, canvas, src, s);
-        previewRef.current.textContent = frame;
-        if (miniPreviewRef.current) miniPreviewRef.current.textContent = frame;
+        const out = sampleFrame(ctx, canvas, src, s);
+        if (typeof out === "string") writeLayers(out, null);
+        else writeLayers(out.frame, out.edgeFrame);
       }
       raf = requestAnimationFrame(render);
     };
     raf = requestAnimationFrame(render);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasSource, sourceType, mode]);
+  }, [hasSource, sourceType, mode, writeLayers]);
 
   // ── baked playback loop ───────────────────────────────────────
   useEffect(() => {
@@ -536,12 +577,9 @@ export default function Create() {
     const reduce = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
-    const el = previewRef.current;
-    const write = (frame) => {
-      el.textContent = frame;
-      if (miniPreviewRef.current) miniPreviewRef.current.textContent = frame;
-    };
-    write(baked.frames[0]);
+    const write = (i) =>
+      writeLayers(baked.frames[i], baked.edgeFrames?.[i] ?? null);
+    write(0);
     if (reduce || baked.frames.length <= 1) return;
     let raf = 0,
       i = 0,
@@ -551,13 +589,13 @@ export default function Create() {
       if (now - last >= interval) {
         last = now;
         i = (i + 1) % baked.frames.length;
-        write(baked.frames[i]);
+        write(i);
       }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [mode, baked]);
+  }, [mode, baked, writeLayers]);
 
   // ── fit the frame into the monitor ────────────────────────────
   // The <pre> renders at cols × pixel-size, which easily exceeds the
@@ -662,19 +700,26 @@ export default function Create() {
       Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)) * duration
     );
   };
-  const applyTrimDrag = (t) => {
+  const applyTrimPoint = (t, which /* 'in' | 'out' */) => {
     setTrim((prev) => {
       const s = prev?.start ?? 0;
       const en = prev?.end ?? duration;
       let next;
-      if (trimDragRef.current === "in")
-        next = { start: Math.min(t, en - MIN_TRIM), end: en };
+      if (which === "in") next = { start: Math.min(t, en - MIN_TRIM), end: en };
       else next = { start: s, end: Math.max(t, s + MIN_TRIM) };
       next.start = Math.max(0, next.start);
       next.end = Math.min(duration, next.end);
       // dragged back to the full clip → untrimmed
       return next.start <= 0.005 && next.end >= duration - 0.005 ? null : next;
     });
+  };
+  const applyTrimDrag = (t) => applyTrimPoint(t, trimDragRef.current);
+  // precise cuts: scrub / frame-step to the exact moment, then set that point.
+  // Reads the video element (not currentTime state, which lags behind seeks).
+  const setTrimFromPlayhead = (which) => {
+    const v = videoRef.current;
+    if (!v || !duration) return;
+    applyTrimPoint(v.currentTime, which);
   };
   const onTrimDown = (e) => {
     if (!duration) return;
@@ -957,7 +1002,7 @@ export default function Create() {
     setCropDraft(null);
     // ignore accidental clicks — a crop needs real area. Crop mode stays on:
     // the committed rect grows handles for Paint-style adjustment, and the
-    // crop button becomes "✓ done".
+    // crop button becomes "✕ reset crop".
     if (rect.w > 0.02 && rect.h > 0.02) {
       setCrop(rect);
       setBaked(null);
@@ -1017,6 +1062,14 @@ export default function Create() {
   const onCropEditUp = () => {
     cropEditRef.current = null;
   };
+  // Clear the crop and put the crop tool away (a cropped bake is now stale).
+  const resetCrop = () => {
+    setCrop(null);
+    setCropMode(false);
+    setCropDraft(null);
+    setBaked(null);
+    setMode("live");
+  };
   // handle roles + their anchor positions on the rect (as percentages)
   const CROP_HANDLES = [
     ["nw", 0, 0],
@@ -1043,7 +1096,7 @@ export default function Create() {
   // cellPx (the tuned display size) rides along so a player can size the figure
   // exactly as previewed here. name/createdAt identify the figure once it's
   // uploaded to the backend; players ignore keys they don't know.
-  const finishBake = async (frames) => {
+  const finishBake = async (frames, edgeFrames) => {
     const name = fileName
       ? fileName.replace(/\.[^.]+$/, "")
       : isStill
@@ -1057,6 +1110,7 @@ export default function Create() {
       lineHeight,
       background: bgColor,
       color: fgColor,
+      edgeColor: splitEdges ? effectiveEdgeColor : undefined,
     });
     const result = {
       cols,
@@ -1068,6 +1122,9 @@ export default function Create() {
       createdAt: new Date().toISOString(),
       ...(style ? { style } : {}),
       frames,
+      // Only present when a distinct edge color split the render — the tinted
+      // edge glyphs on their own layer, one entry per base frame.
+      ...(edgeFrames ? { edgeFrames } : {}),
     };
     setBaked(result);
     setMode("baked");
@@ -1087,13 +1144,29 @@ export default function Create() {
     // newer keys (contrast, edge) and baked without them.
     const settings = settingsRef.current;
 
+    // sampleFrame returns a plain string normally, or { frame, edgeFrame } when
+    // the settings request a split edge layer — collect the edge frames in
+    // parallel so they line up with the base frames one-to-one.
+    const split = settings.splitEdges;
+    const push = (out, frames, edgeFrames) => {
+      if (split) {
+        frames.push(out.frame);
+        edgeFrames.push(out.edgeFrame);
+      } else {
+        frames.push(out);
+      }
+    };
+
     // Photos and drawings are a single still — sample once.
     if (isStill) {
       const src = activeSource();
       if (!src || !sourceReady(src) || rows <= 0) return;
       setBaking(true);
       setBakeProgress(100);
-      await finishBake([sampleFrame(ctx, canvas, src, settings)]);
+      const frames = [];
+      const edgeFrames = [];
+      push(sampleFrame(ctx, canvas, src, settings), frames, edgeFrames);
+      await finishBake(frames, split ? edgeFrames : undefined);
       return;
     }
 
@@ -1108,14 +1181,15 @@ export default function Create() {
     // Only the trimmed range is sampled (the whole clip when untrimmed).
     const total = Math.max(1, Math.round((trimEnd - trimStart) * fps));
     const frames = [];
+    const edgeFrames = [];
     for (let f = 0; f < total; f++) {
       await seekTo(v, trimStart + f / fps);
-      frames.push(sampleFrame(ctx, canvas, v, settings));
+      push(sampleFrame(ctx, canvas, v, settings), frames, edgeFrames);
       setBakeProgress(Math.round(((f + 1) / total) * 100));
       // yield so the progress bar can paint
       if (f % 4 === 0) await new Promise((r) => setTimeout(r, 0));
     }
-    await finishBake(frames);
+    await finishBake(frames, split ? edgeFrames : undefined);
   };
 
   const exportJson = () => {
@@ -1130,6 +1204,11 @@ export default function Create() {
   const [webmProgress, setWebmProgress] = useState(null); // null | 0..1
   const exportPng = () => {
     if (!baked) return;
+    // Animations open a frame picker; stills export their one frame directly.
+    if (baked.frames.length > 1) {
+      setPngOpen(true);
+      return;
+    }
     downloadPng(baked).catch(() => setError("png export failed"));
   };
   const exportWebm = async () => {
@@ -1146,6 +1225,8 @@ export default function Create() {
 
   // share-to-gallery modal
   const [shareOpen, setShareOpen] = useState(false);
+  // png frame-picker modal (animations only)
+  const [pngOpen, setPngOpen] = useState(false);
 
   // Each cell renders at exactly cellPx — a direct handle on block size.
   // Lower `cols` (fewer, fatter cells) + a high pixel size = chunky pixels.
@@ -1509,10 +1590,6 @@ export default function Create() {
                   reset
                 </button>
               </div>
-              <p className="hint">
-                these travel with the figure — the gallery and hero show it
-                styled
-              </p>
             </SettingsBlock>
 
             <SettingsBlock
@@ -1571,33 +1648,6 @@ export default function Create() {
                   </button>
                 ))}
               </div>
-              <div className="field-label">edge detection</div>
-              <div className="keymodes">
-                {[
-                  ["off", "off"],
-                  ["overlay", "overlay"],
-                  ["only", "edges only"],
-                ].map(([k, label]) => (
-                  <button
-                    key={k}
-                    className={`keymode ${edgeMode === k ? "is-active" : ""}`}
-                    onClick={() => setEdgeMode(k)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {edgeMode !== "off" && (
-                <Slider
-                  label="edge threshold"
-                  value={edgeThreshold}
-                  min={0.05}
-                  max={0.8}
-                  step={0.01}
-                  onChange={setEdgeThreshold}
-                  fixed={2}
-                />
-              )}
             </SettingsBlock>
           </aside>
 
@@ -1640,30 +1690,62 @@ export default function Create() {
                           </button>
                         ))}
                       </div>
-                      {hasMedia && (
-                        <button
-                          className={`keymode ${cropMode ? "is-active" : ""}`}
-                          onClick={() => {
-                            setCropMode((m) => !m);
-                            setPicking(false);
-                          }}
-                          title="drag a rectangle on the preview, then adjust it with the handles — the ascii follows live"
-                        >
-                          {cropMode ? "✓ done" : "▦ crop"}
-                        </button>
-                      )}
-                      {crop && (
-                        <button
-                          className="keymode"
-                          onClick={() => {
-                            setCrop(null);
-                            setBaked(null);
-                            setMode("live");
-                          }}
-                        >
-                          ✕ reset crop
-                        </button>
-                      )}
+                      {hasMedia &&
+                        (drawEnabled ? (
+                          // While drawing, the live crop editor would sit over the
+                          // canvas — so cropping is an explicit arm → confirm step
+                          // that puts the overlay away and hands the pointer back.
+                          <>
+                            <button
+                              className={`keymode ${cropMode ? "is-active" : ""}`}
+                              onClick={() => {
+                                if (cropMode) {
+                                  setCropMode(false); // confirm → back to drawing
+                                } else {
+                                  setCropMode(true); // arm / re-open the editor
+                                  setPicking(false);
+                                }
+                              }}
+                              title={
+                                cropMode
+                                  ? "confirm the crop and return to drawing"
+                                  : crop
+                                    ? "edit the crop region"
+                                    : "drag a rectangle on the preview to crop"
+                              }
+                            >
+                              {cropMode ? "✓ done" : crop ? "▦ edit crop" : "▦ crop"}
+                            </button>
+                            {crop && (
+                              <button
+                                className="keymode"
+                                onClick={resetCrop}
+                                title="clear the crop"
+                              >
+                                ✕ reset crop
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <button
+                            className={`keymode ${cropMode && !crop ? "is-active" : ""}`}
+                            onClick={() => {
+                              if (crop) {
+                                resetCrop();
+                              } else {
+                                setCropMode((m) => !m);
+                                setPicking(false);
+                              }
+                            }}
+                            title={
+                              crop
+                                ? "clear the crop"
+                                : "drag a rectangle on the preview — adjust it with the handles, the ascii follows live"
+                            }
+                          >
+                            {crop ? "✕ reset crop" : "▦ crop"}
+                          </button>
+                        ))}
                     </div>
                   </div>
 
@@ -1741,8 +1823,9 @@ export default function Create() {
                         />
                       )}
                       {/* Paint-style crop editor: move the rect, resize from any
-                        handle — hidden while a fresh marquee is being drawn */}
-                      {cropMode && crop && !cropDraft && hasMedia && (
+                        handle — hidden while a fresh marquee is being drawn or
+                        the eyedropper needs the click (even inside the rect) */}
+                      {cropMode && crop && !cropDraft && hasMedia && !picking && (
                         <div
                           className="crop-editor"
                           style={{
@@ -1880,6 +1963,20 @@ export default function Create() {
                       {/* ── trim: only [in, out] previews-in-loop and bakes ── */}
                       <div className="trim-row">
                         <span className="field-label">trim</span>
+                        <button
+                          className="tbtn"
+                          onClick={() => setTrimFromPlayhead("in")}
+                          title="set trim start to the playhead"
+                        >
+                          [ in
+                        </button>
+                        <button
+                          className="tbtn"
+                          onClick={() => setTrimFromPlayhead("out")}
+                          title="set trim end to the playhead"
+                        >
+                          out ]
+                        </button>
                         <div
                           className="trimbar"
                           ref={trimBarRef}
@@ -2012,8 +2109,11 @@ export default function Create() {
 
                   {/* ── background removal — keyed on the source you see above ── */}
                   {hasMedia && (
-                    <div className="keyzone">
-                      <div className="field-label">background removal</div>
+                    <SourceSection
+                      label="background removal"
+                      open={openBlocks.key}
+                      onToggle={() => toggleBlock("key")}
+                    >
                       <div className="keymodes">
                         {[
                           ["off", "keep"],
@@ -2032,10 +2132,7 @@ export default function Create() {
                         ))}
                         <button
                           className={`keymode ${picking ? "is-active" : ""}`}
-                          onClick={() => {
-                            setPicking((p) => !p);
-                            setCropMode(false);
-                          }}
+                          onClick={() => setPicking((p) => !p)}
                           title="click a pixel on the preview to key out that color"
                         >
                           ⌖ pick
@@ -2079,7 +2176,63 @@ export default function Create() {
                           suffix=" · higher removes more"
                         />
                       )}
-                    </div>
+                    </SourceSection>
+                  )}
+
+                  {/* ── edge detection — strong luma gradients become direction glyphs ── */}
+                  {hasMedia && (
+                    <SourceSection
+                      label="edge detection"
+                      open={openBlocks.edges}
+                      onToggle={() => toggleBlock("edges")}
+                    >
+                      <div className="keymodes">
+                        {[
+                          ["off", "off"],
+                          ["overlay", "overlay"],
+                          ["only", "edges only"],
+                        ].map(([k, label]) => (
+                          <button
+                            key={k}
+                            className={`keymode ${edgeMode === k ? "is-active" : ""}`}
+                            onClick={() => setEdgeMode(k)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      {edgeMode !== "off" && (
+                        <>
+                          <Slider
+                            label="edge threshold"
+                            value={edgeThreshold}
+                            min={0.05}
+                            max={0.8}
+                            step={0.01}
+                            onChange={setEdgeThreshold}
+                            fixed={2}
+                          />
+                          <div className="keycolor">
+                            <span className="keycolor-label">edge color</span>
+                            <input
+                              type="color"
+                              className="keycolor-swatch"
+                              value={effectiveEdgeColor}
+                              onChange={(e) => setEdgeColor(e.target.value)}
+                              aria-label="edge color"
+                            />
+                            <button
+                              className="keymode"
+                              onClick={() => setEdgeColor(null)}
+                              disabled={edgeColor === null}
+                              title="match the text color"
+                            >
+                              {edgeColor === null ? "matches text" : "match text"}
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </SourceSection>
                   )}
                 </div>
               </section>
@@ -2125,24 +2278,46 @@ export default function Create() {
                   }
                 >
                   {hasSource ? (
-                    <pre
-                      ref={previewRef}
-                      className="preview"
-                      style={{
-                        fontSize: previewFontSize,
-                        fontFamily: FONT_STACKS[fontKey],
-                        letterSpacing: letterSpacing
-                          ? `${letterSpacing}em`
-                          : undefined,
-                        lineHeight,
-                        color: fgColor,
-                        transform:
-                          previewScale !== 1
-                            ? `scale(${previewScale})`
+                    <div className="preview-stack">
+                      <pre
+                        ref={previewRef}
+                        className="preview"
+                        style={{
+                          fontSize: previewFontSize,
+                          fontFamily: FONT_STACKS[fontKey],
+                          letterSpacing: letterSpacing
+                            ? `${letterSpacing}em`
                             : undefined,
-                      }}
-                      aria-hidden="true"
-                    />
+                          lineHeight,
+                          color: fgColor,
+                          transform:
+                            previewScale !== 1
+                              ? `scale(${previewScale})`
+                              : undefined,
+                        }}
+                        aria-hidden="true"
+                      />
+                      {showEdgeLayer && (
+                        <pre
+                          ref={previewEdgeRef}
+                          className="preview preview-edge"
+                          style={{
+                            fontSize: previewFontSize,
+                            fontFamily: FONT_STACKS[fontKey],
+                            letterSpacing: letterSpacing
+                              ? `${letterSpacing}em`
+                              : undefined,
+                            lineHeight,
+                            color: effectiveEdgeColor,
+                            transform:
+                              previewScale !== 1
+                                ? `scale(${previewScale})`
+                                : undefined,
+                          }}
+                          aria-hidden="true"
+                        />
+                      )}
+                    </div>
                   ) : (
                     <div className="noise">drop a clip to begin</div>
                   )}
@@ -2241,19 +2416,38 @@ export default function Create() {
           tabIndex={0}
           aria-label="ASCII preview — tap to jump to the full monitor, drag to move"
         >
-          <pre
-            ref={miniPreviewRef}
-            className="preview mini-preview"
-            style={{
-              fontSize: previewFontSize,
-              fontFamily: FONT_STACKS[fontKey],
-              letterSpacing: letterSpacing ? `${letterSpacing}em` : undefined,
-              lineHeight,
-              color: fgColor,
-              transform: `scale(${miniScale})`,
-            }}
-            aria-hidden="true"
-          />
+          <div className="preview-stack">
+            <pre
+              ref={miniPreviewRef}
+              className="preview mini-preview"
+              style={{
+                fontSize: previewFontSize,
+                fontFamily: FONT_STACKS[fontKey],
+                letterSpacing: letterSpacing ? `${letterSpacing}em` : undefined,
+                lineHeight,
+                color: fgColor,
+                transform: `scale(${miniScale})`,
+              }}
+              aria-hidden="true"
+            />
+            {showEdgeLayer && (
+              <pre
+                ref={miniPreviewEdgeRef}
+                className="preview mini-preview preview-edge"
+                style={{
+                  fontSize: previewFontSize,
+                  fontFamily: FONT_STACKS[fontKey],
+                  letterSpacing: letterSpacing
+                    ? `${letterSpacing}em`
+                    : undefined,
+                  lineHeight,
+                  color: effectiveEdgeColor,
+                  transform: `scale(${miniScale})`,
+                }}
+                aria-hidden="true"
+              />
+            )}
+          </div>
           <span className="mini-dot" aria-hidden="true" />
           <button
             type="button"
@@ -2296,6 +2490,13 @@ export default function Create() {
         {shareOpen && baked && (
           <UploadModal baked={baked} onClose={() => setShareOpen(false)} />
         )}
+        {pngOpen && baked && (
+          <PngFrameModal
+            baked={baked}
+            onClose={() => setPngOpen(false)}
+            onError={setError}
+          />
+        )}
       </div>
     </div>
   );
@@ -2337,7 +2538,7 @@ function sampleFrame(ctx, canvas, source, s) {
     ctx.drawImage(source, 0, 0, w, h);
   }
   const { data } = ctx.getImageData(0, 0, w, h);
-  return convertFrame(data, w, h, {
+  const opts = {
     cols: s.cols,
     rows: s.rows,
     ramp: s.ramp,
@@ -2347,7 +2548,12 @@ function sampleFrame(ctx, canvas, source, s) {
     key: { mode: s.keyMode, threshold: s.keyThreshold, color: s.keyColor },
     dither: s.dither,
     edge: s.edge,
-  });
+  };
+  // A distinct edge color needs the ramp and edges on separately-tinted layers;
+  // otherwise the single combined string is the exact default output.
+  return s.splitEdges
+    ? convertFrameLayers(data, w, h, opts)
+    : convertFrame(data, w, h, opts);
 }
 
 /** A collapsible settings category — the label bar toggles the body. */
@@ -2366,6 +2572,21 @@ function SettingsBlock({ label, open, onToggle, children }) {
       </button>
       {open && <div className="block-body">{children}</div>}
     </section>
+  );
+}
+
+/** A collapsible sub-section inside the source panel (keyzone styling). */
+function SourceSection({ label, open, onToggle, children }) {
+  return (
+    <div className="keyzone">
+      <button className="zone-toggle" aria-expanded={open} onClick={onToggle}>
+        <span className="field-label">{label}</span>
+        <span className="caret" aria-hidden="true">
+          {open ? "▾" : "▸"}
+        </span>
+      </button>
+      {open && <div className="zone-body">{children}</div>}
+    </div>
   );
 }
 

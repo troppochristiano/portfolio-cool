@@ -8,6 +8,14 @@
 const easeInOutCubic = (t) =>
   t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
+const easeInOutSine = (t) => -(Math.cos(Math.PI * t) - 1) / 2;
+
+// Hermite smoothstep of x across [edge0, edge1], clamped to 0..1.
+const smoothstep = (edge0, edge1, x) => {
+  const u = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return u * u * (3 - 2 * u);
+};
+
 // Each gesture:
 //   axis        which grid axis sweeps — 'x' = yaw (left/right), 'y' = pitch (up/down).
 //   recenterMs  time to ease from the current look back to the neutral center cell.
@@ -15,6 +23,9 @@ const easeInOutCubic = (t) =>
 //   keyframes   [{ t: 0..1, offset: -1..1 }]. offset is a fraction of the axis half-range
 //               around center (-1 = top/left edge cell, +1 = bottom/right edge cell).
 //               Segments interpolate with easeInOutCubic for smooth, settling motion.
+//
+// 2D variant: keyframes of [{ t, x, y }] (both offsets in -1..1) drive yaw AND pitch
+// together — no `axis` field. Detected per-gesture by the first keyframe having `x`.
 export const GESTURES = {
   // "Yes": pitch down, up, a smaller dip, settle. y increases downward in the grid.
   nodYes: {
@@ -42,6 +53,19 @@ export const GESTURES = {
       { t: 0.9, offset: 0.3 },
       { t: 1, offset: 0 },
     ],
+  },
+  // Intro look-around: continuous circular gaze motion matching the gallery orbit —
+  // no keyframes, sampled parametrically (see the `type: "circle"` branch in
+  // sampleGesture). The gaze spirals out from center, sweeps `turns` revolutions at
+  // `radius` (fraction of the grid half-range), and spirals back to center, with the
+  // angular speed globally eased so it starts and stops gently — never stalling at
+  // edges the way per-segment keyframe easing does.
+  lookAround: {
+    type: "circle",
+    recenterMs: 300,
+    durationMs: 4200,
+    turns: 1.25,
+    radius: 0.85,
   },
 };
 
@@ -86,6 +110,36 @@ export function sampleGesture(inst, now, h) {
     return { xIndex: Math.round(cx), yIndex: Math.round(cy), done: true };
   }
 
+  // Circle gesture: parametric circular motion (yaw + pitch on a circle). The angle
+  // is eased globally (gentle start/stop, constant sweep in the middle) and the
+  // radius ramps in/out over the first/last 15%, so the gaze spirals out from
+  // neutral, orbits, and spirals home — continuous, no per-keyframe stalls.
+  if (spec.type === "circle") {
+    const eased = easeInOutSine(t);
+    const theta = (spec.turns ?? 1) * Math.PI * 2 * eased;
+    const r =
+      (spec.radius ?? 0.85) * smoothstep(0, 0.15, t) * (1 - smoothstep(0.85, 1, t));
+    // Counterclockwise on screen (grid +y looks down), matching the orbit's spin.
+    const ox = r * Math.cos(theta);
+    const oy = -r * Math.sin(theta);
+    return {
+      xIndex: clampIndex(Math.round(cx + ox * cx), h.xSteps),
+      yIndex: clampIndex(Math.round(cy + oy * cy), h.ySteps),
+      done: false,
+    };
+  }
+
+  // 2D gesture: both axes follow their own keyframe track (yaw + pitch together).
+  if (spec.keyframes[0].x !== undefined) {
+    const ox = sampleKeyframes(spec.keyframes, t, "x");
+    const oy = sampleKeyframes(spec.keyframes, t, "y");
+    return {
+      xIndex: clampIndex(Math.round(cx + ox * cx), h.xSteps),
+      yIndex: clampIndex(Math.round(cy + oy * cy), h.ySteps),
+      done: false,
+    };
+  }
+
   const offset = sampleKeyframes(spec.keyframes, t);
   const center = spec.axis === "x" ? cx : cy;
   const idx = clampIndex(
@@ -99,17 +153,18 @@ export function sampleGesture(inst, now, h) {
   };
 }
 
-// Piecewise interpolation of [{ t, offset }] keyframes at progress t∈[0,1], easing
-// each segment with easeInOutCubic.
-function sampleKeyframes(keyframes, t) {
+// Piecewise interpolation of keyframes at progress t∈[0,1], easing each segment with
+// easeInOutCubic. `field` picks the sampled property: "offset" (single-axis gestures,
+// default) or "x"/"y" (2D gestures).
+function sampleKeyframes(keyframes, t, field = "offset") {
   for (let i = 1; i < keyframes.length; i++) {
     const b = keyframes[i];
     if (t <= b.t) {
       const a = keyframes[i - 1];
       const span = b.t - a.t || 1;
       const e = easeInOutCubic((t - a.t) / span);
-      return a.offset + (b.offset - a.offset) * e;
+      return a[field] + (b[field] - a[field]) * e;
     }
   }
-  return keyframes[keyframes.length - 1].offset;
+  return keyframes[keyframes.length - 1][field];
 }

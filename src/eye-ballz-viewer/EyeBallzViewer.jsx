@@ -292,6 +292,11 @@ function EyeBallzViewerInner(
   useEffect(() => setStatus(statusProp), [statusProp]);
   useEffect(() => setAutoBlink(autoBlinkProp), [autoBlinkProp]);
   useEffect(() => setAnimMode(animationModeProp), [animationModeProp]);
+  // Mirrored so the mount effect can seed the freshly created handles with the live
+  // mode. The drive-effect below is declared before the mount effect, so on first
+  // render it runs against a null handle and can't apply an initially-true prop.
+  const animModeRef = useRef(animMode);
+  animModeRef.current = animMode;
 
   // Drive animation mode onto the Three.js handle. Enabling eases the avatar into a
   // neutral, forward-facing pose (flat tilt + centered look); disabling arms the
@@ -336,6 +341,28 @@ function EyeBallzViewerInner(
       getExpressions: () => {
         const h = three.current;
         return h ? Object.keys(h.expr).filter((n) => !isBlinkVariant(n)) : [];
+      },
+      // Abort the active gesture (if any) mid-flight and arm the eased return, so the
+      // next pointer move glides back to mouse tracking. Used when the site intro is
+      // skipped while the lookAround gesture is still sweeping.
+      stopGesture: () => {
+        const h = three.current;
+        if (!h || !h.gesture) return;
+        h.gesture = null;
+        h.easeNextLook = true;
+      },
+      // Intro reveal effect: scale the shader's glitch/noise/rgb-shift from a strong
+      // peak (amount=1) back down to the user's settings baseline (amount=0). Mutates
+      // uniforms directly — no settings state writes, no re-renders; the settings
+      // panel simply re-stomps these on its next change.
+      setIntroDistortion: (amount) => {
+        const h = three.current;
+        if (!h) return;
+        const a = Math.max(0, Math.min(1, amount));
+        const base = settingsRef.current.distortion;
+        h.uniforms.uGlitch.value = base.glitch + (0.12 - base.glitch) * a;
+        h.uniforms.uNoise.value = base.noise + (0.06 - base.noise) * a;
+        h.uniforms.uRGBShift.value = base.rgbShift + (0.02 - base.rgbShift) * a;
       },
     }),
     [],
@@ -448,8 +475,10 @@ function EyeBallzViewerInner(
       // animation loop; sweeps the grid look-cell so the face turns (no mesh tilt).
       gesture: null,
       // Animation mode: when true the avatar ignores the cursor entirely (so scripted
-      // animations play cleanly) and rests in a neutral, forward-facing pose.
-      animMode: false,
+      // animations play cleanly) and rests in a neutral, forward-facing pose. Seeded
+      // from the live prop so a parent mounting with animationMode already on (the
+      // site intro) is respected from the first frame.
+      animMode: animModeRef.current,
       // One-shot: when true the next cursor reacquire eases (smooth look-sweep) instead
       // of snapping, then reverts to normal snap behavior. Set on gesture-end / mode-off.
       easeNextLook: false,

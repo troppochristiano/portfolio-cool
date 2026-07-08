@@ -21,7 +21,10 @@
 #   npx wrangler d1 execute ascii-figures --remote \
 #     --command "ALTER TABLE figures ADD COLUMN style TEXT"
 name = "portfolio"
-pages_build_output_dir = "dist"
+# NOTE: no `pages_build_output_dir` here — wrangler ≥4.x refuses to combine it
+# with the `-- npx vite` proxy command that `npm run dev:full` uses. The deploy
+# script passes the directory explicitly (`wrangler pages deploy dist`), and
+# serving a local build directly is `npx wrangler pages dev dist`.
 compatibility_date = "2026-06-01"
 
 [[d1_databases]]

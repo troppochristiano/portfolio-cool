@@ -19,63 +19,68 @@ body {
         sans-serif;
 }
 
-/* Full-screen preloader. Transparent shell; the opaque .loader__panel is the cover the
-   dissolve removes (top→bottom) to reveal the hero once assets are warm. */
-.loader {
+/* ── cinematic intro ─────────────────────────────────────────────
+   Phase 1–3 overlay: the character swarm canvas. Transparent, so the black body
+   shows through while forming and the hero avatar fades in *behind* the text. */
+.intro-swarm {
     position: fixed;
     inset: 0;
     z-index: 10;
-    background-color: transparent;
-}
-
-/* The cover the dissolve clips. Carries the black background + centers the bar. */
-.loader__panel {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: #000;
-    will-change: clip-path;
-}
-
-/* The dissolve band canvas — full-viewport, above the panel, never blocks input. */
-.loader__dissolve {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 1;
     pointer-events: none;
 }
 
-.loader__inner {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-    width: min(240px, 60vw);
-}
-
-.loader__bar {
+.intro-swarm__canvas {
     width: 100%;
-    height: 3px;
-    background-color: #222;
-    overflow: hidden;
-}
-
-.loader__fill {
     height: 100%;
-    background-color: #0000ff;
-    transition: width 0.2s ease;
+    display: block;
 }
 
-.loader__pct {
-    text-transform: uppercase;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    color: #fff;
+/* The real headline for screen readers; the canvas is decorative. */
+.intro-swarm__sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+/* Skip pill — above the swarm, bottom-right where the corner pills will appear. */
+.intro-skip {
+    position: fixed;
+    right: 16px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+    z-index: 11;
+}
+
+/* Reduced-motion fallback: a plain cover that fades once the scene is warm. */
+.intro-cover {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background-color: #000;
+    opacity: 1;
+    transition: opacity 0.6s ease;
+    pointer-events: none;
+}
+
+.intro-cover.is-hidden {
+    opacity: 0;
+}
+
+/* Nav + corner pills + About trigger ease in together once the intro is over. */
+.ui-chrome {
+    animation: ui-chrome-in 0.8s ease both;
+}
+
+@keyframes ui-chrome-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
 }
 
 /* The CSS3D ascii gallery fills the viewport behind everything else. */
@@ -95,6 +100,12 @@ body {
 
 .ascii-gallery.is-ready {
     opacity: 1;
+}
+
+/* During the intro roam the wall is scenery, not a control. */
+.ascii-gallery.is-intro {
+    pointer-events: none;
+    cursor: default;
 }
 
 .ascii-gallery.is-grabbing,
@@ -212,6 +223,14 @@ body {
     transform: translate(-50%, -50%);
     z-index: 2;
     pointer-events: none;
+    /* Hidden while the intro's headline forms; the "face" phase fades it in
+       behind the (transparent) swarm canvas. */
+    opacity: 0;
+    transition: opacity 1s ease;
+}
+
+.hero-avatar.is-revealed {
+    opacity: 1;
 }
 
 /* Override the component's inline width/height to stay responsive; its ResizeObserver

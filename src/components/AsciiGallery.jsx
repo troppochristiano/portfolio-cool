@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import gsap from "gsap";
 import {
   CSS3DRenderer,
   CSS3DObject,
@@ -56,7 +57,16 @@ const params = {
   verticalCurvature: 0.5, // dimensionless — feeds rotation (rad) and a scaled z-offset
 };
 
-export function AsciiGallery({ figures, onReady, onSelect }) {
+export function AsciiGallery({
+  figures,
+  onReady,
+  onSelect,
+  // Intro choreography: "waiting" builds the wall invisible, "roam" plays the
+  // scattered fly-in -> drift -> settle sequence, "done" is the normal wall
+  // (also the skip target). Defaults keep the component usable standalone.
+  introState = "done",
+  onSettled,
+}) {
   const mountRef = useRef(null);
   const stageRef = useRef(null);
   // The hover label is positioned imperatively every frame (it tracks a moving 3D plane),
@@ -67,6 +77,12 @@ export function AsciiGallery({ figures, onReady, onSelect }) {
   onReadyRef.current = onReady;
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  const onSettledRef = useRef(onSettled);
+  onSettledRef.current = onSettled;
+  // The build effect reads the intro state it was mounted under; the prop-watcher
+  // effect below drives start/skip through this ref-exposed API.
+  const introStateRef = useRef(introState);
+  const roamApiRef = useRef(null);
 
   // Assign each of rows*columns planes a figure at random (same idea as the old video
   // pool). Stable for the lifetime of the figures array so React never reorders nodes.
@@ -81,6 +97,20 @@ export function AsciiGallery({ figures, onReady, onSelect }) {
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
+
+    // Intro roam: planes start scattered off-screen, drift on a slowly revolving
+    // shell around the center (where the face sits), then settle into their wall
+    // slots. `introActive` gates the per-frame compose and bypasses the idle-skip.
+    const introMode = introStateRef.current !== "done";
+    let introActive = introMode;
+    const spin = { value: 0 };
+    let introTl = null;
+    const finishIntro = () => {
+      if (!introActive) return;
+      introActive = false;
+      mount.classList.remove("is-intro");
+      onSettledRef.current?.();
+    };
 
     // scene setup
     const scene = new THREE.Scene();
@@ -207,6 +237,46 @@ export function AsciiGallery({ figures, onReady, onSelect }) {
             videoName: labelFor(fig?.name),
           };
 
+          if (introMode) {
+            // Roam poses: a scattered ring loosely around the face — random per-plane
+            // radius/depth keeps the drifting-cloud character, while the whole cloud
+            // revolves around the screen axis (see the spin compose in the loop) so it
+            // reads as clips looping around the face before peeling off to the wall.
+            // The ring is sized against the camera frustum at the plane's depth (not
+            // against `spacing`) so the orbit stays in frame on any viewport size.
+            const theta = Math.random() * Math.PI * 2;
+            const ringZ = params.spacing * (0.5 + Math.random() * 1.0);
+            const halfH =
+              (camera.position.z - ringZ) *
+              Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+            const halfMin = Math.min(halfH, halfH * camera.aspect);
+            const ringR = halfMin * (0.55 + Math.random() * 0.35);
+            const shell = {
+              x: Math.cos(theta) * ringR,
+              y: Math.sin(theta) * ringR * 0.6,
+              z: ringZ,
+            };
+            object.userData.intro = {
+              arrive: 0,
+              settle: 0,
+              shell,
+              start: {
+                x: shell.x * 8,
+                y: shell.y * 8,
+                z: shell.z - params.spacing * 6,
+              },
+              startRot: {
+                x: (Math.random() - 0.5) * 1.0,
+                y: (Math.random() - 0.5) * 1.6,
+                z: (Math.random() - 0.5) * 0.6,
+              },
+            };
+            // Park the plane at its start pose so the roam's first frame is right.
+            const it = object.userData.intro;
+            object.position.set(it.start.x, it.start.y, it.start.z);
+            object.rotation.set(it.startRot.x, it.startRot.y, it.startRot.z);
+          }
+
           // Hover label: set on enter, cleared on leave (positioned per-frame below).
           const onEnter = () => {
             hoveredObject = object;
@@ -233,6 +303,8 @@ export function AsciiGallery({ figures, onReady, onSelect }) {
 
     // event listeners
     function onMouseMove(event) {
+      // The wall ignores the cursor entirely until the intro roam has settled.
+      if (introActive) return;
       // While dragging, the pointer handlers own mouseX/mouseY — don't let the absolute
       // mapping clobber the accumulated drag delta.
       if (isDragging) return;
@@ -243,6 +315,8 @@ export function AsciiGallery({ figures, onReady, onSelect }) {
     }
 
     function onPointerDown(event) {
+      // The wall isn't interactive until the roam has settled.
+      if (introActive) return;
       isDragging = true;
       lastX = event.clientX;
       lastY = event.clientY;
@@ -313,10 +387,12 @@ export function AsciiGallery({ figures, onReady, onSelect }) {
       // Idle skip: once the target has stopped easing AND the oscillation amplitude
       // (∝ mouseDistance) is negligible, the wall is at rest — skip all per-plane
       // math and the CSS3D render until the next input. rAF stays alive (cheap).
+      // The intro roam writes transforms from GSAP-tweened values, so it must keep
+      // the loop hot even with zero mouse input.
       const eased =
         Math.abs(targetX - prevTX) > IDLE_EPS ||
         Math.abs(targetY - prevTY) > IDLE_EPS;
-      if (!eased && mouseDistance < IDLE_EPS) return;
+      if (!introActive && !eased && mouseDistance < IDLE_EPS) return;
 
       lookAtTarget.x = targetX * params.lookAtRange;
       lookAtTarget.y = -targetY * params.lookAtRange;
@@ -326,6 +402,10 @@ export function AsciiGallery({ figures, onReady, onSelect }) {
       const time = performance.now() * 0.001;
       const tx3 = targetX * 3;
       const ty3 = targetY * 3;
+
+      // Shell revolution for the intro roam — computed once per frame.
+      const spinCos = introActive ? Math.cos(spin.value) : 1;
+      const spinSin = introActive ? Math.sin(spin.value) : 0;
 
       // update each plane (parallax + oscillation), identical to the reference
       objects.forEach((object) => {
@@ -344,28 +424,53 @@ export function AsciiGallery({ figures, onReady, onSelect }) {
         // space once; rotations are radians and stay dimensionless.
         const oscillation = Math.sin(time + phaseOffset) * mouseDistance * 0.1;
 
-        object.position.x =
+        const px =
           basePosition.x + (parallaxX + oscillation * randomOffset.x) * SCALE;
-        object.position.y =
+        const py =
           basePosition.y + (parallaxY + oscillation * randomOffset.y) * SCALE;
-        object.position.z =
+        const pz =
           basePosition.z +
           oscillation * randomOffset.z * parallaxFactor * SCALE;
 
-        object.rotation.x =
+        const rx =
           baseRotation.x +
           targetY * rotationModifier.x * mouseDistance +
           oscillation * rotationModifier.x * 0.2;
 
-        object.rotation.y =
+        const ry =
           baseRotation.y +
           targetX * rotationModifier.y * mouseDistance +
           oscillation * rotationModifier.y * 0.2;
 
-        object.rotation.z =
+        const rz =
           baseRotation.z +
           targetX * targetY * rotationModifier.z * 2 +
           oscillation * rotationModifier.z * 0.3;
+
+        const it = object.userData.intro;
+        if (introActive && it) {
+          // Compose: start --arrive--> orbiting ring point --settle--> wall slot.
+          // The spin revolves the scattered ring in the screen plane (around Z), so
+          // the cloud visibly loops around the face while it drifts.
+          const roamX = it.shell.x * spinCos - it.shell.y * spinSin;
+          const roamY = it.shell.x * spinSin + it.shell.y * spinCos;
+          const ax = it.start.x + (roamX - it.start.x) * it.arrive;
+          const ay = it.start.y + (roamY - it.start.y) * it.arrive;
+          const az = it.start.z + (it.shell.z - it.start.z) * it.arrive;
+          object.position.set(
+            ax + (px - ax) * it.settle,
+            ay + (py - ay) * it.settle,
+            az + (pz - az) * it.settle,
+          );
+          object.rotation.set(
+            it.startRot.x + (rx - it.startRot.x) * it.settle,
+            it.startRot.y + (ry - it.startRot.y) * it.settle,
+            it.startRot.z + (rz - it.startRot.z) * it.settle,
+          );
+        } else {
+          object.position.set(px, py, pz);
+          object.rotation.set(rx, ry, rz);
+        }
       });
 
       camera.lookAt(lookAtTarget);
@@ -398,13 +503,73 @@ export function AsciiGallery({ figures, onReady, onSelect }) {
 
     buildGallery();
 
+    if (introMode) {
+      // The roam timeline: fly-in to the shell (staggered), a slow revolution
+      // around the center, then a staggered settle into the wall slots. Created
+      // paused; the introState watcher effect plays it when the phase arrives.
+      mount.classList.add("is-intro");
+      const intros = objects
+        .map((o) => o.userData.intro)
+        .filter(Boolean);
+      introTl = gsap.timeline({ paused: true, onComplete: finishIntro });
+      introTl.to(
+        intros,
+        {
+          arrive: 1,
+          duration: 1.6,
+          ease: "power2.out",
+          stagger: { each: 0.035, from: "random" },
+        },
+        0,
+      );
+      introTl.to(
+        spin,
+        { value: Math.PI * 1.5, duration: 4.6, ease: "power1.inOut" },
+        0,
+      );
+      introTl.to(
+        intros,
+        {
+          settle: 1,
+          duration: 1.6,
+          ease: "power3.inOut",
+          stagger: { each: 0.03, from: "center" },
+        },
+        1.8,
+      );
+    }
+    roamApiRef.current = {
+      // Reveal the wall and play the roam (the fade-in and the fly-in overlap).
+      start() {
+        mount.classList.add("is-ready");
+        introTl?.play();
+      },
+      // Skip: jump every plane to its slot and hand control back to the loop.
+      skipToEnd() {
+        if (introTl) {
+          introTl.kill();
+          introTl = null;
+        }
+        objects.forEach((o) => {
+          const it = o.userData.intro;
+          if (it) {
+            it.arrive = 1;
+            it.settle = 1;
+          }
+        });
+        mount.classList.add("is-ready");
+        finishIntro();
+      },
+    };
+
     // First render, then fade the wall in + signal ready on the next tick. The
     // `is-ready` class drives the opacity transition (global.css) so the ambient wall
-    // eases in behind the already-revealed hero rather than popping.
+    // eases in behind the already-revealed hero rather than popping. During the
+    // intro the wall stays invisible until the roam phase reveals it.
     camera.lookAt(lookAtTarget);
     renderer.render(scene, camera);
     requestAnimationFrame(() => {
-      mount.classList.add("is-ready");
+      if (!introMode) mount.classList.add("is-ready");
       onReadyRef.current?.();
     });
 
@@ -423,6 +588,12 @@ export function AsciiGallery({ figures, onReady, onSelect }) {
     // teardown — idempotent so StrictMode's dev remount doesn't duplicate the wall
     return () => {
       cancelAnimationFrame(rafId);
+      if (introTl) {
+        introTl.kill();
+        introTl = null;
+      }
+      roamApiRef.current = null;
+      mount.classList.remove("is-intro");
       if (settleTimer) clearTimeout(settleTimer);
       setInteracting(false);
       document.removeEventListener("mousemove", onMouseMove);
@@ -443,6 +614,15 @@ export function AsciiGallery({ figures, onReady, onSelect }) {
       }
     };
   }, [assignments]);
+
+  // Drive the roam from the intro phase: "roam" plays the timeline, "done" jumps
+  // to the end (skip, or the normal post-settle acknowledgement — skipToEnd is a
+  // no-op once the intro has already finished).
+  useEffect(() => {
+    introStateRef.current = introState;
+    if (introState === "roam") roamApiRef.current?.start();
+    else if (introState === "done") roamApiRef.current?.skipToEnd();
+  }, [introState]);
 
   return (
     <>

@@ -110,6 +110,7 @@ export default function UploadModal({ baked, onClose }) {
   // what the gallery will.
   const previewFont = Math.max(1.5, Math.min(8, 300 / (baked.cols * 0.6)));
   const st = resolveStyle(baked.style);
+  const frameIdx = isAnim ? thumbFrame : 0;
 
   return (
     <div
@@ -180,20 +181,41 @@ export default function UploadModal({ baked, onClose }) {
                 />
               </div>
             )}
-            <pre
-              className="upmodal-thumb"
-              style={{
-                fontSize: `${previewFont}px`,
-                fontFamily: st.fontFamily,
-                letterSpacing: st.letterSpacing ? `${st.letterSpacing}em` : undefined,
-                lineHeight: st.lineHeight,
-                color: st.color,
-                background: st.background,
-              }}
-              aria-hidden="true"
-            >
-              {baked.frames[isAnim ? thumbFrame : 0]}
-            </pre>
+            <div className="upmodal-thumb-stack">
+              <pre
+                className="upmodal-thumb"
+                style={{
+                  fontSize: `${previewFont}px`,
+                  fontFamily: st.fontFamily,
+                  letterSpacing: st.letterSpacing ? `${st.letterSpacing}em` : undefined,
+                  lineHeight: st.lineHeight,
+                  color: st.color,
+                  background: st.background,
+                  gridArea: '1 / 1',
+                }}
+                aria-hidden="true"
+              >
+                {baked.frames[frameIdx]}
+              </pre>
+              {baked.edgeFrames && (
+                <pre
+                  className="upmodal-thumb"
+                  style={{
+                    fontSize: `${previewFont}px`,
+                    fontFamily: st.fontFamily,
+                    letterSpacing: st.letterSpacing ? `${st.letterSpacing}em` : undefined,
+                    lineHeight: st.lineHeight,
+                    color: st.edgeColor,
+                    background: 'transparent',
+                    gridArea: '1 / 1',
+                    pointerEvents: 'none',
+                  }}
+                  aria-hidden="true"
+                >
+                  {baked.edgeFrames[frameIdx]}
+                </pre>
+              )}
+            </div>
 
             {/* Turnstile mounts here (invisible/managed) */}
             <div ref={widgetRef} className="upmodal-turnstile" />
