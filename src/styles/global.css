@@ -19,6 +19,29 @@ body {
         sans-serif;
 }
 
+/* ── persistent hero + routed page layers ────────────────────────
+   The hero (App) stays mounted for the whole session under /create and
+   /gallery; RouteTransition renders the active page in .page-layer above it.
+   visibility (not display) keeps the WebGL context, layout, and observers
+   alive while skipping paint. HeroLayout pairs .is-covered with inert. */
+.hero-layer.is-covered {
+    visibility: hidden;
+}
+
+/* Above the hero (nav z-2, About z-20, dialog z-30 — all unmounted while
+   covered anyway). pointer-events:none keeps the empty layer at "/" from
+   blocking the hero; the opaque pages re-enable their own hit-testing. */
+.page-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    pointer-events: none;
+}
+
+.page-layer > * {
+    pointer-events: auto;
+}
+
 /* ── cinematic intro ─────────────────────────────────────────────
    Phase 1–3 overlay: the character swarm canvas. Transparent, so the black body
    shows through while forming and the hero avatar fades in *behind* the text. */

@@ -1,7 +1,7 @@
 import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import App from "./App";
+import HeroLayout from "./components/HeroLayout.jsx";
 import Create from "./pages/Create";
 import "./styles/global.css";
 
@@ -15,20 +15,26 @@ createRoot(document.getElementById("root")).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
-        {/* Home — the hero + ambient gallery + About overlay, unchanged. */}
-        <Route path="/" element={<App />} />
-        {/* The merged ASCII media converter. */}
-        <Route path="/create" element={<Create />} />
-        {/* Community uploads (approved) — infinite scroll grid. */}
-        <Route
-          path="/gallery"
-          element={
-            <Suspense fallback={null}>
-              <Gallery />
-            </Suspense>
-          }
-        />
-        {/* Unlinked moderation queue (server-side bearer auth). */}
+        {/* Hero layout: App (face + wall + intro) stays mounted underneath
+            /create and /gallery so returning home is instant with no intro
+            replay. The index route renders nothing — the hero IS the page. */}
+        <Route element={<HeroLayout />}>
+          <Route index element={null} />
+          {/* The merged ASCII media converter. */}
+          <Route path="create" element={<Create />} />
+          {/* Community uploads (approved) — infinite scroll grid. */}
+          <Route
+            path="gallery"
+            element={
+              <Suspense fallback={null}>
+                <Gallery />
+              </Suspense>
+            }
+          />
+        </Route>
+        {/* Admin lives OUTSIDE the hero layout: owner-only, so no reason to
+            keep a WebGL context + ~200 textures alive under it. Trade-off:
+            admin -> "/" remounts the hero and replays the intro. */}
         <Route
           path="/admin"
           element={

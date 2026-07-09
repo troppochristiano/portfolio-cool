@@ -44,8 +44,9 @@ const PAPER_W = 1024;
 const PAPER_H = 768;
 const MAX_PHOTO = 1280;
 
-// Brush shades, white → black. ASCII maps brightness, so the swatch you pick
-// is literally the glyph density you'll get (under the default invert).
+// Brush shades, white → black. ASCII maps brightness — with "invert" ON
+// (dark ink on light bg) the swatch you pick is literally the glyph density
+// you'll get; with invert off (the default) the mapping flips.
 const BRUSH_SHADES = [
   "#ffffff",
   "#d9d9d9",
@@ -145,7 +146,7 @@ export default function Create({ adminSecret = null }) {
   const [fps, setFps] = useState(15);
   const [gamma, setGamma] = useState(1);
   const [contrast, setContrast] = useState(1);
-  const [invert, setInvert] = useState(true);
+  const [invert, setInvert] = useState(false);
   // edge detection: replace (or isolate) cells on strong luma gradients with
   // direction glyphs — see detectEdges in asciify.js.
   const [edgeMode, setEdgeMode] = useState("off"); // 'off' | 'overlay' | 'only'
@@ -1232,13 +1233,36 @@ export default function Create({ adminSecret = null }) {
 
   // Each cell renders at exactly cellPx — a direct handle on block size.
   // Lower `cols` (fewer, fatter cells) + a high pixel size = chunky pixels.
-  const previewFontSize = `${cellPx}px`;
+  //
+  // …except the on-screen <pre> must never actually be laid out that big. At
+  // high cols × cellPx × spacing the natural size reaches 10–30k real pixels;
+  // the fit transform only shrinks it VISUALLY, so the browser still has to
+  // rasterize a layer that large — past GPU texture limits it drops tiles and
+  // whole parts of the page flash/blank (worst on Safari). Clamp the displayed
+  // font instead: letter-spacing (em) and line-height (unitless) scale with it,
+  // so the grid stays proportionally identical and previewScale compensates —
+  // in the clamped regime the pre dwarfs the monitor, so the fitted result is
+  // pixel-identical. Exports are untouched (they render their own canvas from
+  // the true cellPx), only the readout must divide the measurement back.
+  const MAX_PRE_PX = 4000;
+  const estNatW = cols * cellPx * 0.6 * (1 + (letterSpacing || 0));
+  const estNatH = rows * cellPx * lineHeight;
+  const fitK = Math.min(
+    1,
+    MAX_PRE_PX / Math.max(estNatW, 1),
+    MAX_PRE_PX / Math.max(estNatH, 1),
+  );
+  const previewFontSize = `${cellPx * fitK}px`;
 
   // "real pixels" readout: measured when a source renders; estimated before
-  // (monospace advance ≈ 0.6 × font size — only the height is exact).
+  // (monospace advance ≈ 0.6 × font size — only the height is exact). The
+  // measurement sees the clamped font, so scale it back to true export size.
   const readoutW =
-    hasSource && outputPx ? outputPx.w : Math.round(cols * cellPx * 0.6);
-  const readoutH = hasSource && outputPx ? outputPx.h : rows * cellPx;
+    hasSource && outputPx
+      ? Math.round(outputPx.w / fitK)
+      : Math.round(cols * cellPx * 0.6);
+  const readoutH =
+    hasSource && outputPx ? Math.round(outputPx.h / fitK) : rows * cellPx;
 
   // Image source shows the upload-first intro until a photo lands or the user
   // opts into blank paper — the canvas/crop/draw chrome waits behind it.
@@ -2175,7 +2199,12 @@ export default function Create({ adminSecret = null }) {
                           />
                         </label>
                       )}
-                      {keyMode !== "off" && (
+                      {/* Reserved slot: the slider keeps its layout box while
+                          the key is off so toggling modes never resizes the
+                          panel (border-pop + preview refit flicker). */}
+                      <div
+                        className={`zone-slot${keyMode !== "off" ? " is-active" : ""}`}
+                      >
                         <Slider
                           label="threshold"
                           value={keyThreshold}
@@ -2186,7 +2215,7 @@ export default function Create({ adminSecret = null }) {
                           fixed={2}
                           suffix=" · higher removes more"
                         />
-                      )}
+                      </div>
                     </SourceSection>
                   )}
 
@@ -2214,8 +2243,10 @@ export default function Create({ adminSecret = null }) {
                           </button>
                         ))}
                       </div>
-                      {edgeMode !== "off" && (
-                        <>
+                      {/* Same reserved-slot trick as the key threshold above. */}
+                      <div
+                        className={`zone-slot${edgeMode !== "off" ? " is-active" : ""}`}
+                      >
                           <Slider
                             label="edge threshold"
                             value={edgeThreshold}
@@ -2245,8 +2276,7 @@ export default function Create({ adminSecret = null }) {
                                 : "match text"}
                             </button>
                           </div>
-                        </>
-                      )}
+                      </div>
                     </SourceSection>
                   )}
                 </div>
@@ -2648,6 +2678,11 @@ function SourceSection({ label, status, statusOn, open, onToggle, children }) {
   );
 }
 
+// Uncontrolled-while-dragging: the thumb and readout track a local value at
+// input speed, but the parent (the whole 2700-line Create tree) is committed
+// to at most once per animation frame. Pointer input can outrun the display
+// rate, and each commit re-renders every settings block — throttling here is
+// what keeps fast drags from stacking layout work behind the pointer.
 function Slider({
   label,
   value,
@@ -2658,7 +2693,39 @@ function Slider({
   suffix = "",
   fixed,
 }) {
-  const shown = fixed != null ? Number(value).toFixed(fixed) : value;
+  const [local, setLocal] = useState(value);
+  const dragging = useRef(false);
+  const raf = useRef(0);
+  const pending = useRef(value);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  // Follow external changes (ramp presets, resets) when not mid-drag.
+  useEffect(() => {
+    if (!dragging.current) setLocal(value);
+  }, [value]);
+  useEffect(() => () => cancelAnimationFrame(raf.current), []);
+
+  const handle = (v) => {
+    setLocal(v);
+    pending.current = v;
+    if (!raf.current)
+      raf.current = requestAnimationFrame(() => {
+        raf.current = 0;
+        onChangeRef.current(pending.current);
+      });
+  };
+  // Flush on release/blur so the final value never rides on a cancelled frame.
+  const endDrag = () => {
+    dragging.current = false;
+    if (raf.current) {
+      cancelAnimationFrame(raf.current);
+      raf.current = 0;
+      onChangeRef.current(pending.current);
+    }
+  };
+
+  const shown = fixed != null ? Number(local).toFixed(fixed) : local;
   return (
     <label className="slider">
       <span className="slider-top">
@@ -2673,8 +2740,14 @@ function Slider({
         min={min}
         max={max}
         step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
+        value={local}
+        onPointerDown={() => {
+          dragging.current = true;
+        }}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onBlur={endDrag}
+        onChange={(e) => handle(Number(e.target.value))}
       />
     </label>
   );

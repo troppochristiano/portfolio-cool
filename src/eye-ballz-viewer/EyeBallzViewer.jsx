@@ -246,6 +246,10 @@ function EyeBallzViewerInner(
     // N×N; { x, y } => rectangular. null/undefined or a size >= the rendered grid keeps
     // the full source grid (production default).
     previewGrid = null,
+    // Parent signal that the viewer is hidden behind other content (e.g. a routed
+    // page over the persistent hero): the animation loop and the document-level
+    // cursor tracking early-return, so nothing renders or reacts until unsuspended.
+    suspended = false,
   },
   ref,
 ) {
@@ -295,6 +299,15 @@ function EyeBallzViewerInner(
   // without becoming a dependency (which would re-create the whole Three.js scene).
   const transparentRef = useRef(transparent);
   transparentRef.current = transparent;
+
+  // Mirrored for the same reason: the animation loop and onMouseMove read the live
+  // suspended flag without re-creating the scene. On unsuspend, one forced render
+  // repaints whatever state changes (e.g. a texture swap) landed while paused.
+  const suspendedRef = useRef(suspended);
+  suspendedRef.current = suspended;
+  useEffect(() => {
+    if (!suspended && three.current) three.current.needsRender = true;
+  }, [suspended]);
 
   // Latest onReady, mirrored so the load effect can fire it without re-subscribing.
   const onReadyRef = useRef(onReady);
@@ -563,6 +576,9 @@ function EyeBallzViewerInner(
     renderer.setAnimationLoop(() => {
       const h = three.current;
       if (!h || h.disposed) return;
+      // Hidden behind a routed page — skip everything (uTime freezes too, so a
+      // time-based distortion resumes where it left off instead of jumping).
+      if (suspendedRef.current) return;
       h.uniforms.uTime.value = performance.now() / 1000;
 
       // Subtle mouse-follow tilt: ease the mesh rotation toward the cursor (or back
@@ -677,6 +693,9 @@ function EyeBallzViewerInner(
     const onMouseMove = (e) => {
       const h = three.current;
       if (!h || h.xSteps === 0) return;
+      // Document-level listener: while a routed page covers the hero the cursor
+      // belongs to that page — no look tracking, no tilt, no texture swaps.
+      if (suspendedRef.current) return;
       // A scripted gesture or animation mode owns the avatar — ignore the cursor entirely
       // (no grid look, no tilt) while either is active.
       if (h.gesture || h.animMode) return;

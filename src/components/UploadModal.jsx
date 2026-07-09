@@ -43,10 +43,11 @@ const errorText = (code) =>
 // With adminSecret set (the /admin/create route) the dialog is the same form,
 // but Turnstile never loads and the upload authenticates with the bearer
 // secret instead — the server then waives the daily/capacity limits.
-export default function UploadModal({ baked, adminSecret = null, onClose }) {
+export default function UploadModal({ baked, adminSecret = null, onClose, onSuccess }) {
   const isAnim = baked.frames.length > 1;
   const [name, setName] = useState(baked.name || '');
-  const [author, setAuthor] = useState('');
+  // Converter bakes never carry an author; re-uploaded gallery JSONs might.
+  const [author, setAuthor] = useState(baked.author || '');
   const [thumbFrame, setThumbFrame] = useState(0);
   const [token, setToken] = useState(null);
   const [phase, setPhase] = useState('form'); // 'form' | 'sending' | 'done'
@@ -103,6 +104,7 @@ export default function UploadModal({ baked, adminSecret = null, onClose }) {
         figure: baked,
       });
       setPhase('done');
+      onSuccess?.();
     } catch (e) {
       setError(errorText(e.code));
       setToken(null); // tokens are single-use — Turnstile must re-verify

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isBusy, isRoaming } from '../lib/galleryBus.js';
 import { resolveStyle, STYLE_DEFAULTS } from '../create/styleOptions.js';
 
@@ -64,7 +64,11 @@ export default function AsciiPlayer({
   const hasEdges = Array.isArray(data?.edgeFrames) && data.edgeFrames.length > 0;
 
   // ── playback ──
-  useEffect(() => {
+  // Layout effect so frame 0 is committed to the DOM before paint whenever
+  // `data` swaps (the hero wall trades a downsampled copy for the full figure
+  // on hover) — paired with the sizing layout effect below, the new glyphs and
+  // their new scale land in the same paint instead of flashing mis-scaled.
+  useLayoutEffect(() => {
     const el = ref.current;
     const frames = data?.frames;
     if (!el || !frames || frames.length === 0) return;
@@ -123,10 +127,12 @@ export default function AsciiPlayer({
   const sized = width != null || fit;
 
   // ── transform sizing (width / fit) ──
-  // Declared after playback so frame 0 is already written when we measure. The
-  // <pre> never wraps and offsetWidth/Height ignore transforms, so the natural
-  // size is stable across re-measures — no feedback loop.
-  useEffect(() => {
+  // Layout effect declared after playback: layout effects run in order, so
+  // frame 0 is already written when we measure, and setBox flushes before the
+  // browser paints — a data swap can never paint one frame at the stale scale.
+  // The <pre> never wraps and offsetWidth/Height ignore transforms, so the
+  // natural size is stable across re-measures — no feedback loop.
+  useLayoutEffect(() => {
     if (!sized) {
       setBox(null);
       return;

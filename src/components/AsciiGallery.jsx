@@ -80,6 +80,9 @@ export function AsciiGallery({
   // scattered fly-in -> drift -> settle sequence, "done" is the normal wall
   // (also the skip target). Defaults keep the component usable standalone.
   introState = "done",
+  // A routed page covers the hero: skip all per-frame work (same idea as the
+  // document.hidden check in the loop) and pause every player's rAF.
+  suspended = false,
   onSettled,
 }) {
   const mountRef = useRef(null);
@@ -97,6 +100,10 @@ export function AsciiGallery({
   // The build effect reads the intro state it was mounted under; the prop-watcher
   // effect below drives start/skip through this ref-exposed API.
   const introStateRef = useRef(introState);
+  // Mirrored so the rAF loop and cursor handler read the live value without
+  // re-running the build effect (the wall must survive route changes untouched).
+  const suspendedRef = useRef(suspended);
+  suspendedRef.current = suspended;
   const roamApiRef = useRef(null);
 
   // Assign each of rows*columns planes a figure at random (same idea as the old video
@@ -323,6 +330,9 @@ export function AsciiGallery({
 
     // event listeners
     function onMouseMove(event) {
+      // Covered by a routed page: the cursor belongs to the page, not the wall
+      // (this listener is on document, so it still fires underneath).
+      if (suspendedRef.current) return;
       // The wall ignores the cursor entirely until the intro roam has settled.
       if (introActive) return;
       // While dragging, the pointer handlers own mouseX/mouseY — don't let the absolute
@@ -392,8 +402,9 @@ export function AsciiGallery({
     function animate() {
       rafId = requestAnimationFrame(animate);
 
-      // Skip work while backgrounded.
-      if (document.hidden) return;
+      // Skip work while backgrounded — or while a routed page covers the hero
+      // (the layer is visibility:hidden; composing an invisible wall is waste).
+      if (document.hidden || suspendedRef.current) return;
 
       // update camera target
       const prevTX = targetX;
@@ -674,7 +685,7 @@ export function AsciiGallery({
               desc={fig}
               index={i}
               hold={introState === "roam"}
-              paused={introState !== "done"}
+              paused={suspended || introState !== "done"}
             />
             {FRAMED && (
               <div className="ascii-frame-label">{labelFor(fig.name)}</div>

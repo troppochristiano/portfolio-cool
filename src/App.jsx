@@ -89,7 +89,11 @@ const REDUCED_MOTION =
   typeof window !== "undefined" &&
   window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
-export default function App() {
+// `suspended` (from HeroLayout): a routed page (/create, /gallery) covers the
+// hero. The layer above is already visibility:hidden + inert; this prop pauses
+// everything that would still run underneath — render loops, blinking, the
+// intro, and the ui-chrome's window-level wheel/touch listeners.
+export default function App({ suspended = false }) {
   // Staged reveal so the hero's GPU warm-up (shader compile + texture uploads) happens
   // behind the intro: preload HTTP assets -> mount scene hidden -> wait until the
   // avatar reports GPU-warm -> reveal. Avoids post-reveal jank on the focal point.
@@ -128,6 +132,60 @@ export default function App() {
   const [coverGone, setCoverGone] = useState(!REDUCED_MOTION);
   const introDone = introPhase === "done";
   const skipIntro = () => setIntroPhase("done");
+
+  // Leaving mid-intro = skipping. Once the intro has actually been on screen
+  // (first unsuspended render), navigating away jumps it to "done" so a
+  // half-formed swarm is never resumed on return.
+  const introStartedRef = useRef(false);
+  useEffect(() => {
+    if (!suspended) {
+      introStartedRef.current = true;
+    } else if (introStartedRef.current && !introDone) {
+      setIntroPhase("done");
+    }
+  }, [suspended, introDone]);
+
+  // Deep-link warm-up: when the session starts on /create or /gallery, hold the
+  // ~200-frame avatar preload until that page has settled (load + idle) so it
+  // never competes with the page's own assets. Any unsuspend wins immediately —
+  // the user is heading home and the preload gates the scene mount.
+  const [warmupOk, setWarmupOk] = useState(!suspended);
+  useEffect(() => {
+    if (warmupOk) return;
+    if (!suspended) {
+      setWarmupOk(true);
+      return;
+    }
+    let idleId = 0;
+    let timerId = 0;
+    const arm = () => {
+      if (typeof window.requestIdleCallback === "function") {
+        idleId = window.requestIdleCallback(() => setWarmupOk(true), {
+          timeout: 4000,
+        });
+      } else {
+        // Safari: no requestIdleCallback — a flat delay after load is close enough.
+        timerId = window.setTimeout(() => setWarmupOk(true), 3000);
+      }
+    };
+    if (document.readyState === "complete") {
+      arm();
+    } else {
+      window.addEventListener("load", arm, { once: true });
+    }
+    return () => {
+      window.removeEventListener("load", arm);
+      if (idleId) window.cancelIdleCallback?.(idleId);
+      if (timerId) window.clearTimeout(timerId);
+    };
+  }, [suspended, warmupOk]);
+
+  // A page covering the hero closes anything that could reopen in a stale state.
+  useEffect(() => {
+    if (!suspended) return;
+    setAboutOpen(false);
+    setDialogFigure(null);
+  }, [suspended]);
 
   // forming -> face once the headline is assembled AND the avatar is warm; with the
   // avatar hidden there is no face phase — go straight to the scatter.
@@ -235,11 +293,13 @@ export default function App() {
 
   // Safety net: never let the overlay hang if a ready signal fails to fire (e.g. an
   // asset error). Once the scene is mounted, reveal after at most 12s regardless.
+  // Paused while suspended: a user parked on /gallery must not accumulate a fake
+  // "warm" that would skip the face reveal when they finally come home.
   useEffect(() => {
-    if (!preloaded) return;
+    if (!preloaded || suspended) return;
     const t = window.setTimeout(() => setTimedOut(true), 12000);
     return () => window.clearTimeout(t);
-  }, [preloaded]);
+  }, [preloaded, suspended]);
 
   // Critical avatar assets to warm before reveal: the base (neutral) color grid plus
   // the shared depth maps. The non-critical blink grid keeps loading behind the scene.
@@ -275,8 +335,9 @@ export default function App() {
 
   // Warm the avatar assets (formerly the Loader's job). Lives here — not in the
   // intro overlay — so skipping the intro can never cancel the preload that gates
-  // the scene mount.
+  // the scene mount. `warmupOk` defers this on deep-linked page loads.
   useEffect(() => {
+    if (!warmupOk) return;
     let cancelled = false;
     const tasks = preloadUrls.map((u) => () => preloadImage(u));
     // 24-wide: Cloudflare serves HTTP/2+ over one multiplexed connection, so a
@@ -287,24 +348,27 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [preloadUrls]);
+  }, [preloadUrls, warmupOk]);
 
   return (
     <>
       {/* Phases 1–3: swarm forms the headline, holds while the face fades in, then
-          scatters. Unmounts for good once the roam starts (or on skip). */}
-      {(introPhase === "forming" ||
-        introPhase === "face" ||
-        introPhase === "disperse") && (
-        <IntroOverlay
-          phase={introPhase === "disperse" ? "disperse" : "forming"}
-          onFormed={() => setTextFormed(true)}
-          onDispersed={() =>
-            setIntroPhase((p) => (p === "disperse" ? "roam" : p))
-          }
-        />
-      )}
-      {!introDone && (
+          scatters. Unmounts for good once the roam starts (or on skip). Suspension
+          holds it back entirely: a deep-linked session must not run (or finish) the
+          swarm behind the covering page — it starts on the first visit home. */}
+      {!suspended &&
+        (introPhase === "forming" ||
+          introPhase === "face" ||
+          introPhase === "disperse") && (
+          <IntroOverlay
+            phase={introPhase === "disperse" ? "disperse" : "forming"}
+            onFormed={() => setTextFormed(true)}
+            onDispersed={() =>
+              setIntroPhase((p) => (p === "disperse" ? "roam" : p))
+            }
+          />
+        )}
+      {!introDone && !suspended && (
         <button
           type="button"
           className="corner-pill intro-skip"
@@ -331,6 +395,7 @@ export default function App() {
             <AsciiGallery
               figures={figures}
               onSelect={setDialogFigure}
+              suspended={suspended}
               introState={
                 introDone ? "done" : introPhase === "roam" ? "roam" : "waiting"
               }
@@ -350,7 +415,11 @@ export default function App() {
                 photos={photoConfigs}
                 urlFor={urlFor}
                 status="neutral"
-                autoBlink
+                // Covered by a page: stop blinking (the existing autoBlink
+                // effect tears the timer down and reopens the eyes) and pause
+                // the render loop + cursor tracking via `suspended`.
+                autoBlink={!suspended}
+                suspended={suspended}
                 transparent
                 // Intro: hold the face neutral and ignore the cursor until the intro
                 // is over (the lookAround gesture still plays over this). Flipping to
@@ -368,8 +437,11 @@ export default function App() {
           )}
         </Suspense>
       )}
-      {/* UI chrome appears only once the intro is over, with a soft fade-in. */}
-      {preloaded && introDone && (
+      {/* UI chrome appears only once the intro is over, with a soft fade-in.
+          Unmounted while a page covers the hero: AboutOverlay's dissolve hook
+          binds wheel/touch to window with preventDefault, and those listeners
+          must never react to (or block) scrolling on the page above. */}
+      {preloaded && introDone && !suspended && (
         <>
           <div className="ui-chrome">
             <Nav

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import AsciiPlayer from '../components/AsciiPlayer.jsx';
 import FigureCard from '../components/FigureCard.jsx';
 import FigureDialog from '../components/FigureDialog.jsx';
+import UploadModal from '../components/UploadModal.jsx';
 import {
   adminList,
   adminFigureData,
@@ -11,6 +12,9 @@ import {
 } from '../lib/api.js';
 import { SECRET_KEY } from '../lib/adminSecret.js';
 import './Admin.css';
+// The share modal's styles live in Create.css; every rule there is scoped
+// under .create-page, so importing it cannot restyle the admin page itself.
+import './Create.css';
 
 // Moderation — an unlinked route with two views:
 //  · queue    new pending submissions with inline previews; approve puts a
@@ -22,6 +26,33 @@ import './Admin.css';
 // the actual gatekeeping (a wrong secret just gets 401s).
 
 const typeOf = (item) => ((item.framesCount ?? 1) > 1 ? 'clip' : 'photo');
+
+// Light sanity check for a "download json" file before handing it to the
+// share modal (which reads frames/cols/style unguarded). Mirrors just enough
+// of the server's validation to give a readable error instead of a crash or
+// an opaque 400 — the server stays the real gatekeeper.
+function checkFigureJson(fig) {
+  if (typeof fig !== 'object' || fig === null || Array.isArray(fig))
+    return 'not a figure file — expected a JSON object.';
+  if (
+    !Array.isArray(fig.frames) ||
+    fig.frames.length === 0 ||
+    fig.frames.some((f) => typeof f !== 'string')
+  )
+    return 'not a figure file — "frames" must be a non-empty array of strings.';
+  if (![fig.cols, fig.rows, fig.fps].every((n) => Number.isInteger(n) && n > 0))
+    return 'not a figure file — cols/rows/fps must be positive integers.';
+  if (fig.color !== false && fig.color !== undefined)
+    return "color figures can't be uploaded — rebake without color.";
+  if (
+    fig.edgeFrames != null &&
+    (!Array.isArray(fig.edgeFrames) ||
+      fig.edgeFrames.length !== fig.frames.length ||
+      fig.edgeFrames.some((f) => typeof f !== 'string'))
+  )
+    return 'broken edge layer — edgeFrames must mirror frames one-to-one.';
+  return null;
+}
 
 function PendingCard({ item, secret, onDone }) {
   const [data, setData] = useState(null);
@@ -101,6 +132,10 @@ export default function Admin() {
   const [library, setLibrary] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [gateError, setGateError] = useState('');
+  // Direct .json upload ("transfer" figures made elsewhere into this DB).
+  const fileRef = useRef(null);
+  const [jsonUpload, setJsonUpload] = useState(null); // parsed figure or null
+  const [jsonError, setJsonError] = useState('');
 
   const forget = useCallback(() => {
     localStorage.removeItem(SECRET_KEY);
@@ -141,6 +176,35 @@ export default function Admin() {
     adminList(secret, 'all')
       .then(({ items }) => setLibrary(items))
       .catch(() => {});
+  };
+
+  // After a direct json upload lands (as pending), re-pull both lists so the
+  // queue count updates without a reload.
+  const refresh = useCallback(() => {
+    Promise.all([adminList(secret, 'pending'), adminList(secret, 'all')])
+      .then(([p, all]) => {
+        setPending(p.items);
+        setLibrary(all.items);
+      })
+      .catch(() => {});
+  }, [secret]);
+
+  const onJsonFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // so the same file can be re-selected
+    if (!file) return;
+    setJsonError('');
+    try {
+      const fig = JSON.parse(await file.text());
+      const bad = checkFigureJson(fig);
+      if (bad) {
+        setJsonError(`${file.name}: ${bad}`);
+        return;
+      }
+      setJsonUpload(fig);
+    } catch {
+      setJsonError(`"${file.name}" is not valid JSON.`);
+    }
   };
 
   // Dialog moderation actions patch the library in place.
@@ -211,10 +275,22 @@ export default function Admin() {
           </button>
         </div>
         <div className="admin-head__actions">
+          <button className="admin-btn" onClick={() => fileRef.current?.click()}>
+            ↑ upload json
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".json,application/json"
+            hidden
+            onChange={onJsonFile}
+          />
           <Link className="admin-btn" to="/admin/create">+ create</Link>
           <button className="admin-btn" onClick={forget}>lock</button>
         </div>
       </header>
+
+      {jsonError && <p className="admin-error">{jsonError}</p>}
 
       {tab === 'queue' && (
         <>
@@ -269,6 +345,25 @@ export default function Admin() {
           admin={{ item: selected, secret, onChanged: libraryChanged }}
           onClose={() => setSelectedId(null)}
         />
+      )}
+
+      {/* Direct .json upload → same share modal as /admin/create. The wrapper
+          class only scopes the modal's Create.css rules; its layout styles are
+          neutralized inline (the backdrop is position:fixed, so the wrapper
+          contributes zero layout of its own). */}
+      {jsonUpload && (
+        <div className="create-page" style={{ height: 'auto', overflow: 'visible' }}>
+          <UploadModal
+            baked={
+              jsonUpload.color === undefined
+                ? { ...jsonUpload, color: false }
+                : jsonUpload
+            }
+            adminSecret={secret}
+            onSuccess={refresh}
+            onClose={() => setJsonUpload(null)}
+          />
+        </div>
       )}
     </div>
   );

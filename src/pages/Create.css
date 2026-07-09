@@ -137,6 +137,18 @@
         position: sticky;
         top: 0;
     }
+    /* Safari: pin the rail and the sticky monitor column onto their own
+       compositing layers so preview churn during slider drags can't trigger
+       the layer re-rasterization that blanks them for frames. Inert on other
+       engines: neither element contains position:fixed descendants and the
+       two grid columns never overlap, so the new containing block / stacking
+       context changes nothing visually. */
+    .create-page .rail,
+    .create-page .stage-row .monitor-col {
+        transform: translateZ(0);
+        -webkit-backface-visibility: hidden;
+        backface-visibility: hidden;
+    }
 }
 @media (max-width: 980px) {
     /* not enough room for two columns — stack, monitor (+ actions) on top via
@@ -713,6 +725,19 @@
     color: var(--muted);
 }
 .create-page .zone-body > * + * {
+    margin-top: 0.8rem;
+}
+/* Reserved-space slot: conditional controls (key/edge thresholds) keep their
+   layout box while their mode is off, so toggling never resizes the section —
+   which used to pop the bottom border and re-trigger the preview refit. Hidden
+   via visibility so the controls also leave hit-testing and the tab order. */
+.create-page .zone-slot {
+    visibility: hidden;
+}
+.create-page .zone-slot.is-active {
+    visibility: visible;
+}
+.create-page .zone-slot > * + * {
     margin-top: 0.8rem;
 }
 
