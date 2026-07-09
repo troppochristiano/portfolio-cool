@@ -18,10 +18,6 @@
 let interacting = false;
 let roaming = false;
 
-export function isInteracting() {
-  return interacting;
-}
-
 export function setInteracting(value) {
   interacting = !!value;
 }

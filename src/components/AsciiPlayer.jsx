@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isBusy, isRoaming } from '../lib/galleryBus.js';
 import { resolveStyle, STYLE_DEFAULTS } from '../create/styleOptions.js';
+import { prefersReducedMotion } from '../lib/utils.js';
 
 /**
  * Plays a `figure.json` exported by the ascii media converter. The data shape is
@@ -86,8 +87,7 @@ export default function AsciiPlayer({
     };
 
     write(0);
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (paused || reduce || frames.length <= 1) return;
+    if (paused || prefersReducedMotion() || frames.length <= 1) return;
 
     const interval = 1000 / (data.fps || 12);
     // While the CSS3D wall is re-compositing every frame (a user drag OR the

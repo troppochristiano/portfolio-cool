@@ -28,6 +28,7 @@ import { AboutOverlay } from "./components/AboutOverlay";
 import FigureDialog from "./components/FigureDialog";
 import { getRandomFigures } from "./lib/api";
 import { preloadImage, runPool } from "./lib/preload";
+import { isCoarsePointer, prefersReducedMotion } from "./lib/utils.js";
 
 // Map photos.js entries into the viewer's photo-config shape (same as the bundled demo),
 // pointing thumbnails at the public/photos copy.
@@ -85,9 +86,7 @@ const PREVIEW_GRID = (() => {
 // Reduced motion: skip the cinematic intro entirely — a plain black cover fades
 // out once the scene is warm. Evaluated once; mid-session OS toggles are rare
 // and a reload picks the change up.
-const REDUCED_MOTION =
-  typeof window !== "undefined" &&
-  window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+const REDUCED_MOTION = prefersReducedMotion();
 
 // `suspended` (from HeroLayout): a routed page (/create, /gallery) covers the
 // hero. The layer above is already visibility:hidden + inert; this prop pauses
@@ -235,7 +234,7 @@ export default function App({ suspended = false }) {
       viewerRef.current?.setIntroDistortion(1);
       distortTweenRef.current = gsap.to(proxy, {
         v: 0,
-        duration: window.matchMedia?.("(pointer: coarse)").matches ? 2.5 : 4,
+        duration: isCoarsePointer() ? 2.5 : 4,
         ease: "power2.out",
         onUpdate: () => viewerRef.current?.setIntroDistortion(proxy.v),
       });
@@ -276,9 +275,8 @@ export default function App({ suspended = false }) {
     loadPool();
   }, [loadPool]);
 
-  // Scroll-to-open is now owned by the dissolve effect (useDissolveReveal inside
-  // AboutOverlay): a downward wheel on the closed hero scrubs the overlay open. The old
-  // one-shot deltaY>24 listener lived here; it's gone so the two don't fight.
+  // Scroll-to-open is owned by the dissolve effect (useDissolveReveal inside
+  // AboutOverlay): a downward wheel on the closed hero scrubs the overlay open.
 
   // Reveal the "^" open hint once the intro is over (both pointer types — it signals
   // the scroll/swipe-up-to-open gesture); hide it for good once the overlay opens.

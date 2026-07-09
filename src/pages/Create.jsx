@@ -22,6 +22,7 @@ import {
 } from "../create/styleOptions.js";
 import UploadModal from "../components/UploadModal.jsx";
 import PngFrameModal from "../components/PngFrameModal.jsx";
+import { clamp01, fmtTime, prefersReducedMotion, rgbToHex, MONO_ADVANCE } from "../lib/utils.js";
 import "./Create.css";
 
 const RAMP_PRESETS = {
@@ -57,10 +58,6 @@ const BRUSH_SHADES = [
   "#000000",
 ];
 
-const fmtTime = (s) => {
-  if (!isFinite(s) || s < 0) s = 0;
-  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-};
 
 // With an adminSecret (the /admin/create route), the tool is identical except
 // the share dialog: no Turnstile and the server waives the upload limits.
@@ -577,9 +574,7 @@ export default function Create({ adminSecret = null }) {
   // ── baked playback loop ───────────────────────────────────────
   useEffect(() => {
     if (mode !== "baked" || !baked) return;
-    const reduce = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
+    const reduce = prefersReducedMotion();
     const write = (i) =>
       writeLayers(baked.frames[i], baked.edgeFrames?.[i] ?? null);
     write(0);
@@ -929,7 +924,6 @@ export default function Create({ adminSecret = null }) {
   // ── crop marquee + eyedropper (shared stage overlay) ──────────
   const overlayPos = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const clamp01 = (v) => Math.min(1, Math.max(0, v));
     return {
       x: clamp01((e.clientX - rect.left) / rect.width),
       y: clamp01((e.clientY - rect.top) / rect.height),
@@ -974,10 +968,7 @@ export default function Create({ adminSecret = null }) {
       d = tctx.getImageData(0, 0, 1, 1).data;
     }
     if (!d) return;
-    const hex =
-      "#" +
-      [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
-    setKeyColor(hex);
+    setKeyColor(rgbToHex(d[0], d[1], d[2]));
     setKeyMode("custom");
     setPicking(false);
   };
@@ -1021,7 +1012,6 @@ export default function Create({ adminSecret = null }) {
   const cropEditRef = useRef(null); // { role, start:{x,y}, rect } during a drag
   const stagePos = (e) => {
     const rect = mediaBoxRef.current.getBoundingClientRect();
-    const clamp01 = (v) => Math.min(1, Math.max(0, v));
     return {
       x: clamp01((e.clientX - rect.left) / rect.width),
       y: clamp01((e.clientY - rect.top) / rect.height),
@@ -1245,7 +1235,7 @@ export default function Create({ adminSecret = null }) {
   // pixel-identical. Exports are untouched (they render their own canvas from
   // the true cellPx), only the readout must divide the measurement back.
   const MAX_PRE_PX = 4000;
-  const estNatW = cols * cellPx * 0.6 * (1 + (letterSpacing || 0));
+  const estNatW = cols * cellPx * MONO_ADVANCE * (1 + (letterSpacing || 0));
   const estNatH = rows * cellPx * lineHeight;
   const fitK = Math.min(
     1,
@@ -1260,7 +1250,7 @@ export default function Create({ adminSecret = null }) {
   const readoutW =
     hasSource && outputPx
       ? Math.round(outputPx.w / fitK)
-      : Math.round(cols * cellPx * 0.6);
+      : Math.round(cols * cellPx * MONO_ADVANCE);
   const readoutH =
     hasSource && outputPx ? Math.round(outputPx.h / fitK) : rows * cellPx;
 
@@ -1424,10 +1414,6 @@ export default function Create({ adminSecret = null }) {
           <h1 className="title">
             ascii media converter{adminSecret ? " · admin" : ""}
           </h1>
-          {/* <p className="tagline">
-            drop a clip or a photo — or draw one — tune the grid → bake to
-            frames → export json for the web
-          </p>*/}
         </header>
 
         <div className="workbench">
@@ -2126,11 +2112,6 @@ export default function Create({ adminSecret = null }) {
                           {imageName}
                         </div>
                       )}
-                      {/* <p className="hint">
-                        {drawEnabled
-                          ? `draw over the ${hasPhoto ? "photo" : "blank paper"} — shade = brightness · fill buckets a region · erase removes ink · cut removes photo (transparent)${hasPhoto ? " · replacing the photo clears the drawing" : ""}`
-                          : "converting the photo only — turn on “draw on photo” to overlay your drawing"}
-                      </p>*/}
                     </div>
                   )}
 

@@ -11,15 +11,12 @@
  * grid, so per-frame cost stays trivial even inside a rAF loop.
  */
 
-// Dark → dense. Keep this matching your drop animation's ramp.
-export const DEFAULT_RAMP = ' .:-=+*#%@';
-
 /**
  * Split a ramp into an array of glyphs. `Array.from` splits by code
  * point, so multi-byte glyphs count as one each. Pass an array through
  * untouched.
  */
-export function toGlyphs(ramp) {
+function toGlyphs(ramp) {
   return Array.isArray(ramp) ? ramp : Array.from(ramp);
 }
 
@@ -61,7 +58,7 @@ const MAX_RGB_DIST = Math.sqrt(3) * 255;
  * Operates on the raw source RGB — deliberately before gamma/invert — so
  * "black background" means actually-dark source pixels regardless of display.
  */
-export function isKeyed(r, g, b, keyMode, t, target) {
+function isKeyed(r, g, b, keyMode, t, target) {
   if (!keyMode || keyMode === 'off') return false;
   if (keyMode === 'green') {
     // Greenness: ~1 for pure green, ~0 for any gray/neutral pixel.
@@ -104,7 +101,7 @@ const ALPHA_CUTOFF = 128;
  * path). Keyed cells and mostly-transparent cells get the sentinel -1:
  * they render blank and every later stage skips them.
  */
-export function lumaGrid(data, srcW, srcH, cols, rows, key) {
+function lumaGrid(data, srcW, srcH, cols, rows, key) {
   const k = keyOf(key);
   const luma = new Float32Array(cols * rows);
   const bw = srcW / cols;
@@ -144,7 +141,7 @@ export function lumaGrid(data, srcW, srcH, cols, rows, key) {
  * <1 flattens, >1 separates tones — often the difference between mush and a
  * readable figure on low-contrast sources).
  */
-export function adjustLuma(luma, gamma, invert, contrast = 1) {
+function adjustLuma(luma, gamma, invert, contrast = 1) {
   for (let i = 0; i < luma.length; i++) {
     let v = luma[i];
     if (v < 0) continue;
@@ -165,7 +162,7 @@ export function adjustLuma(luma, gamma, invert, contrast = 1) {
  * whitelist (they appear in the detailed ramp), so edge-mode figures upload
  * unchanged.
  */
-export const EDGE_GLYPHS = ['-', '/', '|', '\\'];
+const EDGE_GLYPHS = ['-', '/', '|', '\\'];
 
 /**
  * Sobel edge detector over the (adjusted) cell-resolution luma grid.
@@ -176,7 +173,7 @@ export const EDGE_GLYPHS = ['-', '/', '|', '\\'];
  * the center value so keyed/cut boundaries don't turn into thick outlines —
  * only real tonal edges inside the content register.
  */
-export function detectEdges(luma, cols, rows, threshold) {
+function detectEdges(luma, cols, rows, threshold) {
   const out = new Int8Array(cols * rows).fill(-1);
   const at = (x, y, center) => {
     if (x < 0) x = 0; else if (x >= cols) x = cols - 1;
@@ -213,7 +210,7 @@ export function detectEdges(luma, cols, rows, threshold) {
  * decodes them back to EDGE_GLYPHS). mode 'overlay' draws edges over the
  * ramp output; 'only' blanks everything that isn't an edge.
  */
-export function applyEdges(indices, edgeMap, mode) {
+function applyEdges(indices, edgeMap, mode) {
   for (let i = 0; i < indices.length; i++) {
     if (edgeMap[i] >= 0) indices[i] = -2 - edgeMap[i];
     else if (mode === 'only' && indices[i] >= 0) indices[i] = -1;
@@ -235,7 +232,7 @@ const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
  * - bayer: ordered dithering; a tiled threshold offset scaled to one
  *   quantization step. Stable frame-to-frame (no crawl on video).
  */
-export function quantizeLuma(luma, cols, rows, glyphCount, dither) {
+function quantizeLuma(luma, cols, rows, glyphCount, dither) {
   const n = Math.max(1, glyphCount - 1);
   const out = new Int16Array(cols * rows);
   const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -284,7 +281,7 @@ export function quantizeLuma(luma, cols, rows, glyphCount, dither) {
  * Stage 5: glyph indices → frame string. -1 → ' ' (transparent cell),
  * codes ≤ -2 → edge direction glyphs (see applyEdges).
  */
-export function indicesToFrame(indices, cols, rows, glyphs) {
+function indicesToFrame(indices, cols, rows, glyphs) {
   const lines = new Array(rows);
   for (let y = 0; y < rows; y++) {
     let line = '';
@@ -305,7 +302,7 @@ export function indicesToFrame(indices, cols, rows, glyphs) {
  * Stacking base under edge reproduces indicesToFrame exactly (edges win on top),
  * which is what the two-layer renderers rely on.
  */
-export function indicesToLayers(indices, cols, rows, glyphs) {
+function indicesToLayers(indices, cols, rows, glyphs) {
   const base = new Array(rows);
   const edge = new Array(rows);
   for (let y = 0; y < rows; y++) {
@@ -328,12 +325,11 @@ export function indicesToLayers(indices, cols, rows, glyphs) {
 }
 
 /**
- * The whole chain in one call — what the live preview and the bake use.
- * data: Uint8ClampedArray from ctx.getImageData(...).data, srcW×srcH.
+ * Shared pipeline core: RGBA buffer → glyph indices.
  * opts: { cols, rows, ramp, invert, gamma, contrast, key, dither, edge }.
  * edge: { mode: 'off'|'overlay'|'only', threshold: 0..1 } or undefined.
  */
-export function convertFrame(data, srcW, srcH, opts) {
+function convertToIndices(data, srcW, srcH, opts) {
   const { cols, rows, ramp, invert, gamma, contrast = 1, key, dither = 'off', edge } = opts;
   const glyphs = toGlyphs(ramp);
   const luma = lumaGrid(data, srcW, srcH, cols, rows, key);
@@ -344,6 +340,15 @@ export function convertFrame(data, srcW, srcH, opts) {
   const edgeMap = edgeOn ? detectEdges(luma, cols, rows, edge.threshold ?? 0.25) : null;
   const indices = quantizeLuma(luma, cols, rows, glyphs.length, dither);
   if (edgeMap) applyEdges(indices, edgeMap, edge.mode);
+  return { indices, glyphs, cols, rows };
+}
+
+/**
+ * The whole chain in one call — what the live preview and the bake use.
+ * data: Uint8ClampedArray from ctx.getImageData(...).data, srcW×srcH.
+ */
+export function convertFrame(data, srcW, srcH, opts) {
+  const { indices, glyphs, cols, rows } = convertToIndices(data, srcW, srcH, opts);
   return indicesToFrame(indices, cols, rows, glyphs);
 }
 
@@ -355,14 +360,7 @@ export function convertFrame(data, srcW, srcH, opts) {
  * pointless (edgeFrame would be all spaces) — use convertFrame instead.
  */
 export function convertFrameLayers(data, srcW, srcH, opts) {
-  const { cols, rows, ramp, invert, gamma, contrast = 1, key, dither = 'off', edge } = opts;
-  const glyphs = toGlyphs(ramp);
-  const luma = lumaGrid(data, srcW, srcH, cols, rows, key);
-  adjustLuma(luma, gamma, invert, contrast);
-  const edgeOn = edge && edge.mode && edge.mode !== 'off';
-  const edgeMap = edgeOn ? detectEdges(luma, cols, rows, edge.threshold ?? 0.25) : null;
-  const indices = quantizeLuma(luma, cols, rows, glyphs.length, dither);
-  if (edgeMap) applyEdges(indices, edgeMap, edge.mode);
+  const { indices, glyphs, cols, rows } = convertToIndices(data, srcW, srcH, opts);
   const { base, edge: edgeLayer } = indicesToLayers(indices, cols, rows, glyphs);
   return { frame: base, edgeFrame: edgeLayer };
 }

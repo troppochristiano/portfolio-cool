@@ -26,6 +26,7 @@ import { applyShader, createUniforms } from "./shader.js";
 import { generateSteps, subsampleSteps } from "./steps.js";
 import { listGestures, sampleGesture, startGesture } from "./gestures.js";
 import { mergeSettings } from "./settings.js";
+import { easeInOutCubic, isCoarsePointer } from "../lib/utils.js";
 import "./EyeBallzViewer.css";
 
 const FPS = 24;
@@ -34,9 +35,7 @@ const FPS = 24;
 // renders (see the render gate): the render+asciify pass is the single
 // heaviest per-frame cost on mobile, and above ~30fps the ASCII grid
 // quantizes the difference away anyway.
-const COARSE_POINTER =
-  typeof window !== "undefined" &&
-  window.matchMedia?.("(pointer: coarse)").matches;
+const COARSE_POINTER = isCoarsePointer();
 
 // Device pixel ratio to render at. Cap at 2 so high-DPI displays don't rasterize 4–9× the
 // pixels for no visible gain. When ASCII is on the WebGL canvas is invisible (opacity:0)
@@ -72,8 +71,6 @@ const PLANE_SEGMENTS =
 
 // Smallest the floating window can be resized to (px), in `windowed` mode.
 const MIN_WINDOW = 240;
-const easeInOutCubic = (t) =>
-  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
 // How long a look "sweep" takes when easing through the grid cells — used by the touch
 // sweep, the animation-mode recenter, and the one-shot eased return to mouse tracking.
@@ -158,32 +155,6 @@ function EyeBallzViewerInner(
     width = 800,
     height = 800,
 
-    // initialSettings ={
-    //   "displacementScale": 0.5,
-    //   "ascii": {
-    //     "enabled": false,
-    //     "characters": " .:-+*=%@#",
-    //     "invert": false,
-    //     "color": false,
-    //     "resolution": 0.15,
-    //     "fgColor": "#ffffff",
-    //     "bgColor": "#000000"
-    //   },
-    //   "distortion": {
-    //     "waveAmp": 0,
-    //     "waveSpeed": 2,
-    //     "swirl": 0,
-    //     "glitch": 0,
-    //     "noise": 0,
-    //     "rgbShift": 0
-    //   },
-    //   "tilt": {
-    //     "enabled": true,
-    //     "maxTiltX": 6,
-    //     "maxTiltY": 6
-    //   }
-    // },
-    //
     initialSettings = {
       displacementScale: 0.5,
       ascii: {
@@ -192,7 +163,6 @@ function EyeBallzViewerInner(
         invert: true,
         color: false,
         resolution: 0.27,
-        // fgColor: "#00ff88",
         fgColor: "#0000ff",
         bgColor: "#000000",
       },

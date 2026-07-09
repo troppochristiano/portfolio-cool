@@ -9,6 +9,7 @@ import AsciiPlayer from "./AsciiPlayer.jsx";
 import { setInteracting, setRoaming } from "../lib/galleryBus.js";
 import { downsampleFigure } from "../lib/downsampleFigure.js";
 import { getFigureData } from "../lib/api.js";
+import { isCoarsePointer } from "../lib/utils.js";
 
 // A curved wall of floating ASCII players, ported from the Three.js video gallery
 // (REFERENCE CODE/cg-threejs-video-gallery) — same camera parallax, per-plane
@@ -24,7 +25,6 @@ function labelFor(name) {
 // values are multiplied by SCALE below so a PLANE_PX-wide DOM player occupies its slot:
 // CSS3D treats 1 world unit as 1 CSS pixel, so we work in pixel space and render the
 // ascii text at native resolution (crisp) rather than CSS-downscaling a tiny plane.
-// const PLANE_PX = 320; // rendered width of one ascii player, in px
 const PLANE_PX = 160; // rendered width of one ascii player, in px
 const BASE_IMAGE_WIDTH = 2; // the reference plane width, in world units
 const SCALE = PLANE_PX / BASE_IMAGE_WIDTH;
@@ -38,8 +38,7 @@ const FRAMED = false;
 // Touch device or small viewport — evaluated once at module load. Drives both
 // the wall density and the per-plane player size below.
 const COARSE_OR_SMALL =
-  typeof window !== "undefined" &&
-  (window.matchMedia?.("(pointer: coarse)").matches || window.innerWidth < 768);
+  isCoarsePointer() || (typeof window !== "undefined" && window.innerWidth < 768);
 
 // Wall density. Each plane is a retained CSS3D compositor layer transformed every
 // frame, so on phones (where most columns sit off-screen anyway) a smaller grid

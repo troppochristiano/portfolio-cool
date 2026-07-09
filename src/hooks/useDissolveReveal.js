@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import gsap from "gsap";
+import { prefersReducedMotion } from "../lib/utils.js";
 
 /**
  * useDissolveReveal — CodeGrid KVS "dissolve band" effect, driving a FULL-PAGE
@@ -323,8 +324,7 @@ export function useDissolveReveal({
     [duration, renderProgress]
   );
 
-  const reduceMotion = () =>
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduceMotion = prefersReducedMotion;
 
   // ---- button path: full instant sweeps ----
   const playOpen = useCallback(() => {

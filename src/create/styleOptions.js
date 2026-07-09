@@ -13,7 +13,7 @@ export const FONT_STACKS = {
   lucida: '"Lucida Console", "Lucida Sans Typewriter", monospace',
 };
 
-export const STYLE_LIMITS = {
+const STYLE_LIMITS = {
   LETTER_SPACING_MIN: 0,
   LETTER_SPACING_MAX: 0.5, // em
   LINE_HEIGHT_MIN: 0.7,

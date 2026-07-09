@@ -42,8 +42,7 @@ const SOCIALS = [
 //
 // Open/close are driven by the KVS "dissolve" effect (useDissolveReveal): the overlay builds
 // bottom→top on open and dissolves top→bottom on close, revealing the hero behind. The same
-// hook owns the scroll-to-open scrub and the pull-to-close-at-top scrub, so the old one-shot
-// wheel-open (in App) and the 690px pull-to-close indicator are no longer needed.
+// hook owns the scroll-to-open scrub and the pull-to-close-at-top scrub.
 export function AboutOverlay({
   open,
   onOpenChange,

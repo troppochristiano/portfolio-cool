@@ -5,8 +5,7 @@
 // Adding a new gesture = adding one entry to GESTURES; it then auto-surfaces in the
 // imperative API and the debug panel.
 
-const easeInOutCubic = (t) =>
-  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+import { easeInOutCubic } from "../lib/utils.js";
 
 const easeInOutSine = (t) => -(Math.cos(Math.PI * t) - 1) / 2;
 
