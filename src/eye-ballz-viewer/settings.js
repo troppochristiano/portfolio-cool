@@ -1,6 +1,10 @@
 // The single, serializable settings object that fully describes a "look": depth,
 // the AsciiEffect options, and the shader distortion amounts. Tweak it in the UI,
 // Export it as JSON, then paste it back as `initialSettings` in another project.
+//
+// NOTE: these are the portable package's neutral defaults, NOT the shipped look —
+// EyeBallzViewer's inline `initialSettings` default overrides them via mergeSettings
+// (the inline object wins key-by-key).
 
 export const DEFAULT_SETTINGS = {
   displacementScale: 0.5,

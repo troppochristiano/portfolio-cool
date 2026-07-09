@@ -2,7 +2,6 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
-  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -27,6 +26,22 @@ import { generateSteps, subsampleSteps } from "./steps.js";
 import { listGestures, sampleGesture, startGesture } from "./gestures.js";
 import { mergeSettings } from "./settings.js";
 import { easeInOutCubic, isCoarsePointer } from "../lib/utils.js";
+import {
+  applyTexture,
+  resolveBase,
+  isBlinkVariant,
+  disposeExpr,
+} from "./avatarState.js";
+import { useAutoBlink } from "./useAutoBlink.js";
+import { useWindowChrome } from "./useWindowChrome.js";
+import {
+  GridPanel,
+  ExpressionPanel,
+  AsciiPanel,
+  DistortionPanel,
+  TiltPanel,
+  CRTPanel,
+} from "./EyeBallzDebugPanels.jsx";
 import "./EyeBallzViewer.css";
 
 const FPS = 24;
@@ -69,9 +84,6 @@ const effectiveAsciiResolution = (baseRes, containerWidth) =>
 const PLANE_SEGMENTS =
   Number(new URLSearchParams(window.location.search).get("seg")) || 192;
 
-// Smallest the floating window can be resized to (px), in `windowed` mode.
-const MIN_WINDOW = 240;
-
 // How long a look "sweep" takes when easing through the grid cells — used by the touch
 // sweep, the animation-mode recenter, and the one-shot eased return to mouse tracking.
 const LOOK_TRANSITION_MS = 300;
@@ -90,21 +102,6 @@ const SMILE_STOP_MS = 250; // revert this long after the circular motion stops
 const FOREHEAD_X_HALF = 0.4; // half-width of the brow zone
 const FOREHEAD_Y_TOP = -0.95; // upper edge — above this is the top of the head / empty space
 const FOREHEAD_Y_BOTTOM = -0.2; // lower edge — below this is the eyes / face center
-
-// Resolve the blink variant the auto-blink loop flashes on top of a base expression.
-// Convention: "neutral" → "blink", any other "<name>" → "<name>Blink". Returns the
-// variant only if it's actually loaded, so adding a new expression + its blink grid
-// (e.g. "angry" + "angryBlink") just works with no code change here.
-const blinkVariantOf = (base, expr) => {
-  const variant = base === "neutral" ? "blink" : `${base}Blink`;
-  return expr[variant] ? variant : null;
-};
-// Auto-blink timing (ms). Random gap between blinks, how long the eyes stay shut,
-// and the odds of an immediate second blink.
-const BLINK_MIN_GAP = 2800;
-const BLINK_MAX_GAP = 6000;
-const BLINK_DURATION = 120;
-const DOUBLE_BLINK_CHANCE = 0.15;
 
 // Default resolver for each grid cell's image + depth-map URL. Matches the repo's
 // ./outputs/<prefix>/... layout. Override via the `urlFor` prop to host elsewhere.
@@ -258,12 +255,13 @@ function EyeBallzViewerInner(
   const [importText, setImportText] = useState("");
   const [exportText, setExportText] = useState("");
 
-  // Windowed scroll-anchoring: true = fixed (stays on screen), false = absolute (scrolls
-  // with the page). Mirrored into a ref so the imperative pointer handlers read the live
-  // mode without stale closures.
-  const [isAnchored, setIsAnchored] = useState(anchored);
-  const anchoredRef = useRef(isAnchored);
-  anchoredRef.current = isAnchored;
+  const {
+    isAnchored,
+    onTitlebarPointerDown,
+    onHandlePointerDown,
+    restoreWindow,
+    toggleAnchor,
+  } = useWindowChrome({ containerRef, windowed, width, height, anchored });
 
   // Mirrored so the mount effect's createAscii closure reads the live transparent flag
   // without becoming a dependency (which would re-create the whole Three.js scene).
@@ -1146,58 +1144,7 @@ function EyeBallzViewerInner(
   }, [status]);
 
   // ---- Auto-blink: flash the current base's blink variant on a random cadence. ----
-  useEffect(() => {
-    if (!autoBlink) return;
-    let timer;
-    const reapply = (h) => {
-      if (h.steps.length) applyTexture(h, h.steps[h.yIndex][h.xIndex]);
-    };
-    const eyesOpen = (h) => {
-      h.blinking = false;
-      h.displayExpression = h.baseExpression;
-      reapply(h);
-    };
-    const eyesShut = (h, after) => {
-      const variant = blinkVariantOf(h.baseExpression, h.expr);
-      // Skip if this base has no (loaded) blink variant — just stay open.
-      if (variant) {
-        h.blinking = true;
-        h.displayExpression = variant;
-        reapply(h);
-      }
-      timer = setTimeout(after, BLINK_DURATION);
-    };
-    const schedule = () => {
-      const gap =
-        BLINK_MIN_GAP + Math.random() * (BLINK_MAX_GAP - BLINK_MIN_GAP);
-      timer = setTimeout(() => {
-        const h = three.current;
-        if (!h) return schedule();
-        eyesShut(h, () => {
-          eyesOpen(h);
-          if (Math.random() < DOUBLE_BLINK_CHANCE) {
-            timer = setTimeout(() => {
-              const h2 = three.current;
-              if (!h2) return schedule();
-              eyesShut(h2, () => {
-                eyesOpen(h2);
-                schedule();
-              });
-            }, 140);
-          } else {
-            schedule();
-          }
-        });
-      }, gap);
-    };
-    schedule();
-    return () => {
-      clearTimeout(timer);
-      const h = three.current;
-      if (h && h.blinking) eyesOpen(h); // don't leave the eyes stuck shut
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoBlink, activeKey]);
+  useAutoBlink(three, autoBlink, activeKey);
 
   // ---- Hold "c" to smile: smile while held, return to the prior expression on release. --
   useEffect(() => {
@@ -1245,178 +1192,6 @@ function EyeBallzViewerInner(
       }
     };
   }, []);
-
-  // ---- Window mode: drag / resize / restore --------------------------------------
-  // All geometry is driven imperatively on the container's style (never via React
-  // state) so dragging/resizing don't trigger re-renders, and React never clobbers
-  // the live size on an unrelated re-render. The mount effect's ResizeObserver keeps
-  // the renderer/camera/ASCII in sync; eye-tracking reads getBoundingClientRect live.
-  const winTween = useRef(0);
-  const cancelWinTween = () => {
-    if (winTween.current) {
-      cancelAnimationFrame(winTween.current);
-      winTween.current = 0;
-    }
-  };
-
-  // Place the window centered at its default size on mount (before first paint).
-  useLayoutEffect(() => {
-    if (!windowed) return;
-    const el = containerRef.current;
-    if (!el) return;
-    el.style.width = `${width}px`;
-    el.style.height = `${height}px`;
-    writePos(
-      Math.max(0, (window.innerWidth - width) / 2),
-      Math.max(0, (window.innerHeight - height) / 2),
-    );
-  }, [windowed, width, height]);
-
-  // Cancel any in-flight restore tween on unmount.
-  useEffect(() => () => cancelWinTween(), []);
-
-  // Write a viewport-space position to the element. When the window scrolls with the
-  // page (absolute), add the scroll offset since absolute left/top are document-relative;
-  // when anchored (fixed), viewport == style coords so no offset.
-  const writePos = (vpLeft, vpTop) => {
-    const el = containerRef.current;
-    const ox = anchoredRef.current ? 0 : window.scrollX;
-    const oy = anchoredRef.current ? 0 : window.scrollY;
-    el.style.left = `${vpLeft + ox}px`;
-    el.style.top = `${vpTop + oy}px`;
-  };
-
-  const applyRect = (l, t, w, hgt) => {
-    const el = containerRef.current;
-    writePos(l, t);
-    el.style.width = `${w}px`;
-    el.style.height = `${hgt}px`;
-  };
-
-  // Drag the window by the title bar (ignoring clicks on the restore button).
-  const onTitlebarPointerDown = (e) => {
-    // Don't start a drag when clicking the title-bar buttons.
-    if (
-      e.target.closest(
-        ".eye-ballz-restore, .eye-ballz-pin, .eye-ballz-debug-toggle",
-      )
-    )
-      return;
-    cancelWinTween();
-    e.preventDefault();
-    const el = containerRef.current;
-    const rect = el.getBoundingClientRect();
-    const offX = e.clientX - rect.left;
-    const offY = e.clientY - rect.top;
-    const w = rect.width;
-    const bar = e.currentTarget;
-    bar.setPointerCapture(e.pointerId);
-    const move = (ev) => {
-      // Keep at least part of the title bar reachable on-screen.
-      const left = Math.min(
-        Math.max(ev.clientX - offX, -(w - 80)),
-        window.innerWidth - 80,
-      );
-      const top = Math.min(
-        Math.max(ev.clientY - offY, 0),
-        window.innerHeight - 32,
-      );
-      writePos(left, top);
-    };
-    const up = (ev) => {
-      bar.releasePointerCapture(ev.pointerId);
-      bar.removeEventListener("pointermove", move);
-      bar.removeEventListener("pointerup", up);
-    };
-    bar.addEventListener("pointermove", move);
-    bar.addEventListener("pointerup", up);
-  };
-
-  // Resize from an edge/corner handle. `dir` is any of n/s/e/w combined (e.g. "se").
-  const onHandlePointerDown = (dir) => (e) => {
-    cancelWinTween();
-    e.preventDefault();
-    e.stopPropagation();
-    const el = containerRef.current;
-    const start = el.getBoundingClientRect();
-    const sx = e.clientX;
-    const sy = e.clientY;
-    const handle = e.currentTarget;
-    handle.setPointerCapture(e.pointerId);
-    const move = (ev) => {
-      const dx = ev.clientX - sx;
-      const dy = ev.clientY - sy;
-      let left = start.left;
-      let top = start.top;
-      let w = start.width;
-      let hgt = start.height;
-      if (dir.includes("e")) w = start.width + dx;
-      if (dir.includes("s")) hgt = start.height + dy;
-      if (dir.includes("w")) {
-        w = start.width - dx;
-        left = start.left + dx;
-      }
-      if (dir.includes("n")) {
-        hgt = start.height - dy;
-        top = start.top + dy;
-      }
-      // Clamp to min size, keeping the anchored (opposite) edge fixed.
-      if (w < MIN_WINDOW) {
-        if (dir.includes("w")) left = start.right - MIN_WINDOW;
-        w = MIN_WINDOW;
-      }
-      if (hgt < MIN_WINDOW) {
-        if (dir.includes("n")) top = start.bottom - MIN_WINDOW;
-        hgt = MIN_WINDOW;
-      }
-      applyRect(left, top, w, hgt);
-    };
-    const up = (ev) => {
-      handle.releasePointerCapture(ev.pointerId);
-      handle.removeEventListener("pointermove", move);
-      handle.removeEventListener("pointerup", up);
-    };
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", up);
-  };
-
-  // Smoothly animate the window back to its centered default size (rAF tween). The
-  // ResizeObserver scales the 3D view along, frame-by-frame.
-  const restoreWindow = () => {
-    cancelWinTween();
-    const r = containerRef.current.getBoundingClientRect();
-    const from = { left: r.left, top: r.top, width: r.width, height: r.height };
-    const target = {
-      left: Math.max(0, (window.innerWidth - width) / 2),
-      top: Math.max(0, (window.innerHeight - height) / 2),
-      width,
-      height,
-    };
-    const t0 = performance.now();
-    const step = (now) => {
-      const p = Math.min(1, (now - t0) / 450);
-      const e = easeInOutCubic(p);
-      applyRect(
-        from.left + (target.left - from.left) * e,
-        from.top + (target.top - from.top) * e,
-        from.width + (target.width - from.width) * e,
-        from.height + (target.height - from.height) * e,
-      );
-      winTween.current = p < 1 ? requestAnimationFrame(step) : 0;
-    };
-    winTween.current = requestAnimationFrame(step);
-  };
-
-  // Toggle between anchored-to-viewport (fixed) and scroll-with-page (absolute) without
-  // a visual jump: snapshot the current viewport rect, flip the mode, then re-place using
-  // the new mode's coordinate space.
-  const toggleAnchor = () => {
-    cancelWinTween();
-    const r = containerRef.current.getBoundingClientRect();
-    anchoredRef.current = !anchoredRef.current; // so writePos uses the new mode now
-    setIsAnchored(anchoredRef.current); // re-render → swap CSS position
-    writePos(r.left, r.top); // keep it visually in place
-  };
 
   // ---- Control helpers ------------------------------------------------------------
   const setDepth = (displacementScale) =>
@@ -1491,7 +1266,7 @@ function EyeBallzViewerInner(
       }${settings.crt.enabled && settings.crt.glow ? " glow-on" : ""}${
         transparent ? " eye-ballz--transparent" : ""
       }`}
-      // In windowed mode geometry is owned imperatively (see useLayoutEffect); leave
+      // In windowed mode geometry is owned imperatively (see useWindowChrome); leave
       // the style prop off so React never overwrites the live left/top/width/height.
       style={windowed ? undefined : { width, height }}
     >
@@ -1680,415 +1455,3 @@ function EyeBallzViewerInner(
 // forwardRef so parents can grab an imperative handle (playGesture / setExpression /
 // getGestures / getExpressions) while the component stays a normal named export.
 export const EyeBallzViewer = forwardRef(EyeBallzViewerInner);
-
-// Swap the material's color + displacement maps to the current display expression's
-// grid cell. Falls back to the base expression, then any loaded grid, so a missing or
-// still-loading variant never blanks the avatar.
-function applyTexture(h, step) {
-  // Resolve the cell *per-cell*, not per-grid: a grid may be partially loaded (e.g. smile
-  // only holds its top forehead rows), so if the chosen expression lacks this exact cell we
-  // fall back to the base grid's cell, then any grid that has it. This keeps a partial grid
-  // from freezing on the last frame when the look-cell leaves its loaded region.
-  const fn = step.filename;
-  const tex =
-    h.expr[h.displayExpression]?.get(fn) ??
-    h.expr[h.baseExpression]?.get(fn) ??
-    Object.values(h.expr)
-      .map((m) => m.get(fn))
-      .find(Boolean);
-  if (!tex) return;
-  const depthTex = h.depth.get(step.filename) ?? null; // shared depth
-  h.material.map = tex;
-  h.material.displacementMap = depthTex;
-  // Mirror the live cell's depth into the shader so the fragment stage can key out the
-  // background by depth (removes the gray inpainting smudges the luminance key misses).
-  h.uniforms.uDepthMap.value = depthTex;
-  h.uniforms.uHasDepth.value = depthTex ? 1 : 0;
-  // Swapping between two non-null maps reuses the same shader program — the renderer
-  // re-reads the maps each frame, so needsUpdate (a program re-eval) is only required
-  // when a map's presence toggles null↔texture and the USE_MAP/USE_DISPLACEMENTMAP
-  // defines actually change (e.g. the first reveal).
-  const maps = (tex ? 1 : 0) | (depthTex ? 2 : 0);
-  if (maps !== h.mapState) {
-    h.mapState = maps;
-    h.material.needsUpdate = true;
-  }
-  h.needsRender = true; // demand rendering: a map swap must reach the screen
-}
-
-// Pick the base expression to show for a given status, honoring what's loaded. Accepts
-// any expression name present in h.expr; falls back to "neutral", then the first loaded
-// grid, so an unknown/blink-only status never blanks the avatar.
-function resolveBase(h, status) {
-  if (!h.hasExpressions) return Object.keys(h.expr)[0] ?? "default";
-  // Blink variants are flashed by the auto-blink loop, not selectable as a base.
-  if (status && h.expr[status] && !isBlinkVariant(status)) return status;
-  if (h.expr.neutral) return "neutral";
-  return Object.keys(h.expr)[0] ?? "default";
-}
-
-// Blink variants are named "blink" or "<name>Blink" — never a long-lived base.
-const isBlinkVariant = (name) => name === "blink" || name.endsWith("Blink");
-
-// Dispose every resident color grid plus the shared depth set, and reset the maps.
-function disposeExpr(h) {
-  Object.values(h.expr).forEach((colors) => colors.forEach((t) => t.dispose()));
-  h.expr = {};
-  h.depth.forEach((t) => t.dispose());
-  h.depth.clear();
-}
-
-// ---- Sub-panels (drei-AsciiRenderer-style controls) -------------------------------
-function Row({ label, children }) {
-  return (
-    <label className="eye-ballz-row">
-      <span>{label}</span>
-      {children}
-    </label>
-  );
-}
-
-// Capitalize a camelCase name for a button label: "nodYes" → "Nod Yes".
-const labelOf = (name) =>
-  name
-    .replace(/([A-Z])/g, " $1")
-    .replace(/^./, (c) => c.toUpperCase())
-    .trim();
-
-// Dev-only: hot-swap the avatar's preview grid size and read back the last load's frame
-// count + time, so coarser grids' faster loads can be felt without editing the URL.
-const GRID_PRESETS = [3, 5, 7, 10]; // 10 = the full rendered source grid
-function GridPanel({ value, onChange, stats }) {
-  // The active preset for a square value (number, or {x,y} with x===y); null otherwise.
-  const active =
-    typeof value === "number"
-      ? value
-      : value && value.x === value.y
-        ? value.x
-        : null;
-  return (
-    <div className="eye-ballz-panel eye-ballz-panel--grid">
-      <span className="eye-ballz-title">grid size</span>
-      <div className="eye-ballz-buttons">
-        {GRID_PRESETS.map((n) => (
-          <button
-            key={n}
-            className={`eye-ballz-btn${active === n ? " active" : ""}`}
-            onClick={() => onChange({ x: n, y: n })}
-          >
-            {n}×{n}
-          </button>
-        ))}
-      </div>
-      <span className="eye-ballz-stat">
-        {stats
-          ? `${stats.grid} · ${stats.frames} frames · ${stats.ms} ms`
-          : "load a size to time it"}
-      </span>
-    </div>
-  );
-}
-
-function ExpressionPanel({
-  expressions,
-  status,
-  onStatus,
-  gestures,
-  onGesture,
-  autoBlink,
-  onAutoBlink,
-  animMode,
-  onAnimMode,
-}) {
-  return (
-    <div className="eye-ballz-panel eye-ballz-panel--expression">
-      {expressions.length > 0 && (
-        <>
-          <span className="eye-ballz-title">expression</span>
-          <div className="eye-ballz-buttons">
-            {expressions.map((name) => (
-              <button
-                key={name}
-                className={`eye-ballz-btn${status === name ? " active" : ""}`}
-                onClick={() => onStatus(name)}
-              >
-                {labelOf(name)}
-              </button>
-            ))}
-          </div>
-          <Row label="auto-blink">
-            <input
-              type="checkbox"
-              checked={autoBlink}
-              onChange={(e) => onAutoBlink(e.target.checked)}
-            />
-          </Row>
-        </>
-      )}
-      {gestures.length > 0 && (
-        <>
-          <span className="eye-ballz-title">gestures</span>
-          <div className="eye-ballz-buttons">
-            {gestures.map((name) => (
-              <button
-                key={name}
-                className="eye-ballz-btn"
-                onClick={() => onGesture(name)}
-              >
-                {labelOf(name)}
-              </button>
-            ))}
-          </div>
-          <Row label="animation mode">
-            <input
-              type="checkbox"
-              checked={animMode}
-              onChange={(e) => onAnimMode(e.target.checked)}
-            />
-          </Row>
-        </>
-      )}
-    </div>
-  );
-}
-
-// Character ramps to stress-test the renderer (dark -> light). Fed into the `characters`
-// setting; click to swap. The free-text field below stays editable for custom ramps.
-const RAMP_PRESETS = [
-  ["min", " .:-=+*#%@"],
-  ["blocks", " ░▒▓█"],
-  ["dots", " .·•●"],
-  [
-    "dense",
-    " .'`^\",:;Il!i~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
-  ],
-];
-
-function AsciiPanel({ ascii, onChange }) {
-  const g = ascii.gradient;
-  return (
-    <div className="eye-ballz-panel eye-ballz-panel--ascii">
-      <span className="eye-ballz-title">ascii</span>
-      <div className="eye-ballz-buttons">
-        {RAMP_PRESETS.map(([label, ramp]) => (
-          <button
-            key={label}
-            className={`eye-ballz-btn${ascii.characters === ramp ? " active" : ""}`}
-            onClick={() => onChange({ characters: ramp })}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <Row label="characters">
-        <input
-          type="text"
-          value={ascii.characters}
-          onChange={(e) => onChange({ characters: e.target.value || " " })}
-        />
-      </Row>
-      <Row label="phrase">
-        <input
-          type="text"
-          value={ascii.phrase}
-          placeholder="(ramp mode)"
-          onChange={(e) => onChange({ phrase: e.target.value })}
-        />
-      </Row>
-      <Row label="resolution">
-        <input
-          type="range"
-          min={0.05}
-          max={0.4}
-          step={0.01}
-          value={ascii.resolution}
-          onChange={(e) => onChange({ resolution: parseFloat(e.target.value) })}
-        />
-      </Row>
-      <Row label="invert">
-        <input
-          type="checkbox"
-          checked={ascii.invert}
-          onChange={(e) => onChange({ invert: e.target.checked })}
-        />
-      </Row>
-      <Row label="color (slow)">
-        <input
-          type="checkbox"
-          checked={ascii.color}
-          onChange={(e) => onChange({ color: e.target.checked })}
-        />
-      </Row>
-      <Row label="fg">
-        <input
-          type="color"
-          value={ascii.fgColor}
-          onChange={(e) => onChange({ fgColor: e.target.value })}
-        />
-      </Row>
-      <Row label="bg">
-        <input
-          type="color"
-          value={ascii.bgColor}
-          onChange={(e) => onChange({ bgColor: e.target.value })}
-        />
-      </Row>
-      <Row label="model fill">
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={ascii.backplate}
-          onChange={(e) => onChange({ backplate: parseFloat(e.target.value) })}
-        />
-      </Row>
-      <Row label="gradient">
-        <input
-          type="checkbox"
-          checked={g.enabled}
-          onChange={(e) =>
-            onChange({ gradient: { ...g, enabled: e.target.checked } })
-          }
-        />
-      </Row>
-      {g.enabled && (
-        <>
-          <Row label="from → to">
-            <span>
-              <input
-                type="color"
-                value={g.from}
-                onChange={(e) =>
-                  onChange({ gradient: { ...g, from: e.target.value } })
-                }
-              />
-              <input
-                type="color"
-                value={g.to}
-                onChange={(e) =>
-                  onChange({ gradient: { ...g, to: e.target.value } })
-                }
-              />
-            </span>
-          </Row>
-          <Row label="angle">
-            <input
-              type="range"
-              min={0}
-              max={360}
-              step={1}
-              value={g.angle}
-              onChange={(e) =>
-                onChange({
-                  gradient: { ...g, angle: parseInt(e.target.value, 10) },
-                })
-              }
-            />
-          </Row>
-        </>
-      )}
-    </div>
-  );
-}
-
-function DistortionPanel({ distortion, onChange }) {
-  const sliders = [
-    ["waveAmp", "wave", 0, 0.08, 0.001],
-    ["waveSpeed", "wave speed", 0, 10, 0.1],
-    ["swirl", "swirl", 0, 6, 0.05],
-    ["glitch", "glitch", 0, 0.2, 0.001],
-    ["noise", "noise", 0, 0.1, 0.001],
-    ["rgbShift", "rgb shift", 0, 0.04, 0.001],
-  ];
-  return (
-    <div className="eye-ballz-panel eye-ballz-panel--distortion">
-      <span className="eye-ballz-title">distortion</span>
-      {sliders.map(([key, label, min, max, step]) => (
-        <Row key={key} label={label}>
-          <input
-            type="range"
-            min={min}
-            max={max}
-            step={step}
-            value={distortion[key]}
-            onChange={(e) => onChange({ [key]: parseFloat(e.target.value) })}
-          />
-        </Row>
-      ))}
-    </div>
-  );
-}
-
-function TiltPanel({ tilt, onChange }) {
-  return (
-    <div className="eye-ballz-panel eye-ballz-panel--tilt">
-      <span className="eye-ballz-title">tilt</span>
-      <Row label="enable">
-        <input
-          type="checkbox"
-          checked={tilt.enabled}
-          onChange={(e) => onChange({ enabled: e.target.checked })}
-        />
-      </Row>
-      <Row label="max tilt x">
-        <input
-          type="range"
-          min={0}
-          max={20}
-          step={0.5}
-          value={tilt.maxTiltX}
-          onChange={(e) => onChange({ maxTiltX: parseFloat(e.target.value) })}
-        />
-      </Row>
-      <Row label="max tilt y">
-        <input
-          type="range"
-          min={0}
-          max={20}
-          step={0.5}
-          value={tilt.maxTiltY}
-          onChange={(e) => onChange({ maxTiltY: parseFloat(e.target.value) })}
-        />
-      </Row>
-    </div>
-  );
-}
-
-function CRTPanel({ crt, onChange }) {
-  const sliders = [
-    ["scanlineOpacity", "scanlines", 0, 1, 0.01],
-    ["scanlineSize", "scanline size", 2, 10, 1],
-  ];
-  const toggles = [
-    ["scanBar", "scan bar"],
-    ["curvature", "curvature"],
-    ["glow", "glow"],
-  ];
-  return (
-    <div className="eye-ballz-panel eye-ballz-panel--crt">
-      <span className="eye-ballz-title">crt</span>
-      {sliders.map(([key, label, min, max, step]) => (
-        <Row key={key} label={label}>
-          <input
-            type="range"
-            min={min}
-            max={max}
-            step={step}
-            value={crt[key]}
-            onChange={(e) => onChange({ [key]: parseFloat(e.target.value) })}
-          />
-        </Row>
-      ))}
-      {toggles.map(([key, label]) => (
-        <Row key={key} label={label}>
-          <input
-            type="checkbox"
-            checked={crt[key]}
-            onChange={(e) => onChange({ [key]: e.target.checked })}
-          />
-        </Row>
-      ))}
-    </div>
-  );
-}
