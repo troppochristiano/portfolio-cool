@@ -7,7 +7,7 @@
 // per-character whitelist below rejects anything that isn't a glyph the
 // converter's own ramps can emit (so no markup can even be expressed).
 
-// Union of RAMP_PRESETS from src/pages/Create.jsx — keep in sync if ramps change.
+// Union of RAMP_PRESETS from src/create/createConstants.js — keep in sync if ramps change.
 const RAMPS = [
   ' .:-=+*#%@', // classic
   ' .\'`^",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$', // detailed
