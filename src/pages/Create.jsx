@@ -1,128 +1,50 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { SUPERSAMPLE, computeRows, formatBytes } from "../create/asciify.js";
+import { FONT_STACKS, STYLE_DEFAULTS } from "../create/styleOptions.js";
 import {
-  SUPERSAMPLE,
-  computeRows,
-  convertFrame,
-  convertFrameLayers,
-  hexToRgb,
-  gzipSize,
-  formatBytes,
-} from "../create/asciify.js";
-import {
-  downloadJson,
-  downloadPng,
-  downloadWebm,
-  webmMimeType,
-} from "../create/exportMedia.js";
-import {
-  FONT_STACKS,
-  STYLE_DEFAULTS,
-  buildStyle,
-} from "../create/styleOptions.js";
+  RAMP_PRESETS,
+  QUALITY_PRESETS,
+  PAPER_W,
+  PAPER_H,
+  BRUSH_SHADES,
+} from "../create/createConstants.js";
+import { useBake } from "../create/hooks/useBake.js";
+import { useCrop, CROP_HANDLES } from "../create/hooks/useCrop.js";
+import { useVideoSource } from "../create/hooks/useVideoSource.js";
+import { useImageCanvas } from "../create/hooks/useImageCanvas.js";
+import { useAsciiPreviewLoop } from "../create/hooks/useAsciiPreviewLoop.js";
+import { useExport } from "../create/hooks/useExport.js";
+import { useMiniMonitor } from "../create/hooks/useMiniMonitor.js";
+import Slider from "../create/controls/Slider.jsx";
+import SegmentedControl from "../create/controls/SegmentedControl.jsx";
+import ToggleRow from "../create/controls/ToggleRow.jsx";
+import { SettingsBlock, SourceSection } from "../create/controls/Sections.jsx";
 import UploadModal from "../components/UploadModal.jsx";
 import PngFrameModal from "../components/PngFrameModal.jsx";
-import { clamp01, fmtTime, prefersReducedMotion, rgbToHex, MONO_ADVANCE } from "../lib/utils.js";
+import { fmtTime, MONO_ADVANCE } from "../lib/utils.js";
 import "./Create.css";
-
-const RAMP_PRESETS = {
-  classic: " .:-=+*#%@",
-  // 70-level ramp (Paul Bourke), empty→dense — far finer tonal gradation
-  detailed:
-    " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
-  blocks: " ░▒▓█",
-  minimal: " .oO@",
-  dots: " ·•●",
-};
-
-// Quality presets → column counts. Columns are the real control, but the
-// preset names + the pixel readout keep the units human.
-const QUALITY_PRESETS = { low: 60, medium: 110, high: 180, ultra: 280 };
-
-// Backing resolution of the blank "paper" before a photo is loaded, and the
-// cap applied to uploaded photos (largest dimension) so sampling stays cheap.
-const PAPER_W = 1024;
-const PAPER_H = 768;
-const MAX_PHOTO = 1280;
-
-// Brush shades, white → black. ASCII maps brightness — with "invert" ON
-// (dark ink on light bg) the swatch you pick is literally the glyph density
-// you'll get; with invert off (the default) the mapping flips.
-const BRUSH_SHADES = [
-  "#ffffff",
-  "#d9d9d9",
-  "#ababab",
-  "#7f7f7f",
-  "#555555",
-  "#2b2b2b",
-  "#000000",
-];
-
 
 // With an adminSecret (the /admin/create route), the tool is identical except
 // the share dialog: no Turnstile and the server waives the upload limits.
 export default function Create({ adminSecret = null }) {
   const videoRef = useRef(null);
-  const photoCanvasRef = useRef(null); // offscreen: the uploaded photo (or white paper); cut erases here
-  const strokeCanvasRef = useRef(null); // offscreen: brush strokes; eraser erases here only
   const compositeRef = useRef(null); // displayed <canvas> = photo + strokes; also the sample source
   const canvasRef = useRef(null); // offscreen sampler
-  const previewRef = useRef(null); // <pre> the live ASCII is written to
-  const previewEdgeRef = useRef(null); // overlay <pre> for tinted edge glyphs (when split)
-  const miniPreviewRef = useRef(null); // <pre> in the floating mobile mini-monitor
-  const miniPreviewEdgeRef = useRef(null); // overlay <pre> for the mini-monitor's edges
-  const miniElRef = useRef(null); // the floating mini container (for drag)
-  const miniPosRef = useRef(null); // dragged position {left, top} or null (default corner)
-  const miniDragRef = useRef(null); // in-flight drag state
-  const draggedRef = useRef(false); // did the last pointer sequence move (drag vs tap)
   const monitorRef = useRef(null); // the main monitor (observed for the mini's visibility)
-  const pageRef = useRef(null); // the .create-page scroll container (IntersectionObserver root)
+  const pageRef = useRef(null); // the .create-page scroll container
   const screenRef = useRef(null); // monitor interior the <pre> must fit inside
   const mediaBoxRef = useRef(null); // wrapper that shrink-wraps the visible media (crop/eyedropper coords)
   const settingsRef = useRef(null); // latest settings for the rAF loop
-  const photoImgRef = useRef(null); // decoded photo, kept so "restore photo" can undo cuts
 
   // 'video' | 'image' — which input feeds the converter. The image source is
   // one canvas the user can both load a photo into and draw on.
   const [sourceType, setSourceType] = useState("video");
-  // Upload-first intro for the image source: landing straight on blank paper
-  // hides the fact that photos can be uploaded, so a dropzone shows first and
-  // "start with blank paper" (or loading a photo) dismisses it.
-  const [imageIntro, setImageIntro] = useState(true);
-  const [hasVideo, setHasVideo] = useState(false);
-  const [hasPhoto, setHasPhoto] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
-  const [duration, setDuration] = useState(0);
-  const [playing, setPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [loop, setLoop] = useState(true);
-  // trim: only [start, end] of the clip previews-in-loop and bakes.
-  // null = full clip (and the state new clips reset to).
-  const [trim, setTrim] = useState(null);
-  const trimBarRef = useRef(null);
-  const trimDragRef = useRef(null); // 'in' | 'out' while a handle drags
   const [dragOver, setDragOver] = useState(false);
-  const [videoName, setVideoName] = useState("");
-  const [imageName, setImageName] = useState("");
   const [error, setError] = useState("");
-
-  // image tools: draw (ink), fill (bucket), erase (ink only), cut (photo → transparent)
-  const [tool, setTool] = useState("draw");
-  const [brush, setBrush] = useState(14);
-  const [fillTolerance, setFillTolerance] = useState(0.15);
-  const [drawOnPhoto, setDrawOnPhoto] = useState(true); // photo loaded: overlay drawing vs convert photo only
-  const [drawFullscreen, setDrawFullscreen] = useState(false); // maximize the canvas for drawing
-  const [brushShade, setBrushShade] = useState("#000000");
-  const drawingRef = useRef(false);
-  const lastPtRef = useRef(null);
-
-  // source stage: display size + crop of the conversion region
+  // source stage display size
   const [sourceScale, setSourceScale] = useState("m"); // 's' | 'm' | 'l'
-  const [crop, setCrop] = useState(null); // {x,y,w,h} normalized, or null
-  const [cropMode, setCropMode] = useState(false); // marquee armed
-  const [cropDraft, setCropDraft] = useState(null); // rect while dragging
-  const cropStartRef = useRef(null);
-  const [picking, setPicking] = useState(false); // eyedropper armed
 
   // settings
   const [cols, setCols] = useState(110);
@@ -176,16 +98,117 @@ export default function Create({ adminSecret = null }) {
   });
   const toggleBlock = (id) => setOpenBlocks((o) => ({ ...o, [id]: !o[id] }));
 
-  // bake / export
-  const [baking, setBaking] = useState(false);
-  const [bakeProgress, setBakeProgress] = useState(0);
-  const [baked, setBaked] = useState(null); // { cols, rows, fps, frames, … }
-  const [sizes, setSizes] = useState({ raw: null, gz: null });
-  const [mode, setMode] = useState("live"); // 'live' | 'baked'
-  const [previewScale, setPreviewScale] = useState(1); // fit the frame into the monitor
+  // fit the frame into the monitor
+  const [previewScale, setPreviewScale] = useState(1);
   const [outputPx, setOutputPx] = useState(null); // measured size of the rendered <pre>
-  const [miniVisible, setMiniVisible] = useState(false); // mobile floating preview shown when the monitor scrolls off
-  const [miniDismissed, setMiniDismissed] = useState(false); // user closed it (re-armed when the monitor scrolls back into view)
+
+  // The metadata listeners in useVideoSource bind once but need the current
+  // source type to decide whether to adopt new dimensions.
+  const sourceTypeRef = useRef(sourceType);
+  useEffect(() => {
+    sourceTypeRef.current = sourceType;
+  }, [sourceType]);
+
+  const { baking, bakeProgress, baked, sizes, mode, setMode, invalidate, bake } =
+    useBake();
+
+  const {
+    crop,
+    setCrop,
+    cropMode,
+    setCropMode,
+    cropDraft,
+    picking,
+    setPicking,
+    onOverlayDown,
+    onOverlayMove,
+    onOverlayUp,
+    onCropEditDown,
+    onCropEditMove,
+    onCropEditUp,
+    resetCrop,
+    clearCropState,
+  } = useCrop({
+    mediaBoxRef,
+    sourceType,
+    videoRef,
+    compositeRef,
+    setKeyColor,
+    setKeyMode,
+    mode,
+    setMode,
+    invalidate,
+  });
+
+  const {
+    hasVideo,
+    duration,
+    playing,
+    currentTime,
+    loop,
+    setLoop,
+    trim,
+    setTrim,
+    trimStart,
+    trimEnd,
+    videoName,
+    trimBarRef,
+    loadFile,
+    togglePlay,
+    onScrub,
+    stepFrame,
+    setTrimFromPlayhead,
+    onTrimDown,
+    onTrimMove,
+    onTrimUp,
+  } = useVideoSource(videoRef, {
+    fps,
+    sourceTypeRef,
+    setDims,
+    setError,
+    onNewClip: () => {
+      invalidate();
+      setCrop(null);
+    },
+  });
+
+  const {
+    hasPhoto,
+    imageIntro,
+    setImageIntro,
+    imageName,
+    tool,
+    setTool,
+    brush,
+    setBrush,
+    fillTolerance,
+    setFillTolerance,
+    drawOnPhoto,
+    setDrawOnPhoto,
+    drawFullscreen,
+    setDrawFullscreen,
+    brushShade,
+    setBrushShade,
+    brushCursorRef,
+    loadImage,
+    onDrawDown,
+    onDrawUp,
+    moveBrushCursor,
+    onCanvasMove,
+    onCanvasLeave,
+    clearInk,
+    restorePhoto,
+  } = useImageCanvas(compositeRef, {
+    sourceType,
+    picking,
+    cropMode,
+    setError,
+    onNewImage: ({ w, h }) => {
+      setDims({ w, h });
+      setCrop(null);
+      invalidate();
+    },
+  });
 
   const ramp = RAMP_PRESETS[rampKey] || RAMP_PRESETS.classic;
   // The color edges actually render in (falls back to the text color when
@@ -210,10 +233,6 @@ export default function Create({ adminSecret = null }) {
     resMode === "custom"
       ? Math.max(1, customRows)
       : computeRows(effW, effH, cols, cellAspect);
-  // Effective trim range (whole clip when untrimmed) — what previews loop
-  // over and what the bake samples.
-  const trimStart = trim?.start ?? 0;
-  const trimEnd = trim?.end ?? duration;
   const frameEstimate = Math.max(0, Math.round((trimEnd - trimStart) * fps));
 
   // The image source is always renderable — a blank white canvas is a valid still.
@@ -269,331 +288,41 @@ export default function Create({ adminSecret = null }) {
     crop,
   ]);
 
-  // ── image layers ──────────────────────────────────────────────
-  // photo (bottom, opaque unless cut) + strokes (top) → composite. The
-  // composite canvas is what's shown AND what the sampler reads, so the rest
-  // of the pipeline never needs to know about layers.
-  // Strokes are composited unless "draw on photo" is off (photo-only output).
-  // Read through a ref so compositeLayers stays a stable, dependency-free callback.
-  const includeStrokesRef = useRef(true);
-  const compositeLayers = useCallback(() => {
-    const comp = compositeRef.current;
-    const photo = photoCanvasRef.current;
-    const stroke = strokeCanvasRef.current;
-    if (!comp || !photo || !stroke) return;
-    const ctx = comp.getContext("2d");
-    ctx.clearRect(0, 0, comp.width, comp.height);
-    ctx.drawImage(photo, 0, 0);
-    if (includeStrokesRef.current) ctx.drawImage(stroke, 0, 0);
-  }, []);
+  const { previewRef, previewEdgeRef, miniPreviewRef, miniPreviewEdgeRef } =
+    useAsciiPreviewLoop({
+      hasSource,
+      sourceType,
+      mode,
+      baked,
+      settingsRef,
+      canvasRef,
+      activeSource,
+      sourceReady,
+    });
 
-  const resizeLayers = useCallback(
-    (w, h, drawPhoto) => {
-      const comp = compositeRef.current;
-      const photo = photoCanvasRef.current;
-      const stroke = strokeCanvasRef.current;
-      if (!comp || !photo || !stroke) return;
-      comp.width = w;
-      comp.height = h; // resizing clears all three
-      photo.width = w;
-      photo.height = h;
-      stroke.width = w;
-      stroke.height = h;
-      const pctx = photo.getContext("2d");
-      if (drawPhoto) {
-        pctx.drawImage(drawPhoto, 0, 0, w, h);
-      } else {
-        pctx.fillStyle = "#fff";
-        pctx.fillRect(0, 0, w, h);
-      }
-      compositeLayers();
-    },
-    [compositeLayers],
-  );
+  const {
+    canWebm,
+    webmProgress,
+    exportJson,
+    exportPng,
+    exportWebm,
+    shareOpen,
+    setShareOpen,
+    pngOpen,
+    setPngOpen,
+  } = useExport({ baked, setError });
 
-  // init: create the offscreen layers and lay down white paper
-  useEffect(() => {
-    photoCanvasRef.current = document.createElement("canvas");
-    strokeCanvasRef.current = document.createElement("canvas");
-    resizeLayers(PAPER_W, PAPER_H, null);
-  }, [resizeLayers]);
-
-  // "draw on photo" only applies with a photo loaded; blank paper always draws.
-  // Recompose whenever the effective setting changes so live/bake pick it up.
-  useEffect(() => {
-    includeStrokesRef.current = drawOnPhoto || !hasPhoto;
-    compositeLayers();
-  }, [drawOnPhoto, hasPhoto, compositeLayers]);
-
-  // Fullscreen draw only makes sense while drawing is available; drop it and
-  // support Escape to exit.
-  useEffect(() => {
-    const enabled = sourceType === "image" && (!hasPhoto || drawOnPhoto);
-    if (!enabled) setDrawFullscreen(false);
-  }, [sourceType, hasPhoto, drawOnPhoto]);
-  useEffect(() => {
-    if (!drawFullscreen) return;
-    const onKey = (e) => {
-      if (e.key === "Escape") setDrawFullscreen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [drawFullscreen]);
-  // Scale the canvas up to fill the fullscreen area (preserving aspect and keeping
-  // the element box == the drawn bitmap, so pointer mapping stays exact). CSS can't
-  // aspect-fit-upscale a <canvas> without object-fit, which would break coords.
-  useEffect(() => {
-    const canvas = compositeRef.current;
-    if (!canvas) return;
-    if (!drawFullscreen) {
-      canvas.style.width = "";
-      canvas.style.height = "";
-      return;
-    }
-    const fit = () => {
-      const bar = document.querySelector(".fs-drawbar");
-      const availW = window.innerWidth - 20;
-      const availH = window.innerHeight - 20 - (bar ? bar.offsetHeight : 84);
-      if (availW <= 0 || availH <= 0) return;
-      const scale = Math.min(availW / canvas.width, availH / canvas.height);
-      canvas.style.width = `${Math.round(canvas.width * scale)}px`;
-      canvas.style.height = `${Math.round(canvas.height * scale)}px`;
-    };
-    fit();
-    window.addEventListener("resize", fit);
-    return () => {
-      window.removeEventListener("resize", fit);
-      canvas.style.width = "";
-      canvas.style.height = "";
-    };
-  }, [drawFullscreen, hasPhoto]);
-
-  // ── switch source type ────────────────────────────────────────
-  const switchSource = (type) => {
-    setSourceType(type);
-    setBaked(null);
-    setMode("live");
-    setError("");
-    setCrop(null);
-    setCropMode(false);
-    setCropDraft(null);
-    setPicking(false);
-    // Point the rows calc at the new source's dimensions.
-    if (type === "image") {
-      const c = compositeRef.current;
-      setDims(c ? { w: c.width, h: c.height } : { w: PAPER_W, h: PAPER_H });
-    } else {
-      const v = videoRef.current;
-      setDims(
-        v && v.videoWidth
-          ? { w: v.videoWidth, h: v.videoHeight }
-          : { w: 0, h: 0 },
-      );
-    }
-  };
-
-  // ── load a video file ─────────────────────────────────────────
-  const loadFile = useCallback((file) => {
-    if (!file) return;
-    if (!file.type.startsWith("video/")) {
-      setError(`"${file.name}" isn't a video — try mp4, mov, or webm`);
-      return;
-    }
-    setError("");
-    const url = URL.createObjectURL(file);
-    setVideoName(file.name);
-    setBaked(null);
-    setMode("live");
-    setBakeProgress(0);
-    setCrop(null);
-    const v = videoRef.current;
-    v.src = url;
-    v.load();
-  }, []);
-
-  const onDrop = useCallback(
-    (e) => {
-      e.preventDefault();
-      setDragOver(false);
-      loadFile(e.dataTransfer.files?.[0]);
-    },
-    [loadFile],
-  );
-
-  // ── load a photo into the image layers ────────────────────────
-  const loadImage = useCallback(
-    (file) => {
-      if (!file) return;
-      if (!file.type.startsWith("image/")) {
-        setError(`"${file.name}" isn't an image — try jpg, png, or webp`);
-        return;
-      }
-      setError("");
-      const url = URL.createObjectURL(file);
-      const img = new Image();
-      img.onload = () => {
-        URL.revokeObjectURL(url);
-        const scale = Math.min(
-          1,
-          MAX_PHOTO / Math.max(img.naturalWidth, img.naturalHeight),
-        );
-        const w = Math.max(1, Math.round(img.naturalWidth * scale));
-        const h = Math.max(1, Math.round(img.naturalHeight * scale));
-        photoImgRef.current = img;
-        // resizing the layers clears the strokes — coordinates wouldn't survive
-        // the aspect change anyway (hinted in the UI)
-        resizeLayers(w, h, img);
-        setHasPhoto(true);
-        setImageIntro(false);
-        setImageName(file.name);
-        setDims({ w, h });
-        setCrop(null);
-        setBaked(null);
-        setMode("live");
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        setError("couldn’t read that image — try another file");
-      };
-      img.src = url;
-    },
-    [resizeLayers],
-  );
-
-  const onDropImage = useCallback(
-    (e) => {
-      e.preventDefault();
-      setDragOver(false);
-      loadImage(e.dataTransfer.files?.[0]);
-    },
-    [loadImage],
-  );
-
-  // ── video metadata ────────────────────────────────────────────
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const onMeta = () => {
-      setHasVideo(true);
-      setError("");
-      if (sourceTypeRef.current === "video")
-        setDims({ w: v.videoWidth, h: v.videoHeight });
-      setDuration(v.duration || 0);
-      setTrim(null); // a new clip starts untrimmed
-    };
-    const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
-    const onTime = () => setCurrentTime(v.currentTime);
-    const onErr = () => {
-      if (!v.src) return; // ignore the empty-source state before a clip is picked
-      setError(
-        "couldn’t read that clip — it may be corrupt or use an unsupported codec",
-      );
-    };
-    v.addEventListener("loadedmetadata", onMeta);
-    v.addEventListener("play", onPlay);
-    v.addEventListener("pause", onPause);
-    v.addEventListener("timeupdate", onTime);
-    v.addEventListener("error", onErr);
-    return () => {
-      v.removeEventListener("loadedmetadata", onMeta);
-      v.removeEventListener("play", onPlay);
-      v.removeEventListener("pause", onPause);
-      v.removeEventListener("timeupdate", onTime);
-      v.removeEventListener("error", onErr);
-    };
-  }, []);
-
-  // The metadata listeners bind once but need the current source type to
-  // decide whether to adopt the new dimensions — read it through a ref so they
-  // don't have to re-subscribe on every switch.
-  const sourceTypeRef = useRef(sourceType);
-  useEffect(() => {
-    sourceTypeRef.current = sourceType;
-  }, [sourceType]);
-
-  // ── trim playback ─────────────────────────────────────────────
-  // While trimmed, playback lives inside [start, end]: reaching the out point
-  // loops back (or pauses when loop is off), and pressing play from outside
-  // the range jumps to the in point first.
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v || !trim) return;
-    const onTime = () => {
-      if (v.currentTime >= trim.end) {
-        if (loop) v.currentTime = trim.start;
-        else v.pause();
-      }
-    };
-    const onPlay = () => {
-      if (v.currentTime < trim.start || v.currentTime >= trim.end) {
-        v.currentTime = trim.start;
-      }
-    };
-    v.addEventListener("timeupdate", onTime);
-    v.addEventListener("play", onPlay);
-    return () => {
-      v.removeEventListener("timeupdate", onTime);
-      v.removeEventListener("play", onPlay);
-    };
-  }, [trim, loop]);
-
-  // Write the base glyphs (and, when split, the tinted edge overlay) to both
-  // the main monitor and the floating mini-monitor. The edge <pre>s are cleared
-  // when there's no edge layer so a stale overlay never lingers.
-  const writeLayers = useCallback((base, edge) => {
-    if (previewRef.current) previewRef.current.textContent = base;
-    if (miniPreviewRef.current) miniPreviewRef.current.textContent = base;
-    const e = edge ?? "";
-    if (previewEdgeRef.current) previewEdgeRef.current.textContent = e;
-    if (miniPreviewEdgeRef.current) miniPreviewEdgeRef.current.textContent = e;
-  }, []);
-
-  // ── live preview rAF loop (no React state per frame) ──────────
-  useEffect(() => {
-    if (!hasSource || mode !== "live") return;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    let raf = 0;
-
-    const render = () => {
-      const s = settingsRef.current;
-      const src = activeSource();
-      if (s && src && sourceReady(src) && s.rows > 0 && previewRef.current) {
-        const out = sampleFrame(ctx, canvas, src, s);
-        if (typeof out === "string") writeLayers(out, null);
-        else writeLayers(out.frame, out.edgeFrame);
-      }
-      raf = requestAnimationFrame(render);
-    };
-    raf = requestAnimationFrame(render);
-    return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasSource, sourceType, mode, writeLayers]);
-
-  // ── baked playback loop ───────────────────────────────────────
-  useEffect(() => {
-    if (mode !== "baked" || !baked) return;
-    const reduce = prefersReducedMotion();
-    const write = (i) =>
-      writeLayers(baked.frames[i], baked.edgeFrames?.[i] ?? null);
-    write(0);
-    if (reduce || baked.frames.length <= 1) return;
-    let raf = 0,
-      i = 0,
-      last = performance.now();
-    const interval = 1000 / baked.fps;
-    const tick = (now) => {
-      if (now - last >= interval) {
-        last = now;
-        i = (i + 1) % baked.frames.length;
-        write(i);
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [mode, baked, writeLayers]);
+  const {
+    miniVisible,
+    miniDismissed,
+    setMiniDismissed,
+    miniElRef,
+    miniPosStyle,
+    onMiniDown,
+    onMiniMove,
+    onMiniUp,
+    onMiniClick,
+  } = useMiniMonitor({ pageRef, monitorRef, hasSource });
 
   // ── fit the frame into the monitor ────────────────────────────
   // The <pre> renders at cols × pixel-size, which easily exceeds the
@@ -626,600 +355,39 @@ export default function Create({ adminSecret = null }) {
     ro.observe(screen);
     ro.observe(pre);
     return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasSource, sourceType, mode, cols, rows, cellPx, baked]);
 
-  // ── mobile: reveal the floating mini-monitor once the main one scrolls off ──
-  // A scroll-position check (not IntersectionObserver, which misses fast/edge
-  // transitions). The monitor is compared to the VIEWPORT — correct whether the
-  // page scrolls inside .create-page or the document body scrolls. Listeners are
-  // attached to the scroll container itself, window (capture, for either model),
-  // and visualViewport (mobile address-bar show/hide), so it fires on real
-  // devices regardless of which element owns the scroll.
-  useEffect(() => {
-    const page = pageRef.current;
-    const mon = monitorRef.current;
-    if (!mon || !hasSource) {
-      setMiniVisible(false);
-      return;
-    }
-    const check = () => {
-      const mr = mon.getBoundingClientRect();
-      const vh = window.innerHeight || document.documentElement.clientHeight;
-      const off = mr.bottom <= 4 || mr.top >= vh - 4; // monitor fully above / below the screen
-      setMiniVisible((prev) => (prev === off ? prev : off)); // no re-render unless it changed
-      if (!off) setMiniDismissed((d) => (d ? false : d)); // re-arm when the monitor is back
-    };
-    check();
-    page?.addEventListener("scroll", check, { passive: true });
-    window.addEventListener("scroll", check, true);
-    window.addEventListener("resize", check);
-    const vv = window.visualViewport;
-    vv?.addEventListener("scroll", check);
-    vv?.addEventListener("resize", check);
-    return () => {
-      page?.removeEventListener("scroll", check);
-      window.removeEventListener("scroll", check, true);
-      window.removeEventListener("resize", check);
-      vv?.removeEventListener("scroll", check);
-      vv?.removeEventListener("resize", check);
-    };
-  }, [hasSource]);
-
-  // ── transport (video only) ────────────────────────────────────
-  const togglePlay = () => {
-    const v = videoRef.current;
-    if (v.paused) v.play();
-    else v.pause();
-  };
-  const onScrub = (e) => {
-    const v = videoRef.current;
-    // stay inside the trim range so the scrubber can't wander into cut footage
-    v.currentTime = Math.min(
-      Math.max(trimStart, Number(e.target.value)),
-      Math.max(trimStart, trimEnd - 1e-3),
-    );
-  };
-  const stepFrame = (dir) => {
-    const v = videoRef.current;
-    if (!v || !duration) return;
-    v.pause();
-    const t = v.currentTime + dir / fps;
-    v.currentTime = Math.min(
-      Math.max(trimStart, t),
-      Math.max(trimStart, trimEnd - 1e-3),
-    );
-  };
-
-  // ── trim bar (in/out handles on a custom track) ───────────────
-  const MIN_TRIM = 0.2; // seconds — handles can't cross closer than this
-  const trimPosOf = (e) => {
-    const rect = trimBarRef.current.getBoundingClientRect();
-    return (
-      Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)) * duration
-    );
-  };
-  const applyTrimPoint = (t, which /* 'in' | 'out' */) => {
-    setTrim((prev) => {
-      const s = prev?.start ?? 0;
-      const en = prev?.end ?? duration;
-      let next;
-      if (which === "in") next = { start: Math.min(t, en - MIN_TRIM), end: en };
-      else next = { start: s, end: Math.max(t, s + MIN_TRIM) };
-      next.start = Math.max(0, next.start);
-      next.end = Math.min(duration, next.end);
-      // dragged back to the full clip → untrimmed
-      return next.start <= 0.005 && next.end >= duration - 0.005 ? null : next;
-    });
-  };
-  const applyTrimDrag = (t) => applyTrimPoint(t, trimDragRef.current);
-  // precise cuts: scrub / frame-step to the exact moment, then set that point.
-  // Reads the video element (not currentTime state, which lags behind seeks).
-  const setTrimFromPlayhead = (which) => {
-    const v = videoRef.current;
-    if (!v || !duration) return;
-    applyTrimPoint(v.currentTime, which);
-  };
-  const onTrimDown = (e) => {
-    if (!duration) return;
-    e.preventDefault();
-    const t = trimPosOf(e);
-    const s = trim?.start ?? 0;
-    const en = trim?.end ?? duration;
-    // grab whichever handle is closer to the press
-    trimDragRef.current = Math.abs(t - s) <= Math.abs(t - en) ? "in" : "out";
-    e.currentTarget.setPointerCapture(e.pointerId);
-    applyTrimDrag(t);
-  };
-  const onTrimMove = (e) => {
-    if (!trimDragRef.current) return;
-    e.preventDefault();
-    applyTrimDrag(trimPosOf(e));
-  };
-  const onTrimUp = () => {
-    trimDragRef.current = null;
-  };
-
-  // ── drawing (on the composite canvas, into the layers) ────────
-  const drawPos = (e) => {
-    const c = compositeRef.current;
-    const rect = c.getBoundingClientRect();
-    return {
-      x: (e.clientX - rect.left) * (c.width / rect.width),
-      y: (e.clientY - rect.top) * (c.height / rect.height),
-    };
-  };
-  const strokeTo = (pt) => {
-    // draw/erase live on the stroke layer; cut punches through the photo layer
-    const target =
-      tool === "cut" ? photoCanvasRef.current : strokeCanvasRef.current;
-    const ctx = target.getContext("2d");
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.lineWidth = brush;
-    if (tool === "draw") {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = brushShade;
-      ctx.fillStyle = brushShade;
-    } else {
-      // erase and cut both remove pixels from their layer → transparent
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.strokeStyle = "#000";
-      ctx.fillStyle = "#000";
-    }
-    const last = lastPtRef.current;
-    if (last) {
-      ctx.beginPath();
-      ctx.moveTo(last.x, last.y);
-      ctx.lineTo(pt.x, pt.y);
-      ctx.stroke();
-    } else {
-      // first touch → a dot so a tap leaves a mark
-      ctx.beginPath();
-      ctx.arc(pt.x, pt.y, brush / 2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalCompositeOperation = "source-over";
-    lastPtRef.current = pt;
-    compositeLayers();
-  };
-  // Bucket fill: from the clicked pixel, flood the connected region of similar
-  // color in the COMPOSITE (what you see) and paint the current shade onto the
-  // STROKE layer only — so the photo underneath is preserved and existing
-  // strokes outside the region survive. tolerance 0..1 = how far it spreads.
-  const floodFill = (pt) => {
-    const comp = compositeRef.current;
-    const stroke = strokeCanvasRef.current;
-    const w = comp.width,
-      h = comp.height;
-    const sx = Math.floor(pt.x),
-      sy = Math.floor(pt.y);
-    if (sx < 0 || sy < 0 || sx >= w || sy >= h) return;
-    const rgb = hexToRgb(brushShade) || [0, 0, 0];
-    const cctx = comp.getContext("2d");
-    const src = cctx.getImageData(0, 0, w, h).data;
-    const sctx = stroke.getContext("2d");
-    const dstImg = sctx.getImageData(0, 0, w, h);
-    const dst = dstImg.data;
-
-    const seed = (sy * w + sx) * 4;
-    const sr = src[seed],
-      sg = src[seed + 1],
-      sb = src[seed + 2],
-      sa = src[seed + 3];
-    // 4-channel Euclidean distance, normalized to 0..1 (max = sqrt(4)*255).
-    const maxDist = 510; // sqrt(4) * 255
-    const tol = fillTolerance * maxDist;
-    const tol2 = tol * tol;
-    const matches = (p) => {
-      const dr = src[p] - sr,
-        dg = src[p + 1] - sg,
-        db = src[p + 2] - sb,
-        da = src[p + 3] - sa;
-      return dr * dr + dg * dg + db * db + da * da <= tol2;
-    };
-
-    const seen = new Uint8Array(w * h);
-    const stack = [sx, sy];
-    seen[sy * w + sx] = 1;
-    while (stack.length) {
-      const y = stack.pop();
-      const x = stack.pop();
-      const p = (y * w + x) * 4;
-      // paint the shade opaque onto the stroke layer
-      dst[p] = rgb[0];
-      dst[p + 1] = rgb[1];
-      dst[p + 2] = rgb[2];
-      dst[p + 3] = 255;
-      const push = (nx, ny) => {
-        if (nx < 0 || ny < 0 || nx >= w || ny >= h) return;
-        const idx = ny * w + nx;
-        if (seen[idx]) return;
-        if (!matches(idx * 4)) return;
-        seen[idx] = 1;
-        stack.push(nx, ny);
-      };
-      push(x + 1, y);
-      push(x - 1, y);
-      push(x, y + 1);
-      push(x, y - 1);
-    }
-    sctx.putImageData(dstImg, 0, 0);
-    compositeLayers();
-  };
-
-  const onDrawDown = (e) => {
-    if (picking || cropMode) return; // the overlay owns the pointer then
-    if (hasPhoto && !drawOnPhoto) return; // drawing disabled (converting the photo only)
-    e.preventDefault();
-    if (tool === "fill") {
-      floodFill(drawPos(e));
-      return;
-    } // click action, no drag
-    // capture keeps the stroke tracking outside the canvas; a pointer that
-    // vanished between events must not kill the stroke, so failure is fine
-    try {
-      compositeRef.current.setPointerCapture(e.pointerId);
-    } catch {
-      /* stroke still draws */
-    }
-    drawingRef.current = true;
-    lastPtRef.current = null;
-    strokeTo(drawPos(e));
-  };
-  const onDrawMove = (e) => {
-    if (!drawingRef.current) return;
-    e.preventDefault();
-    strokeTo(drawPos(e));
-  };
-  const onDrawUp = () => {
-    drawingRef.current = false;
-    lastPtRef.current = null;
-  };
-  // A ring cursor the size of the brush footprint on screen (brush is in backing
-  // px; the canvas is displayed scaled, so multiply by the display/backing ratio).
-  const brushCursorRef = useRef(null);
-  const moveBrushCursor = (e) => {
-    const el = brushCursorRef.current;
-    const canvas = compositeRef.current;
-    if (!el || !canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const d = brush * (rect.width / (canvas.width || 1));
-    el.style.width = `${d}px`;
-    el.style.height = `${d}px`;
-    el.style.left = `${e.clientX}px`;
-    el.style.top = `${e.clientY}px`;
-    el.style.display = "block";
-  };
-  const hideBrushCursor = () => {
-    if (brushCursorRef.current) brushCursorRef.current.style.display = "none";
-  };
-  const onCanvasMove = (e) => {
-    moveBrushCursor(e);
-    onDrawMove(e);
-  };
-  const onCanvasLeave = (e) => {
-    hideBrushCursor();
-    onDrawUp(e);
-  };
-  const clearInk = () => {
-    const s = strokeCanvasRef.current;
-    s.getContext("2d").clearRect(0, 0, s.width, s.height);
-    compositeLayers();
-  };
-  // Redraw the photo layer from the kept decoded image — undoes every cut.
-  const restorePhoto = () => {
-    const photo = photoCanvasRef.current;
-    const img = photoImgRef.current;
-    const pctx = photo.getContext("2d");
-    pctx.clearRect(0, 0, photo.width, photo.height);
-    if (img) {
-      pctx.drawImage(img, 0, 0, photo.width, photo.height);
-    } else {
-      pctx.fillStyle = "#fff";
-      pctx.fillRect(0, 0, photo.width, photo.height);
-    }
-    compositeLayers();
-  };
-
-  // ── crop marquee + eyedropper (shared stage overlay) ──────────
-  const overlayPos = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return {
-      x: clamp01((e.clientX - rect.left) / rect.width),
-      y: clamp01((e.clientY - rect.top) / rect.height),
-    };
-  };
-  const draftRect = (a, b) => ({
-    x: Math.min(a.x, b.x),
-    y: Math.min(a.y, b.y),
-    w: Math.abs(a.x - b.x),
-    h: Math.abs(a.y - b.y),
-  });
-  const sampleColorAt = (pos) => {
-    let d = null;
-    if (sourceType === "image") {
+  // ── switch source type ────────────────────────────────────────
+  const switchSource = (type) => {
+    setSourceType(type);
+    invalidate();
+    setError("");
+    clearCropState();
+    // Point the rows calc at the new source's dimensions.
+    if (type === "image") {
       const c = compositeRef.current;
-      d = c
-        .getContext("2d")
-        .getImageData(
-          Math.min(c.width - 1, Math.floor(pos.x * c.width)),
-          Math.min(c.height - 1, Math.floor(pos.y * c.height)),
-          1,
-          1,
-        ).data;
+      setDims(c ? { w: c.width, h: c.height } : { w: PAPER_W, h: PAPER_H });
     } else {
       const v = videoRef.current;
-      if (!v || v.readyState < 2) return;
-      const t = document.createElement("canvas");
-      t.width = 1;
-      t.height = 1;
-      const tctx = t.getContext("2d", { willReadFrequently: true });
-      tctx.drawImage(
-        v,
-        Math.min(v.videoWidth - 1, Math.floor(pos.x * v.videoWidth)),
-        Math.min(v.videoHeight - 1, Math.floor(pos.y * v.videoHeight)),
-        1,
-        1,
-        0,
-        0,
-        1,
-        1,
+      setDims(
+        v && v.videoWidth
+          ? { w: v.videoWidth, h: v.videoHeight }
+          : { w: 0, h: 0 },
       );
-      d = tctx.getImageData(0, 0, 1, 1).data;
     }
-    if (!d) return;
-    setKeyColor(rgbToHex(d[0], d[1], d[2]));
-    setKeyMode("custom");
-    setPicking(false);
   };
-  const onOverlayDown = (e) => {
+
+  const onDrop = (e) => {
     e.preventDefault();
-    const pos = overlayPos(e);
-    if (picking) {
-      sampleColorAt(pos);
-      return;
-    }
-    if (!cropMode) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    cropStartRef.current = pos;
-    setCropDraft({ ...pos, w: 0, h: 0 });
+    setDragOver(false);
+    loadFile(e.dataTransfer.files?.[0]);
   };
-  const onOverlayMove = (e) => {
-    if (!cropMode || !cropStartRef.current) return;
+  const onDropImage = (e) => {
     e.preventDefault();
-    setCropDraft(draftRect(cropStartRef.current, overlayPos(e)));
+    setDragOver(false);
+    loadImage(e.dataTransfer.files?.[0]);
   };
-  const onOverlayUp = (e) => {
-    if (!cropMode || !cropStartRef.current) return;
-    const rect = draftRect(cropStartRef.current, overlayPos(e));
-    cropStartRef.current = null;
-    setCropDraft(null);
-    // ignore accidental clicks — a crop needs real area. Crop mode stays on:
-    // the committed rect grows handles for Paint-style adjustment, and the
-    // crop button becomes "✕ reset crop".
-    if (rect.w > 0.02 && rect.h > 0.02) {
-      setCrop(rect);
-      setBaked(null);
-      setMode("live");
-    }
-  };
-
-  // ── crop editing session (move + 8 resize handles) ────────────
-  // While crop mode is on and a rect exists, a .crop-editor overlay lets the
-  // rect be dragged (move) or resized from any edge/corner — every change
-  // calls setCrop immediately, so the ASCII preview follows live.
-  const MIN_CROP = 0.02;
-  const cropEditRef = useRef(null); // { role, start:{x,y}, rect } during a drag
-  const stagePos = (e) => {
-    const rect = mediaBoxRef.current.getBoundingClientRect();
-    return {
-      x: clamp01((e.clientX - rect.left) / rect.width),
-      y: clamp01((e.clientY - rect.top) / rect.height),
-    };
-  };
-  const applyCropEdit = (r, role, dx, dy) => {
-    if (role === "move") {
-      return {
-        x: Math.min(Math.max(0, r.x + dx), 1 - r.w),
-        y: Math.min(Math.max(0, r.y + dy), 1 - r.h),
-        w: r.w,
-        h: r.h,
-      };
-    }
-    let x0 = r.x,
-      y0 = r.y,
-      x1 = r.x + r.w,
-      y1 = r.y + r.h;
-    if (role.includes("w")) x0 = Math.min(Math.max(0, x0 + dx), x1 - MIN_CROP);
-    if (role.includes("e")) x1 = Math.max(Math.min(1, x1 + dx), x0 + MIN_CROP);
-    if (role.includes("n")) y0 = Math.min(Math.max(0, y0 + dy), y1 - MIN_CROP);
-    if (role.includes("s")) y1 = Math.max(Math.min(1, y1 + dy), y0 + MIN_CROP);
-    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
-  };
-  const onCropEditDown = (role) => (e) => {
-    e.preventDefault();
-    e.stopPropagation(); // don't fall through to the marquee overlay
-    e.currentTarget.setPointerCapture(e.pointerId);
-    cropEditRef.current = { role, start: stagePos(e), rect: { ...crop } };
-    if (mode === "baked") setMode("live"); // editing invalidates the baked view
-  };
-  const onCropEditMove = (e) => {
-    const ed = cropEditRef.current;
-    if (!ed) return;
-    e.preventDefault();
-    const pos = stagePos(e);
-    setCrop(
-      applyCropEdit(ed.rect, ed.role, pos.x - ed.start.x, pos.y - ed.start.y),
-    );
-  };
-  const onCropEditUp = () => {
-    cropEditRef.current = null;
-  };
-  // Clear the crop and put the crop tool away (a cropped bake is now stale).
-  const resetCrop = () => {
-    setCrop(null);
-    setCropMode(false);
-    setCropDraft(null);
-    setBaked(null);
-    setMode("live");
-  };
-  // handle roles + their anchor positions on the rect (as percentages)
-  const CROP_HANDLES = [
-    ["nw", 0, 0],
-    ["n", 50, 0],
-    ["ne", 100, 0],
-    ["e", 100, 50],
-    ["se", 100, 100],
-    ["s", 50, 100],
-    ["sw", 0, 100],
-    ["w", 0, 50],
-  ];
-
-  // ── bake ──────────────────────────────────────────────────────
-  const seekTo = (v, t) =>
-    new Promise((res) => {
-      const onSeeked = () => {
-        v.removeEventListener("seeked", onSeeked);
-        res();
-      };
-      v.addEventListener("seeked", onSeeked);
-      v.currentTime = Math.min(t, Math.max(0, v.duration - 1e-3));
-    });
-
-  // cellPx (the tuned display size) rides along so a player can size the figure
-  // exactly as previewed here. name/createdAt identify the figure once it's
-  // uploaded to the backend; players ignore keys they don't know.
-  const finishBake = async (frames, edgeFrames) => {
-    const name = fileName
-      ? fileName.replace(/\.[^.]+$/, "")
-      : isStill
-        ? "drawing"
-        : "untitled";
-    // The typography/colors controls become the optional `style` block —
-    // omitted entirely at defaults so plain bakes stay byte-identical.
-    const style = buildStyle({
-      font: fontKey,
-      letterSpacing,
-      lineHeight,
-      background: bgColor,
-      color: fgColor,
-      edgeColor: splitEdges ? effectiveEdgeColor : undefined,
-    });
-    const result = {
-      cols,
-      rows,
-      fps,
-      color: false,
-      cellPx,
-      name,
-      createdAt: new Date().toISOString(),
-      ...(style ? { style } : {}),
-      frames,
-      // Only present when a distinct edge color split the render — the tinted
-      // edge glyphs on their own layer, one entry per base frame.
-      ...(edgeFrames ? { edgeFrames } : {}),
-    };
-    setBaked(result);
-    setMode("baked");
-    setBaking(false);
-    const json = JSON.stringify(result);
-    const raw = new Blob([json]).size;
-    const gz = await gzipSize(json);
-    setSizes({ raw, gz });
-  };
-
-  const bake = async () => {
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    // Single source of truth — the same settings object the live preview
-    // reads (kept in sync by its effect), so bake output always matches the
-    // preview exactly. A hand-rolled copy here once silently dropped the
-    // newer keys (contrast, edge) and baked without them.
-    const settings = settingsRef.current;
-
-    // sampleFrame returns a plain string normally, or { frame, edgeFrame } when
-    // the settings request a split edge layer — collect the edge frames in
-    // parallel so they line up with the base frames one-to-one.
-    const split = settings.splitEdges;
-    const push = (out, frames, edgeFrames) => {
-      if (split) {
-        frames.push(out.frame);
-        edgeFrames.push(out.edgeFrame);
-      } else {
-        frames.push(out);
-      }
-    };
-
-    // Photos and drawings are a single still — sample once.
-    if (isStill) {
-      const src = activeSource();
-      if (!src || !sourceReady(src) || rows <= 0) return;
-      setBaking(true);
-      setBakeProgress(100);
-      const frames = [];
-      const edgeFrames = [];
-      push(sampleFrame(ctx, canvas, src, settings), frames, edgeFrames);
-      await finishBake(frames, split ? edgeFrames : undefined);
-      return;
-    }
-
-    // Video: seek across the clip, sample each frame.
-    const v = videoRef.current;
-    if (!v || !duration) return;
-    v.pause();
-    setBaking(true);
-    setMode("live");
-    setBakeProgress(0);
-
-    // Only the trimmed range is sampled (the whole clip when untrimmed).
-    const total = Math.max(1, Math.round((trimEnd - trimStart) * fps));
-    const frames = [];
-    const edgeFrames = [];
-    for (let f = 0; f < total; f++) {
-      await seekTo(v, trimStart + f / fps);
-      push(sampleFrame(ctx, canvas, v, settings), frames, edgeFrames);
-      setBakeProgress(Math.round(((f + 1) / total) * 100));
-      // yield so the progress bar can paint
-      if (f % 4 === 0) await new Promise((r) => setTimeout(r, 0));
-    }
-    await finishBake(frames, split ? edgeFrames : undefined);
-  };
-
-  const exportJson = () => {
-    if (!baked) return;
-    downloadJson(baked, "figure.json");
-  };
-
-  // PNG/WebM exports render the baked frames to a canvas client-side. WebM is
-  // only offered for animations and when MediaRecorder supports it (the export
-  // records in real time, hence the busy readout).
-  const canWebm = !!webmMimeType();
-  const [webmProgress, setWebmProgress] = useState(null); // null | 0..1
-  const exportPng = () => {
-    if (!baked) return;
-    // Animations open a frame picker; stills export their one frame directly.
-    if (baked.frames.length > 1) {
-      setPngOpen(true);
-      return;
-    }
-    downloadPng(baked).catch(() => setError("png export failed"));
-  };
-  const exportWebm = async () => {
-    if (!baked || webmProgress !== null) return;
-    setWebmProgress(0);
-    try {
-      await downloadWebm(baked, { onProgress: setWebmProgress });
-    } catch {
-      setError("webm export failed");
-    } finally {
-      setWebmProgress(null);
-    }
-  };
-
-  // share-to-gallery modal
-  const [shareOpen, setShareOpen] = useState(false);
-  // png frame-picker modal (animations only)
-  const [pngOpen, setPngOpen] = useState(false);
 
   // Each cell renders at exactly cellPx — a direct handle on block size.
   // Lower `cols` (fewer, fatter cells) + a high pixel size = chunky pixels.
@@ -1262,35 +430,68 @@ export default function Create({ adminSecret = null }) {
   const drawEnabled =
     sourceType === "image" && !showImageIntro && (!hasPhoto || drawOnPhoto);
   const overlayActive = hasMedia && (cropMode || picking);
+  const shownRect = cropDraft || crop;
+
+  // Mini-monitor scale: fit the same cols×rows frame into a small fixed box,
+  // reusing the already-measured render size (no extra observer).
+  const MINI_W = 140,
+    MINI_H = 108;
+  const miniScale = outputPx
+    ? Math.min(1, MINI_W / outputPx.w, MINI_H / outputPx.h)
+    : 0.12;
+
+  // Everything bake() needs to sample the exact preview: the settingsRef the
+  // live loop reads plus the source handles and figure metadata.
+  const bakeCtx = {
+    canvasRef,
+    settingsRef,
+    videoRef,
+    activeSource,
+    sourceReady,
+    isStill,
+    rows,
+    cols,
+    cellPx,
+    fps,
+    duration,
+    trimStart,
+    trimEnd,
+    fileName,
+    style: {
+      font: fontKey,
+      letterSpacing,
+      lineHeight,
+      background: bgColor,
+      color: fgColor,
+      edgeColor: splitEdges ? effectiveEdgeColor : undefined,
+    },
+  };
 
   // Tool modes + shade swatches + size slider — rendered both in the rail and in
   // the fullscreen bar, so it's defined once (closes over the shared state).
   const drawControls = (
     <>
       <div className="draw-tools__row">
-        <div className="keymodes toolmodes">
-          {[
-            ["draw", "draw"],
-            ["fill", "fill"],
-            ["erase", "erase"],
-            ["cut", "cut"],
-          ].map(([k, label]) => (
-            <button
-              key={k}
-              className={`keymode ${tool === k ? "is-active" : ""}`}
-              onClick={() => setTool(k)}
-              title={
-                k === "cut"
-                  ? "remove a section of the photo — cut areas become transparent"
-                  : k === "fill"
-                    ? "bucket-fill the clicked region with the selected shade"
-                    : undefined
-              }
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          className="toolmodes"
+          value={tool}
+          onChange={setTool}
+          options={[
+            { value: "draw", label: "draw" },
+            {
+              value: "fill",
+              label: "fill",
+              title: "bucket-fill the clicked region with the selected shade",
+            },
+            { value: "erase", label: "erase" },
+            {
+              value: "cut",
+              label: "cut",
+              title:
+                "remove a section of the photo — cut areas become transparent",
+            },
+          ]}
+        />
         <div className="swatches" role="group" aria-label="brush shade">
           {BRUSH_SHADES.map((c) => (
             <button
@@ -1331,78 +532,31 @@ export default function Create({ adminSecret = null }) {
       )}
     </>
   );
-  const shownRect = cropDraft || crop;
 
-  // Mini-monitor scale: fit the same cols×rows frame into a small fixed box,
-  // reusing the already-measured render size (no extra observer).
-  const MINI_W = 140,
-    MINI_H = 108;
-  const miniScale = outputPx
-    ? Math.min(1, MINI_W / outputPx.w, MINI_H / outputPx.h)
-    : 0.12;
-
-  // ── mini-monitor drag (and tap-to-jump) ──────────────────────
-  // Position lives in a ref, mutated on the DOM directly during a drag so the
-  // per-frame textContent writes and any parent re-render don't fight it; the
-  // ref is re-applied to `style` on every render so the position sticks. The
-  // jump-to-monitor uses onClick (reliable) guarded by a "did we drag" flag.
-  const onMiniDown = (e) => {
-    if (e.target.closest(".mini-close")) return; // the close button owns its click
-    const el = miniElRef.current;
-    const r = el.getBoundingClientRect();
-    miniDragRef.current = {
-      sx: e.clientX,
-      sy: e.clientY,
-      baseL: r.left,
-      baseT: r.top,
-    };
-    draggedRef.current = false;
-    try {
-      el.setPointerCapture(e.pointerId);
-    } catch {
-      /* fine */
-    }
-  };
-  const onMiniMove = (e) => {
-    const d = miniDragRef.current;
-    if (!d) return;
-    const dx = e.clientX - d.sx,
-      dy = e.clientY - d.sy;
-    if (!draggedRef.current && Math.hypot(dx, dy) < 5) return; // ignore jitter → keep tap semantics
-    draggedRef.current = true;
-    const el = miniElRef.current;
-    const left = Math.min(
-      Math.max(6, d.baseL + dx),
-      window.innerWidth - el.offsetWidth - 6,
-    );
-    const top = Math.min(
-      Math.max(6, d.baseT + dy),
-      window.innerHeight - el.offsetHeight - 6,
-    );
-    miniPosRef.current = { left, top };
-    el.style.left = `${left}px`;
-    el.style.top = `${top}px`;
-    el.style.right = "auto";
-    el.style.bottom = "auto";
-  };
-  const onMiniUp = () => {
-    miniDragRef.current = null;
-  };
-  const onMiniClick = () => {
-    if (draggedRef.current) {
-      draggedRef.current = false;
-      return;
-    } // it was a drag, not a tap
-    monitorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-  const miniPosStyle = miniPosRef.current
-    ? {
-        left: miniPosRef.current.left,
-        top: miniPosRef.current.top,
-        right: "auto",
-        bottom: "auto",
+  // The arm → confirm crop flow, rendered in both the source toolbar (while
+  // drawing) and the fullscreen drawbar.
+  const armCropButton = (btnClass) => (
+    <button
+      className={btnClass}
+      onClick={() => {
+        if (cropMode) {
+          setCropMode(false); // confirm → back to drawing
+        } else {
+          setCropMode(true); // arm / re-open the editor
+          setPicking(false);
+        }
+      }}
+      title={
+        cropMode
+          ? "confirm the crop and return to drawing"
+          : crop
+            ? "edit the crop region"
+            : "drag a rectangle on the preview to crop"
       }
-    : null;
+    >
+      {cropMode ? "✓ done" : crop ? "▦ edit crop" : "▦ crop"}
+    </button>
+  );
 
   return (
     <div className="create-page" ref={pageRef}>
@@ -1417,24 +571,21 @@ export default function Create({ adminSecret = null }) {
         </header>
 
         <div className="workbench">
-          {/* ── left rail: settings by category ── */}
+          {/* left rail: settings by category */}
           <aside className="rail">
             <SettingsBlock
               label="resolution"
               open={openBlocks.resolution}
               onToggle={() => toggleBlock("resolution")}
             >
-              <div className="keymodes">
-                {Object.entries(QUALITY_PRESETS).map(([k, v]) => (
-                  <button
-                    key={k}
-                    className={`keymode ${cols === v ? "is-active" : ""}`}
-                    onClick={() => setCols(v)}
-                  >
-                    {k}
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl
+                value={cols}
+                onChange={setCols}
+                options={Object.entries(QUALITY_PRESETS).map(([k, v]) => ({
+                  value: v,
+                  label: k,
+                }))}
+              />
               <Slider
                 label="fine tune"
                 value={cols}
@@ -1444,25 +595,19 @@ export default function Create({ adminSecret = null }) {
                 onChange={setCols}
                 suffix=" cols"
               />
-              <div className="keymodes">
-                {[
-                  ["auto", "auto height"],
-                  ["custom", "custom height"],
-                ].map(([k, label]) => (
-                  <button
-                    key={k}
-                    className={`keymode ${resMode === k ? "is-active" : ""}`}
-                    onClick={() => {
-                      // seed the explicit height from the current aspect-derived rows
-                      // so switching to custom doesn't make the picture jump.
-                      if (k === "custom") setCustomRows(rows);
-                      setResMode(k);
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl
+                value={resMode}
+                onChange={(k) => {
+                  // seed the explicit height from the current aspect-derived rows
+                  // so switching to custom doesn't make the picture jump.
+                  if (k === "custom") setCustomRows(rows);
+                  setResMode(k);
+                }}
+                options={[
+                  { value: "auto", label: "auto height" },
+                  { value: "custom", label: "custom height" },
+                ]}
+              />
               {resMode === "custom" && (
                 <Slider
                   label="rows"
@@ -1546,17 +691,14 @@ export default function Create({ adminSecret = null }) {
               onToggle={() => toggleBlock("typography")}
             >
               <div className="field-label">font</div>
-              <div className="keymodes">
-                {Object.keys(FONT_STACKS).map((k) => (
-                  <button
-                    key={k}
-                    className={`keymode ${fontKey === k ? "is-active" : ""}`}
-                    onClick={() => setFontKey(k)}
-                  >
-                    {k}
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl
+                value={fontKey}
+                onChange={setFontKey}
+                options={Object.keys(FONT_STACKS).map((k) => ({
+                  value: k,
+                  label: k,
+                }))}
+              />
               <Slider
                 label="char spacing"
                 value={letterSpacing}
@@ -1629,43 +771,27 @@ export default function Create({ adminSecret = null }) {
                 onChange={setContrast}
                 fixed={2}
               />
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={invert}
-                  onChange={(e) => setInvert(e.target.checked)}
-                />
+              <ToggleRow checked={invert} onChange={setInvert}>
                 invert <span className="muted">(dark ink on light bg)</span>
-              </label>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={blockAvg}
-                  onChange={(e) => setBlockAvg(e.target.checked)}
-                />
+              </ToggleRow>
+              <ToggleRow checked={blockAvg} onChange={setBlockAvg}>
                 block averaging{" "}
                 <span className="muted">({SUPERSAMPLE}× supersample)</span>
-              </label>
+              </ToggleRow>
               <div className="field-label">dithering</div>
-              <div className="keymodes">
-                {[
-                  ["off", "off"],
-                  ["floyd", "floyd"],
-                  ["bayer", "bayer"],
-                ].map(([k, label]) => (
-                  <button
-                    key={k}
-                    className={`keymode ${dither === k ? "is-active" : ""}`}
-                    onClick={() => setDither(k)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl
+                value={dither}
+                onChange={setDither}
+                options={[
+                  { value: "off", label: "off" },
+                  { value: "floyd", label: "floyd" },
+                  { value: "bayer", label: "bayer" },
+                ]}
+              />
             </SettingsBlock>
           </aside>
 
-          {/* ── main: source panel + preview monitor (hero) ── */}
+          {/* main: source panel + preview monitor (hero) */}
           <main className="monitor-wrap">
             <div className="stage-row">
               <section className="block source-panel">
@@ -1674,66 +800,36 @@ export default function Create({ adminSecret = null }) {
                   <div className="source-toolbar">
                     {/* video · image — both source elements stay mounted so their
                       refs exist and each source's state persists across tabs. */}
-                    <div className="keymodes source-tabs">
-                      {[
-                        ["video", "video"],
-                        ["image", "image"],
-                      ].map(([k, label]) => (
-                        <button
-                          key={k}
-                          className={`keymode ${sourceType === k ? "is-active" : ""}`}
-                          onClick={() => switchSource(k)}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
+                    <SegmentedControl
+                      className="source-tabs"
+                      value={sourceType}
+                      onChange={switchSource}
+                      options={[
+                        { value: "video", label: "video" },
+                        { value: "image", label: "image" },
+                      ]}
+                    />
                     <div className="toolbar-right">
-                      <div
-                        className="keymodes size-modes"
+                      <SegmentedControl
+                        className="size-modes"
                         role="group"
-                        aria-label="source preview size"
-                      >
-                        {["s", "m", "l"].map((k) => (
-                          <button
-                            key={k}
-                            className={`keymode ${sourceScale === k ? "is-active" : ""}`}
-                            onClick={() => setSourceScale(k)}
-                          >
-                            {k.toUpperCase()}
-                          </button>
-                        ))}
-                      </div>
+                        ariaLabel="source preview size"
+                        value={sourceScale}
+                        onChange={setSourceScale}
+                        options={["s", "m", "l"].map((k) => ({
+                          value: k,
+                          label: k.toUpperCase(),
+                        }))}
+                      />
                       {hasMedia &&
                         (drawEnabled ? (
                           // While drawing, the live crop editor would sit over the
                           // canvas — so cropping is an explicit arm → confirm step
                           // that puts the overlay away and hands the pointer back.
                           <>
-                            <button
-                              className={`keymode ${cropMode ? "is-active" : ""}`}
-                              onClick={() => {
-                                if (cropMode) {
-                                  setCropMode(false); // confirm → back to drawing
-                                } else {
-                                  setCropMode(true); // arm / re-open the editor
-                                  setPicking(false);
-                                }
-                              }}
-                              title={
-                                cropMode
-                                  ? "confirm the crop and return to drawing"
-                                  : crop
-                                    ? "edit the crop region"
-                                    : "drag a rectangle on the preview to crop"
-                              }
-                            >
-                              {cropMode
-                                ? "✓ done"
-                                : crop
-                                  ? "▦ edit crop"
-                                  : "▦ crop"}
-                            </button>
+                            {armCropButton(
+                              `keymode ${cropMode ? "is-active" : ""}`,
+                            )}
                             {crop && (
                               <button
                                 className="keymode"
@@ -1931,7 +1027,7 @@ export default function Create({ adminSecret = null }) {
                     )}
                   </div>
 
-                  {/* ── video transport ── */}
+                  {/* video transport */}
                   {sourceType === "video" && hasVideo && (
                     <>
                       <div className="filename" title={videoName}>
@@ -1982,7 +1078,7 @@ export default function Create({ adminSecret = null }) {
                         </button>
                       </div>
 
-                      {/* ── trim: only [in, out] previews-in-loop and bakes ── */}
+                      {/* trim: only [in, out] previews-in-loop and bakes */}
                       <div className="trim-row">
                         <span className="field-label">trim</span>
                         <button
@@ -2061,19 +1157,14 @@ export default function Create({ adminSecret = null }) {
                     </>
                   )}
 
-                  {/* ── image tools: photo + drawing share one canvas ── */}
+                  {/* image tools: photo + drawing share one canvas */}
                   {sourceType === "image" && !showImageIntro && (
                     <div className="draw-tools">
                       {/* with a photo loaded, choose photo-only vs drawing over it */}
                       {hasPhoto && (
-                        <label className="toggle">
-                          <input
-                            type="checkbox"
-                            checked={drawOnPhoto}
-                            onChange={(e) => setDrawOnPhoto(e.target.checked)}
-                          />
+                        <ToggleRow checked={drawOnPhoto} onChange={setDrawOnPhoto}>
                           draw on photo{" "}
-                        </label>
+                        </ToggleRow>
                       )}
                       {drawEnabled && drawControls}
                       <div className="draw-tools__row">
@@ -2121,7 +1212,7 @@ export default function Create({ adminSecret = null }) {
                     </p>
                   )}
 
-                  {/* ── background removal — keyed on the source you see above ── */}
+                  {/* background removal — keyed on the source you see above */}
                   {hasMedia && (
                     <SourceSection
                       label="background removal"
@@ -2130,22 +1221,17 @@ export default function Create({ adminSecret = null }) {
                       open={openBlocks.key}
                       onToggle={() => toggleBlock("key")}
                     >
-                      <div className="keymodes">
-                        {[
-                          ["off", "keep"],
-                          ["green", "green"],
-                          ["black", "black"],
-                          ["white", "white"],
-                          ["custom", "custom"],
-                        ].map(([k, label]) => (
-                          <button
-                            key={k}
-                            className={`keymode ${keyMode === k ? "is-active" : ""}`}
-                            onClick={() => setKeyMode(k)}
-                          >
-                            {label}
-                          </button>
-                        ))}
+                      <SegmentedControl
+                        value={keyMode}
+                        onChange={setKeyMode}
+                        options={[
+                          { value: "off", label: "keep" },
+                          { value: "green", label: "green" },
+                          { value: "black", label: "black" },
+                          { value: "white", label: "white" },
+                          { value: "custom", label: "custom" },
+                        ]}
+                      >
                         <button
                           className={`keymode ${picking ? "is-active" : ""}`}
                           onClick={() => setPicking((p) => !p)}
@@ -2153,7 +1239,7 @@ export default function Create({ adminSecret = null }) {
                         >
                           ⌖ pick
                         </button>
-                      </div>
+                      </SegmentedControl>
                       {keyMode === "custom" && (
                         <label className="keycolor">
                           <span className="keycolor-label">key color</span>
@@ -2200,7 +1286,7 @@ export default function Create({ adminSecret = null }) {
                     </SourceSection>
                   )}
 
-                  {/* ── edge detection — strong luma gradients become direction glyphs ── */}
+                  {/* edge detection — strong luma gradients become direction glyphs */}
                   {hasMedia && (
                     <SourceSection
                       label="edge detection"
@@ -2209,54 +1295,46 @@ export default function Create({ adminSecret = null }) {
                       open={openBlocks.edges}
                       onToggle={() => toggleBlock("edges")}
                     >
-                      <div className="keymodes">
-                        {[
-                          ["off", "off"],
-                          ["overlay", "overlay"],
-                          ["only", "edges only"],
-                        ].map(([k, label]) => (
-                          <button
-                            key={k}
-                            className={`keymode ${edgeMode === k ? "is-active" : ""}`}
-                            onClick={() => setEdgeMode(k)}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
+                      <SegmentedControl
+                        value={edgeMode}
+                        onChange={setEdgeMode}
+                        options={[
+                          { value: "off", label: "off" },
+                          { value: "overlay", label: "overlay" },
+                          { value: "only", label: "edges only" },
+                        ]}
+                      />
                       {/* Same reserved-slot trick as the key threshold above. */}
                       <div
                         className={`zone-slot${edgeMode !== "off" ? " is-active" : ""}`}
                       >
-                          <Slider
-                            label="edge threshold"
-                            value={edgeThreshold}
-                            min={0.05}
-                            max={0.8}
-                            step={0.01}
-                            onChange={setEdgeThreshold}
-                            fixed={2}
+                        <Slider
+                          label="edge threshold"
+                          value={edgeThreshold}
+                          min={0.05}
+                          max={0.8}
+                          step={0.01}
+                          onChange={setEdgeThreshold}
+                          fixed={2}
+                        />
+                        <div className="keycolor">
+                          <span className="keycolor-label">edge color</span>
+                          <input
+                            type="color"
+                            className="keycolor-swatch"
+                            value={effectiveEdgeColor}
+                            onChange={(e) => setEdgeColor(e.target.value)}
+                            aria-label="edge color"
                           />
-                          <div className="keycolor">
-                            <span className="keycolor-label">edge color</span>
-                            <input
-                              type="color"
-                              className="keycolor-swatch"
-                              value={effectiveEdgeColor}
-                              onChange={(e) => setEdgeColor(e.target.value)}
-                              aria-label="edge color"
-                            />
-                            <button
-                              className="keymode"
-                              onClick={() => setEdgeColor(null)}
-                              disabled={edgeColor === null}
-                              title="match the text color"
-                            >
-                              {edgeColor === null
-                                ? "matches text"
-                                : "match text"}
-                            </button>
-                          </div>
+                          <button
+                            className="keymode"
+                            onClick={() => setEdgeColor(null)}
+                            disabled={edgeColor === null}
+                            title="match the text color"
+                          >
+                            {edgeColor === null ? "matches text" : "match text"}
+                          </button>
+                        </div>
                       </div>
                     </SourceSection>
                   )}
@@ -2266,70 +1344,51 @@ export default function Create({ adminSecret = null }) {
               {/* monitor + bake/export bar share a column so the actions sit
                   right under the ASCII view and pin with it on desktop */}
               <div className="monitor-col">
-              <div className="monitor" ref={monitorRef}>
-                <div
-                  className={`statusline ${mode === "baked" ? "is-baked" : ""}`}
-                >
-                  <span className="dot" />
-                  {hasSource
-                    ? mode === "baked"
-                      ? isStill
-                        ? `still · 1 frame · ${cols}×${rows}`
-                        : `baked · ${baked.frames.length} frames · ${cols}×${rows} @ ${baked.fps}fps`
-                      : isStill
-                        ? `still · ${cols}×${rows}`
-                        : `live · ${cols}×${rows} · ~${frameEstimate} frames @ ${fps}fps`
-                    : "no signal"}
-                  {hasSource && baked && (
-                    <span className="toggle-mode">
-                      <button
-                        className={mode === "live" ? "on" : ""}
-                        onClick={() => setMode("live")}
-                      >
-                        live
-                      </button>
-                      <button
-                        className={mode === "baked" ? "on" : ""}
-                        onClick={() => setMode("baked")}
-                      >
-                        baked
-                      </button>
-                    </span>
-                  )}
-                </div>
-                <div
-                  className={`screen ${keyMode !== "off" ? "is-keying" : ""}`}
-                  ref={screenRef}
-                  style={
-                    bgColor !== STYLE_DEFAULTS.background
-                      ? { background: bgColor }
-                      : undefined
-                  }
-                >
-                  {hasSource ? (
-                    <div className="preview-stack">
-                      <pre
-                        ref={previewRef}
-                        className="preview"
-                        style={{
-                          fontSize: previewFontSize,
-                          fontFamily: FONT_STACKS[fontKey],
-                          letterSpacing: letterSpacing
-                            ? `${letterSpacing}em`
-                            : undefined,
-                          lineHeight,
-                          color: fgColor,
-                          transform:
-                            previewScale !== 1
-                              ? `scale(${previewScale})`
-                              : undefined,
-                        }}
-                        aria-hidden="true"
-                      />
-                      {showEdgeLayer && (
+                <div className="monitor" ref={monitorRef}>
+                  <div
+                    className={`statusline ${mode === "baked" ? "is-baked" : ""}`}
+                  >
+                    <span className="dot" />
+                    {hasSource
+                      ? mode === "baked"
+                        ? isStill
+                          ? `still · 1 frame · ${cols}×${rows}`
+                          : `baked · ${baked.frames.length} frames · ${cols}×${rows} @ ${baked.fps}fps`
+                        : isStill
+                          ? `still · ${cols}×${rows}`
+                          : `live · ${cols}×${rows} · ~${frameEstimate} frames @ ${fps}fps`
+                      : "no signal"}
+                    {hasSource && baked && (
+                      <span className="toggle-mode">
+                        <button
+                          className={mode === "live" ? "on" : ""}
+                          onClick={() => setMode("live")}
+                        >
+                          live
+                        </button>
+                        <button
+                          className={mode === "baked" ? "on" : ""}
+                          onClick={() => setMode("baked")}
+                        >
+                          baked
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    className={`screen ${keyMode !== "off" ? "is-keying" : ""}`}
+                    ref={screenRef}
+                    style={
+                      bgColor !== STYLE_DEFAULTS.background
+                        ? { background: bgColor }
+                        : undefined
+                    }
+                  >
+                    {hasSource ? (
+                      <div className="preview-stack">
                         <pre
-                          ref={previewEdgeRef}
-                          className="preview preview-edge"
+                          ref={previewRef}
+                          className="preview"
                           style={{
                             fontSize: previewFontSize,
                             fontFamily: FONT_STACKS[fontKey],
@@ -2337,7 +1396,7 @@ export default function Create({ adminSecret = null }) {
                               ? `${letterSpacing}em`
                               : undefined,
                             lineHeight,
-                            color: effectiveEdgeColor,
+                            color: fgColor,
                             transform:
                               previewScale !== 1
                                 ? `scale(${previewScale})`
@@ -2345,75 +1404,94 @@ export default function Create({ adminSecret = null }) {
                           }}
                           aria-hidden="true"
                         />
-                      )}
-                    </div>
-                  ) : (
-                    <div className="noise">drop a clip to begin</div>
-                  )}
-                  <div className="scanline" aria-hidden="true" />
+                        {showEdgeLayer && (
+                          <pre
+                            ref={previewEdgeRef}
+                            className="preview preview-edge"
+                            style={{
+                              fontSize: previewFontSize,
+                              fontFamily: FONT_STACKS[fontKey],
+                              letterSpacing: letterSpacing
+                                ? `${letterSpacing}em`
+                                : undefined,
+                              lineHeight,
+                              color: effectiveEdgeColor,
+                              transform:
+                                previewScale !== 1
+                                  ? `scale(${previewScale})`
+                                  : undefined,
+                            }}
+                            aria-hidden="true"
+                          />
+                        )}
+                      </div>
+                    ) : (
+                      <div className="noise">drop a clip to begin</div>
+                    )}
+                    <div className="scanline" aria-hidden="true" />
+                  </div>
                 </div>
-              </div>
 
-              {/* ── bake + export bar ── */}
-              <div className="actions">
-              <button
-                className="btn primary"
-                onClick={bake}
-                disabled={!hasSource || baking}
-              >
-                {baking
-                  ? `baking… ${bakeProgress}%`
-                  : isStill
-                    ? "● bake still"
-                    : "● bake animation"}
-              </button>
-              <button
-                className="btn"
-                onClick={exportJson}
-                disabled={!baked || baking}
-              >
-                ↓ json
-              </button>
-              <button
-                className="btn"
-                onClick={exportPng}
-                disabled={!baked || baking}
-              >
-                ↓ png
-              </button>
-              {canWebm && !isStill && (
-                <button
-                  className="btn"
-                  onClick={exportWebm}
-                  disabled={!baked || baking || webmProgress !== null}
-                >
-                  {webmProgress !== null
-                    ? `recording… ${Math.round(webmProgress * 100)}%`
-                    : "↓ webm"}
-                </button>
-              )}
-              <button
-                className="btn"
-                onClick={() => setShareOpen(true)}
-                disabled={!baked || baking}
-              >
-                ↑ share to gallery
-              </button>
-              <div className="readout">
-                {baked
-                  ? `raw ${formatBytes(sizes.raw)} · gzip ~${formatBytes(sizes.gz)}`
-                  : isStill
-                    ? "bake to export the still"
-                    : frameEstimate > 480
-                      ? `heads up: ~${frameEstimate} frames is a lot — lower fps or trim`
-                      : "bake to measure output size"}
-              </div>
-                {/* always in flow — appearing/disappearing used to add a wrapped
-                    row to the actions bar and jolt the layout on every bake */}
-                <div className={`progress ${baking ? "is-active" : ""}`}>
-                  <span style={{ width: baking ? `${bakeProgress}%` : 0 }} />
+                {/* bake + export bar */}
+                <div className="actions">
+                  <button
+                    className="btn primary"
+                    onClick={() => bake(bakeCtx)}
+                    disabled={!hasSource || baking}
+                  >
+                    {baking
+                      ? `baking… ${bakeProgress}%`
+                      : isStill
+                        ? "● bake still"
+                        : "● bake animation"}
+                  </button>
+                  <button
+                    className="btn"
+                    onClick={exportJson}
+                    disabled={!baked || baking}
+                  >
+                    ↓ json
+                  </button>
+                  <button
+                    className="btn"
+                    onClick={exportPng}
+                    disabled={!baked || baking}
+                  >
+                    ↓ png
+                  </button>
+                  {canWebm && !isStill && (
+                    <button
+                      className="btn"
+                      onClick={exportWebm}
+                      disabled={!baked || baking || webmProgress !== null}
+                    >
+                      {webmProgress !== null
+                        ? `recording… ${Math.round(webmProgress * 100)}%`
+                        : "↓ webm"}
+                    </button>
+                  )}
+                  <button
+                    className="btn"
+                    onClick={() => setShareOpen(true)}
+                    disabled={!baked || baking}
+                  >
+                    ↑ share to gallery
+                  </button>
+                  <div className="readout">
+                    {baked
+                      ? `raw ${formatBytes(sizes.raw)} · gzip ~${formatBytes(sizes.gz)}`
+                      : isStill
+                        ? "bake to export the still"
+                        : frameEstimate > 480
+                          ? `heads up: ~${frameEstimate} frames is a lot — lower fps or trim`
+                          : "bake to measure output size"}
+                  </div>
+                  {/* always in flow — appearing/disappearing used to add a wrapped
+                      row to the actions bar and jolt the layout on every bake */}
+                  <div className={`progress ${baking ? "is-active" : ""}`}>
+                    <span style={{ width: baking ? `${bakeProgress}%` : 0 }} />
+                  </div>
                 </div>
-              </div>
               </div>
             </div>
           </main>
@@ -2510,28 +1588,13 @@ export default function Create({ adminSecret = null }) {
               {/* same arm → confirm crop flow as the windowed draw toolbar: the
                   overlay/handles live inside .stage-media, which fullscreens
                   with the stage, so the existing pointer math works unchanged */}
-              <button
-                className={`btn ${cropMode ? "primary" : ""}`}
-                onClick={() => {
-                  if (cropMode) {
-                    setCropMode(false); // confirm → back to drawing
-                  } else {
-                    setCropMode(true); // arm / re-open the editor
-                    setPicking(false);
-                  }
-                }}
-                title={
-                  cropMode
-                    ? "confirm the crop and return to drawing"
-                    : crop
-                      ? "edit the crop region"
-                      : "drag a rectangle to crop"
-                }
-              >
-                {cropMode ? "✓ done" : crop ? "▦ edit crop" : "▦ crop"}
-              </button>
+              {armCropButton(`btn ${cropMode ? "primary" : ""}`)}
               {crop && !cropMode && (
-                <button className="btn" onClick={resetCrop} title="clear the crop">
+                <button
+                  className="btn"
+                  onClick={resetCrop}
+                  title="clear the crop"
+                >
                   ✕ reset crop
                 </button>
               )}
@@ -2561,175 +1624,5 @@ export default function Create({ adminSecret = null }) {
         )}
       </div>
     </div>
-  );
-}
-
-/**
- * Draw the current source frame into the offscreen canvas and return the
- * ascii for it. `source` is a <video> or <canvas> — drawImage handles both.
- * With blockAvg on, the canvas is SUPERSAMPLE× the grid and each cell
- * averages its block. A crop maps only that region of the source onto the
- * grid. The canvas is cleared first because the image source can carry
- * transparency (cut regions) that must not reveal the previous frame.
- */
-function sampleFrame(ctx, canvas, source, s) {
-  const ss = s.blockAvg ? SUPERSAMPLE : 1;
-  const w = s.cols * ss;
-  const h = s.rows * ss;
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
-  }
-  ctx.clearRect(0, 0, w, h);
-  const natW = source.videoWidth || source.width;
-  const natH = source.videoHeight || source.height;
-  const c = s.crop;
-  if (c && natW && natH) {
-    ctx.drawImage(
-      source,
-      c.x * natW,
-      c.y * natH,
-      c.w * natW,
-      c.h * natH,
-      0,
-      0,
-      w,
-      h,
-    );
-  } else {
-    ctx.drawImage(source, 0, 0, w, h);
-  }
-  const { data } = ctx.getImageData(0, 0, w, h);
-  const opts = {
-    cols: s.cols,
-    rows: s.rows,
-    ramp: s.ramp,
-    invert: s.invert,
-    gamma: s.gamma,
-    contrast: s.contrast,
-    key: { mode: s.keyMode, threshold: s.keyThreshold, color: s.keyColor },
-    dither: s.dither,
-    edge: s.edge,
-  };
-  // A distinct edge color needs the ramp and edges on separately-tinted layers;
-  // otherwise the single combined string is the exact default output.
-  return s.splitEdges
-    ? convertFrameLayers(data, w, h, opts)
-    : convertFrame(data, w, h, opts);
-}
-
-/** A collapsible settings category — the label bar toggles the body. */
-function SettingsBlock({ label, open, onToggle, children }) {
-  return (
-    <section className="block">
-      <button
-        className="block-label block-toggle"
-        aria-expanded={open}
-        onClick={onToggle}
-      >
-        <span>{label}</span>
-        <span className="caret" aria-hidden="true">
-          {open ? "▾" : "▸"}
-        </span>
-      </button>
-      {open && <div className="block-body">{children}</div>}
-    </section>
-  );
-}
-
-/** A collapsible sub-section inside the source panel (keyzone styling). */
-function SourceSection({ label, status, statusOn, open, onToggle, children }) {
-  return (
-    <div className="keyzone">
-      <button className="zone-toggle" aria-expanded={open} onClick={onToggle}>
-        <span className="field-label">{label}</span>
-        {/* current state surfaced in the header so a collapsed section still
-            tells you it exists and what it's set to */}
-        {status && (
-          <span className={`zone-status${statusOn ? " is-on" : ""}`}>
-            {status}
-          </span>
-        )}
-        <span className="caret" aria-hidden="true">
-          {open ? "▾" : "▸"}
-        </span>
-      </button>
-      {open && <div className="zone-body">{children}</div>}
-    </div>
-  );
-}
-
-// Uncontrolled-while-dragging: the thumb and readout track a local value at
-// input speed, but the parent (the whole 2700-line Create tree) is committed
-// to at most once per animation frame. Pointer input can outrun the display
-// rate, and each commit re-renders every settings block — throttling here is
-// what keeps fast drags from stacking layout work behind the pointer.
-function Slider({
-  label,
-  value,
-  min,
-  max,
-  step,
-  onChange,
-  suffix = "",
-  fixed,
-}) {
-  const [local, setLocal] = useState(value);
-  const dragging = useRef(false);
-  const raf = useRef(0);
-  const pending = useRef(value);
-  const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
-
-  // Follow external changes (ramp presets, resets) when not mid-drag.
-  useEffect(() => {
-    if (!dragging.current) setLocal(value);
-  }, [value]);
-  useEffect(() => () => cancelAnimationFrame(raf.current), []);
-
-  const handle = (v) => {
-    setLocal(v);
-    pending.current = v;
-    if (!raf.current)
-      raf.current = requestAnimationFrame(() => {
-        raf.current = 0;
-        onChangeRef.current(pending.current);
-      });
-  };
-  // Flush on release/blur so the final value never rides on a cancelled frame.
-  const endDrag = () => {
-    dragging.current = false;
-    if (raf.current) {
-      cancelAnimationFrame(raf.current);
-      raf.current = 0;
-      onChangeRef.current(pending.current);
-    }
-  };
-
-  const shown = fixed != null ? Number(local).toFixed(fixed) : local;
-  return (
-    <label className="slider">
-      <span className="slider-top">
-        <span>{label}</span>
-        <span className="slider-val">
-          {shown}
-          {suffix}
-        </span>
-      </span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={local}
-        onPointerDown={() => {
-          dragging.current = true;
-        }}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-        onBlur={endDrag}
-        onChange={(e) => handle(Number(e.target.value))}
-      />
-    </label>
   );
 }
