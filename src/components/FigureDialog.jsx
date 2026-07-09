@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import AsciiPlayer from './AsciiPlayer.jsx';
 import { getFigureData, adminSetVisibility, adminReject } from '../lib/api.js';
-import { downloadJson, downloadPng, downloadWebm, webmMimeType } from '../create/exportMedia.js';
+import { downloadJson, downloadPng } from '../create/exportMedia.js';
+import { useDismissOnEscape } from '../hooks/useDismissOnEscape.js';
+import { useWebmExport } from '../hooks/useWebmExport.js';
 
 // Info dialog for one figure — opened from the hero wall, the gallery, and
 // the admin library. `figure` is a descriptor `{ key, name, author, url,
@@ -23,7 +25,7 @@ const fmtDate = (iso) => {
 export default function FigureDialog({ figure, onClose, admin }) {
   const [data, setData] = useState(null);
   const [failed, setFailed] = useState(false);
-  const [webmProgress, setWebmProgress] = useState(null);
+  const { canWebm: webmSupported, webmProgress, exportWebm } = useWebmExport();
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminError, setAdminError] = useState('');
 
@@ -43,27 +45,13 @@ export default function FigureDialog({ figure, onClose, admin }) {
     };
   }, [figure]);
 
-  useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useDismissOnEscape(onClose);
 
   const name = figure.name || data?.name || 'untitled';
   const author = figure.author || data?.author || 'unknown';
   const created = fmtDate(figure.createdAt || data?.createdAt);
   const isAnim = (data?.frames?.length ?? figure.framesCount ?? 0) > 1;
-  const canWebm = isAnim && !!webmMimeType();
-
-  const saveWebm = async () => {
-    if (!data || webmProgress !== null) return;
-    setWebmProgress(0);
-    try {
-      await downloadWebm(data, { onProgress: setWebmProgress });
-    } finally {
-      setWebmProgress(null);
-    }
-  };
+  const canWebm = isAnim && webmSupported;
 
   // One guard for every moderation call: busy state + error surface + the
   // grid patch via onChanged.
@@ -214,7 +202,7 @@ export default function FigureDialog({ figure, onClose, admin }) {
             <button
               className="figdialog__btn"
               disabled={!data || webmProgress !== null}
-              onClick={saveWebm}
+              onClick={() => exportWebm(data)}
             >
               {webmProgress !== null ? `recording… ${Math.round(webmProgress * 100)}%` : '↓ webm'}
             </button>

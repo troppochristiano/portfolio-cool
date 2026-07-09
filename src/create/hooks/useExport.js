@@ -1,20 +1,15 @@
 import { useState } from "react";
-import {
-  downloadJson,
-  downloadPng,
-  downloadWebm,
-  webmMimeType,
-} from "../exportMedia.js";
+import { downloadJson, downloadPng } from "../exportMedia.js";
+import { useWebmExport } from "../../hooks/useWebmExport.js";
 
 /**
  * Export + share actions for a baked figure. PNG/WebM exports render the baked
- * frames to a canvas client-side. WebM is only offered for animations and when
- * MediaRecorder supports it (the export records in real time, hence the busy
- * readout).
+ * frames to a canvas client-side.
  */
 export function useExport({ baked, setError }) {
-  const canWebm = !!webmMimeType();
-  const [webmProgress, setWebmProgress] = useState(null); // null | 0..1
+  const { canWebm, webmProgress, exportWebm } = useWebmExport({
+    onError: setError,
+  });
   // share-to-gallery modal
   const [shareOpen, setShareOpen] = useState(false);
   // png frame-picker modal (animations only)
@@ -33,24 +28,13 @@ export function useExport({ baked, setError }) {
     }
     downloadPng(baked).catch(() => setError("png export failed"));
   };
-  const exportWebm = async () => {
-    if (!baked || webmProgress !== null) return;
-    setWebmProgress(0);
-    try {
-      await downloadWebm(baked, { onProgress: setWebmProgress });
-    } catch {
-      setError("webm export failed");
-    } finally {
-      setWebmProgress(null);
-    }
-  };
 
   return {
     canWebm,
     webmProgress,
     exportJson,
     exportPng,
-    exportWebm,
+    exportWebm: () => exportWebm(baked),
     shareOpen,
     setShareOpen,
     pngOpen,
