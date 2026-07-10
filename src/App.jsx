@@ -30,11 +30,11 @@ import { getRandomFigures } from "./lib/api";
 import { preloadImage, runPool } from "./lib/preload";
 import { isCoarsePointer, prefersReducedMotion } from "./lib/utils.js";
 
-// Map photos.js entries into the viewer's photo-config shape (same as the bundled demo),
-// pointing thumbnails at the public/photos copy.
+// Map photos.js entries into the viewer's photo-config shape (same as the bundled
+// demo). No thumbnail: it only fed the debug panel's photo switcher, and the
+// public/photos copy no longer ships.
 const photoConfigs = Object.entries(photos).map(([key, p]) => ({
   key,
-  thumbnail: `/${p.filename}`,
   prefix: p.PREFIX,
   xSteps: p.X_STEPS,
   ySteps: p.Y_STEPS,
@@ -60,11 +60,15 @@ const FIGURES = ["4x3Big", "3x9l0s10n", "GunInverted", "V4n7am", "s09r4n0"];
 // URL + metadata) and each plane fetches its own JSON lazily. The static clips
 // always work — even with the backend down — and community uploads are blended
 // in on top when the API answers.
+//
+// `url` points at the prebuilt wall thumb (scripts/generate-wall-thumbs.mjs);
+// `fullUrl` is the full figure, fetched only on desktop hover and in the dialog.
 const STATIC_POOL = FIGURES.map((name) => ({
   key: `static:${name}`,
   name,
   author: "Christian Bianchi",
-  url: `/data/${name}.json`,
+  url: `/data/thumbs/${name}.json`,
+  fullUrl: `/data/${name}.json`,
 }));
 
 // How many random approved community figures to mix into each roll.

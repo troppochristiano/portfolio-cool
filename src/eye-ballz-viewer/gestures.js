@@ -86,7 +86,10 @@ export function startGesture(name, h) {
   return { name, spec, start: performance.now(), fromX: h.xIndex, fromY: h.yIndex };
 }
 
-// Sample the gesture's target cell for `now`. Returns { xIndex, yIndex, done }.
+// Sample the gesture's target cell for `now`. Returns { xIndex, yIndex, ox, oy, done }.
+// ox/oy are the continuous normalized look offsets (-1..1 of the grid half-range,
+// pre-rounding) — the gesture analog of the cursor's nx/ny, so callers can drive the
+// same subtle mesh tilt the mouse-follow path uses.
 //   Phase 1 (recenter): ease the start cell toward the neutral center over recenterMs.
 //   Phase 2 (nod): hold the off-axis at center, drive the active axis along the keyframes.
 export function sampleGesture(inst, now, h) {
@@ -97,16 +100,20 @@ export function sampleGesture(inst, now, h) {
 
   if (elapsed < spec.recenterMs) {
     const e = easeInOutCubic(elapsed / spec.recenterMs);
+    const x = inst.fromX + (cx - inst.fromX) * e;
+    const y = inst.fromY + (cy - inst.fromY) * e;
     return {
-      xIndex: clampIndex(Math.round(inst.fromX + (cx - inst.fromX) * e), h.xSteps),
-      yIndex: clampIndex(Math.round(inst.fromY + (cy - inst.fromY) * e), h.ySteps),
+      xIndex: clampIndex(Math.round(x), h.xSteps),
+      yIndex: clampIndex(Math.round(y), h.ySteps),
+      ox: (x - cx) / (cx || 1),
+      oy: (y - cy) / (cy || 1),
       done: false,
     };
   }
 
   const t = (elapsed - spec.recenterMs) / spec.durationMs;
   if (t >= 1) {
-    return { xIndex: Math.round(cx), yIndex: Math.round(cy), done: true };
+    return { xIndex: Math.round(cx), yIndex: Math.round(cy), ox: 0, oy: 0, done: true };
   }
 
   // Circle gesture: parametric circular motion (yaw + pitch on a circle). The angle
@@ -124,6 +131,8 @@ export function sampleGesture(inst, now, h) {
     return {
       xIndex: clampIndex(Math.round(cx + ox * cx), h.xSteps),
       yIndex: clampIndex(Math.round(cy + oy * cy), h.ySteps),
+      ox,
+      oy,
       done: false,
     };
   }
@@ -135,6 +144,8 @@ export function sampleGesture(inst, now, h) {
     return {
       xIndex: clampIndex(Math.round(cx + ox * cx), h.xSteps),
       yIndex: clampIndex(Math.round(cy + oy * cy), h.ySteps),
+      ox,
+      oy,
       done: false,
     };
   }
@@ -148,6 +159,8 @@ export function sampleGesture(inst, now, h) {
   return {
     xIndex: spec.axis === "x" ? idx : Math.round(cx),
     yIndex: spec.axis === "y" ? idx : Math.round(cy),
+    ox: spec.axis === "x" ? offset : 0,
+    oy: spec.axis === "y" ? offset : 0,
     done: false,
   };
 }

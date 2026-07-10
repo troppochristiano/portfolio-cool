@@ -31,7 +31,6 @@ import sharp from "sharp";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const EXPRESSIONS_DIR = path.join(ROOT, "public", "outputs", "meBW", "expressions");
 const DEPTH_DIR = path.join(ROOT, "public", "outputs", "meBW", "depth");
-const BACKPLATE = path.join(ROOT, "public", "photos", "IMG_6750BW_HIGHCONTRAST.JPG");
 
 const args = new Map(
   process.argv.slice(2).map((a) => {
@@ -41,11 +40,21 @@ const args = new Map(
 );
 const DRY = args.has("dry-run");
 const PRUNE_ONLY = args.has("prune-only");
+// Depth pass only: skips color frames and the backplate. Use when re-scaling depth
+// after the color frames have already reached their final generation — re-running
+// the color pass over them would stack lossy encodes.
+const DEPTH_ONLY = args.has("depth-only");
 const QUALITY = Number(args.get("quality")) || 72;
+const COLOR_SCALE = Number(args.get("color-scale")) || 1;
 const DEPTH_SCALE = Number(args.get("depth-scale")) || 1;
+// Lossy depth encode at the given quality instead of near-lossless. Only sane at
+// small depth sizes (<=96px): measured there, lossy q75 matches near-lossless on
+// displacement error and silhouette stability at less than half the bytes, and the
+// GPU's bilinear upsample smooths away any blocking. At full res the original
+// "near-lossless only" rule still applies (ringing at the 0.12 key edge fringes).
+const DEPTH_LOSSY = args.has("depth-lossy") ? Number(args.get("depth-lossy")) || 75 : 0;
 const SAMPLE_DIR = typeof args.get("sample") === "string" ? args.get("sample") : null;
 
-const kb = (n) => `${(n / 1024).toFixed(1)} KB`;
 const mb = (n) => `${(n / 1024 / 1024).toFixed(2)} MB`;
 
 async function pool(tasks, limit = 8) {
@@ -93,9 +102,15 @@ async function report(label, results) {
   return { before, after };
 }
 
-const encodeColor = (img) => img.webp({ quality: QUALITY, effort: 6 }).toBuffer();
+const encodeColor = (img) => {
+  if (COLOR_SCALE !== 1) img = img.resize({ width: Math.round(512 * COLOR_SCALE) });
+  // The photography is B&W: encode luma only so no bits are spent on chroma noise.
+  // (Decodes back to R=G=B; the shader's luminance key and invert are unaffected.)
+  return img.grayscale().webp({ quality: QUALITY, effort: 6 }).toBuffer();
+};
 const encodeDepth = (img) => {
   if (DEPTH_SCALE !== 1) img = img.resize({ width: Math.round(512 * DEPTH_SCALE) });
+  if (DEPTH_LOSSY) return img.grayscale().webp({ quality: DEPTH_LOSSY, effort: 6 }).toBuffer();
   return img.webp({ nearLossless: true, quality: 60, effort: 6 }).toBuffer();
 };
 
@@ -162,15 +177,20 @@ async function main() {
 
   // Color frames: same name, same format, just re-encoded.
   const colorTasks = [];
-  for (const expr of await readdir(EXPRESSIONS_DIR)) {
-    const dir = path.join(EXPRESSIONS_DIR, expr);
-    for (const f of await readdir(dir)) {
-      if (!f.endsWith(".webp")) continue;
-      const p = path.join(dir, f);
-      colorTasks.push(() => convert(p, p, encodeColor));
+  if (!DEPTH_ONLY) {
+    for (const expr of await readdir(EXPRESSIONS_DIR)) {
+      const dir = path.join(EXPRESSIONS_DIR, expr);
+      for (const f of await readdir(dir)) {
+        if (!f.endsWith(".webp")) continue;
+        const p = path.join(dir, f);
+        colorTasks.push(() => convert(p, p, encodeColor));
+      }
     }
   }
-  const colorTotals = await report(`color frames (q${QUALITY})`, await pool(colorTasks));
+  const colorLabel = `color frames (q${QUALITY}${COLOR_SCALE !== 1 ? `, ${COLOR_SCALE}x` : ""})`;
+  const colorTotals = DEPTH_ONLY
+    ? { before: 0, after: 0 }
+    : await report(colorLabel, await pool(colorTasks));
 
   // Depth maps: *.webp.depth.png -> *.webp.depth.webp (near-lossless).
   const depthTasks = [];
@@ -180,19 +200,11 @@ async function main() {
     const dst = path.join(DEPTH_DIR, f.replace(/\.png$/, ".webp"));
     depthTasks.push(() => convert(src, dst, encodeDepth));
   }
-  const depthLabel = `depth maps (near-lossless${DEPTH_SCALE !== 1 ? `, ${DEPTH_SCALE}x` : ""})`;
+  const depthLabel = `depth maps (${DEPTH_LOSSY ? `lossy q${DEPTH_LOSSY}` : "near-lossless"}${DEPTH_SCALE !== 1 ? `, ${DEPTH_SCALE}x` : ""})`;
   const depthTotals = await report(depthLabel, await pool(depthTasks));
 
-  // Backplate photo: JPG -> WebP alongside (referenced from src/photos.js).
-  const backplate = await convert(
-    BACKPLATE,
-    BACKPLATE.replace(/\.JPG$/i, ".webp"),
-    (img) => img.webp({ quality: 78, effort: 6 }).toBuffer(),
-  );
-  console.log(`backplate photo               1 file   ${kb(backplate.before)} -> ${kb(backplate.after)}${DRY ? "  [dry-run]" : ""}`);
-
-  const before = colorTotals.before + depthTotals.before + backplate.before;
-  const after = colorTotals.after + depthTotals.after + backplate.after;
+  const before = colorTotals.before + depthTotals.before;
+  const after = colorTotals.after + depthTotals.after;
   console.log(`\nTOTAL ${mb(before)} -> ${mb(after)}  (saved ${mb(before - after)})`);
   if (DRY) console.log("dry-run: nothing written");
   else console.log("note: old depth .png files kept; run --prune-only after validating");

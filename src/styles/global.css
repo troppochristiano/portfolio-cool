@@ -42,6 +42,20 @@ body {
     pointer-events: auto;
 }
 
+/* Route-change block reveal canvas (blockRevealTransition.js). Above
+   .page-layer (z-40); pointer-events:none so a covered screen never eats
+   clicks. */
+.transition-grid {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    pointer-events: none;
+    z-index: 50;
+}
+
 /* ── cinematic intro ─────────────────────────────────────────────
    Phase 1–3 overlay: the character swarm canvas. Transparent, so the black body
    shows through while forming and the hero avatar fades in *behind* the text. */
@@ -664,12 +678,22 @@ body {
 /* Each plane's player fades in when its own figure JSON lands, so the wall
    populates piece by piece instead of popping all at once. */
 .plane-body {
+    position: relative;
     opacity: 0;
     transition: opacity 0.6s ease;
 }
 
 .plane-body.is-loaded {
     opacity: 1;
+}
+
+/* Hover fetch of the full figure in flight — same muted note as .figdialog__note. */
+.plane-loading {
+    position: absolute;
+    right: 6px;
+    bottom: 4px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
 }
 
 /* ── corner pill (intro skip) ─────────────────────────────────── */

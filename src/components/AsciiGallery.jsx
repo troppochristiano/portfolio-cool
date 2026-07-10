@@ -710,6 +710,10 @@ function LazyPlane({ desc, index, hold, paused }) {
   const [data, setData] = useState(null);
   // Desktop hover swaps the full-resolution figure in (gallery-card pattern).
   const [hovering, setHovering] = useState(false);
+  // Full figure for static planes, whose desc.url is the prebuilt wall thumb —
+  // fetched lazily on first hover. Community planes have no fullUrl (their
+  // desc.url is already the full JSON, downsampled client-side as before).
+  const [fullData, setFullData] = useState(null);
   const rootRef = useRef(null);
   const holdRef = useRef(hold);
   holdRef.current = hold;
@@ -718,6 +722,7 @@ function LazyPlane({ desc, index, hold, paused }) {
 
   useEffect(() => {
     setData(null);
+    setFullData(null);
     deferredRef.current = null;
     let alive = true;
     const startFetch = () => {
@@ -771,7 +776,24 @@ function LazyPlane({ desc, index, hold, paused }) {
     };
   }, []);
 
-  const shown = hovering && data ? data : display;
+  // Fetch the full figure on first hover (promise-cached, repeat hovers free).
+  // Skipped when the served thumb wasn't actually downsampled (no `wallThumb`
+  // marker — the figure was already <=96 cols, so the "thumb" IS the full copy).
+  useEffect(() => {
+    if (!hovering || !desc.fullUrl || !data?.wallThumb || fullData) return;
+    let alive = true;
+    getFigureData(desc.fullUrl)
+      .then((d) => {
+        if (alive) setFullData(d);
+      })
+      .catch(() => {}); // hover keeps the thumb — ambient, not critical
+    return () => {
+      alive = false;
+    };
+  }, [hovering, desc, data, fullData]);
+
+  const full = desc.fullUrl && data?.wallThumb ? fullData : data;
+  const shown = hovering && full ? full : display;
   return (
     <div ref={rootRef} className={`plane-body${data ? " is-loaded" : ""}`}>
       {shown && (
@@ -785,6 +807,8 @@ function LazyPlane({ desc, index, hold, paused }) {
           loop
         />
       )}
+      {/* Same muted note the dialog shows while its figure JSON is in flight. */}
+      {hovering && data && !full && <span className="plane-loading">loading…</span>}
     </div>
   );
 }

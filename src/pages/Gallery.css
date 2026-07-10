@@ -78,6 +78,7 @@
 }
 
 .gallery-card__screen {
+    position: relative;
     background: #050505;
     aspect-ratio: 4 / 3;
     display: flex;
@@ -86,6 +87,15 @@
     overflow: hidden;
     padding: 8px;
     pointer-events: none;
+}
+
+/* Hover fetch of the full figure in flight — same muted note as .figdialog__note. */
+.gallery-card__loading {
+    position: absolute;
+    right: 8px;
+    bottom: 6px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
 }
 
 .gallery-card__caption {

@@ -35,8 +35,9 @@ export default function FigureDialog({ figure, onClose, admin }) {
     setFailed(false);
     // Admin dialogs for hidden figures must fetch with the bearer header —
     // the public data route 404s pending figures — so the descriptor can
-    // carry its own fetcher.
-    const fetchIt = figure.fetchData || (() => getFigureData(figure.url));
+    // carry its own fetcher. Static wall descriptors point `url` at the
+    // prebuilt thumb; the dialog always wants the full figure (`fullUrl`).
+    const fetchIt = figure.fetchData || (() => getFigureData(figure.fullUrl || figure.url));
     fetchIt()
       .then((d) => alive && setData(d))
       .catch(() => alive && setFailed(true));

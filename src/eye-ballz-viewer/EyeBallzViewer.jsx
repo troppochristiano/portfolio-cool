@@ -481,7 +481,8 @@ function EyeBallzViewerInner(
         start: 0,
       },
       // Active scripted gesture (nod yes/no), or null. Driven each frame in the
-      // animation loop; sweeps the grid look-cell so the face turns (no mesh tilt).
+      // animation loop; sweeps the grid look-cell so the face turns, and feeds the
+      // tilt targets so the mesh carries the same subtle lean as mouse-look.
       gesture: null,
       // Animation mode: when true the avatar ignores the cursor entirely (so scripted
       // animations play cleanly) and rests in a neutral, forward-facing pose. Seeded
@@ -569,6 +570,12 @@ function EyeBallzViewerInner(
       // while it runs (the touch sweep below and pointer look are gated on !h.gesture).
       if (h.gesture) {
         const g = sampleGesture(h.gesture, performance.now(), h);
+        // Drive the same subtle mesh tilt the cursor does, from the gesture's
+        // continuous look offsets — so the intro look-around and nods carry the
+        // slight lean instead of playing on a perfectly flat mesh. g.done resets
+        // both to 0, easing the mesh back flat.
+        h.tiltTargetX = g.oy;
+        h.tiltTargetY = g.ox;
         if (g.xIndex !== h.xIndex || g.yIndex !== h.yIndex) {
           h.xIndex = g.xIndex;
           h.yIndex = g.yIndex;
@@ -912,6 +919,15 @@ function EyeBallzViewerInner(
     h.canvas.style.opacity = settings.ascii.enabled
       ? String(settings.ascii.backplate ?? 0)
       : "";
+    // The revealed backplate is a solid accent-blue silhouette, not the photographic
+    // render: brightness(0) flattens the keyed head to black (alpha untouched), the
+    // rest of the chain tints that black to #0000ff. Display-only — AsciiEffect
+    // samples the framebuffer, not the CSS-filtered canvas. Raw-canvas mode (ASCII
+    // off) must stay photographic, so the filter clears with the reveal.
+    h.canvas.style.filter =
+      settings.ascii.enabled && (settings.ascii.backplate ?? 0) > 0
+        ? "brightness(0) invert(8%) sepia(94%) saturate(7481%) hue-rotate(247deg) brightness(97%) contrast(147%)"
+        : "";
     h.needsRender = true; // demand rendering: repaint with the new settings
   }, [settings, transparent]);
 
@@ -1440,7 +1456,7 @@ function EyeBallzViewerInner(
                   className={`eye-ballz-switcher-btn${p.key === activeKey ? " active" : ""}`}
                   onClick={() => setActiveKey(p.key)}
                 >
-                  <img src={p.thumbnail} alt={p.key} />
+                  {p.thumbnail && <img src={p.thumbnail} alt={p.key} />}
                   <span>{p.key}</span>
                 </button>
               ))}

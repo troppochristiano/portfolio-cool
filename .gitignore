@@ -13,6 +13,10 @@
 # Local working/source asset dirs — served copies live under public/
 /outputs/
 /photos/
+/media/
+
+# Local texture backups from compression passes — never commit
+/texture-backup-*/
 
 # Unused legacy ascii animations assets
 /asciiLegacy

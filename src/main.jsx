@@ -4,6 +4,9 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import HeroLayout from "./components/HeroLayout.jsx";
 import Create from "./pages/Create";
 import "./styles/global.css";
+// Side effect: registers the block-reveal leave/enter tweens into the
+// pageTransitions seam that RouteTransition drives.
+import "./lib/blockRevealTransition.js";
 
 // Lazy chunks: neither route belongs in the hero bundle — the gallery is a
 // separate page and the admin queue is only ever visited by the site owner.

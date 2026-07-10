@@ -39,7 +39,7 @@ export function RouteTransition({ onCoverChange }) {
     runIdRef.current += 1;
     const runId = runIdRef.current;
     const el = layerRef.current;
-    const { enter, leave } = getPageTransitions();
+    const { enter, leave, cancel } = getPageTransitions();
 
     let cancelled = false;
     const stale = () => cancelled || runIdRef.current !== runId;
@@ -49,7 +49,11 @@ export function RouteTransition({ onCoverChange }) {
       // context needs it now — capture from the layer's dataset (kept in render).
       const from = el?.dataset.path ?? to;
       if (from === to) {
-        // Initial mount / same-path re-render: just sync the node.
+        // Initial mount / same-path re-render — also the landing spot when a
+        // navigation snaps back to the shown page mid-leave (back button):
+        // no leave/enter will run, so tell the transition impl to drop any
+        // in-flight cover instead of leaving the screen blacked out.
+        cancel();
         setShown({ key: to, node: outletRef.current });
         onCoverChangeRef.current?.(to !== "/");
         return;

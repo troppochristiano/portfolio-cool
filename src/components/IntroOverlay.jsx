@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 
 // Cinematic intro, phase 1–3: a swarm of monospace ASCII characters flies in from
@@ -22,6 +22,9 @@ const BUDGET_MOBILE = 425;
 // Rasterize the headline on an offscreen canvas and sample lit pixels on a grid.
 // Returns particle targets (CSS px) plus the glyph size to draw the particles at.
 function computeTargets(vw, vh) {
+  // getImageData throws IndexSizeError on a zero-sized rect (0×0 viewport in
+  // an embedded preview) — callers guard, but never let this crash the tree.
+  if (vw < 1 || vh < 1) return { targets: [], glyph: 7 };
   const off = document.createElement("canvas");
   off.width = vw;
   off.height = vh;
@@ -86,11 +89,34 @@ export function IntroOverlay({ phase, onFormed, onDispersed }) {
   onFormedRef.current = onFormed;
   const onDispersedRef = useRef(onDispersed);
   onDispersedRef.current = onDispersed;
+  // Bumped when a zero-sized viewport gains real dimensions, re-running the
+  // mount effect below.
+  const [bootTick, setBootTick] = useState(0);
 
   // Build the swarm, fly the particles in, and keep a rAF loop painting them.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    // Embedded previews can mount the app in a 0×0 viewport (pane not laid out
+    // yet); rasterizing there makes getImageData throw IndexSizeError. Wait for
+    // the first real size instead of building the swarm.
+    if (window.innerWidth === 0 || window.innerHeight === 0) {
+      const retry = () => {
+        if (window.innerWidth > 0 && window.innerHeight > 0)
+          setBootTick((t) => t + 1);
+      };
+      // Some embedders size the pane without firing a window resize event, so
+      // watch the root element's layout size as well.
+      const ro = new ResizeObserver(retry);
+      ro.observe(document.documentElement);
+      window.addEventListener("resize", retry);
+      return () => {
+        ro.disconnect();
+        window.removeEventListener("resize", retry);
+      };
+    }
+
     const ctx = canvas.getContext("2d");
 
     const vw = window.innerWidth;
@@ -183,9 +209,12 @@ export function IntroOverlay({ phase, onFormed, onDispersed }) {
     const onResize = () => {
       sizeCanvas();
       if (swarm.dispersing) return;
+      // A collapsed pane can resize to 0 mid-intro; keep the last layout.
+      if (window.innerWidth === 0 || window.innerHeight === 0) return;
       const next = computeTargets(window.innerWidth, window.innerHeight);
-      swarm.glyph = next.glyph;
       const n = next.targets.length;
+      if (!n) return;
+      swarm.glyph = next.glyph;
       gsap.to(particles, {
         x: (i) => next.targets[i % n].x,
         y: (i) => next.targets[i % n].y,
@@ -202,7 +231,7 @@ export function IntroOverlay({ phase, onFormed, onDispersed }) {
       gsap.killTweensOf(particles);
       swarmRef.current = null;
     };
-  }, []);
+  }, [bootTick]);
 
   // Phase 3: scatter the particles off-screen and fade them out.
   useEffect(() => {

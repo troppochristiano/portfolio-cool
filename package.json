@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:full": "wrangler pages dev --port 8788 --proxy 5173 -- npx vite --port 5173 --strictPort",
+    "prebuild": "node scripts/generate-wall-thumbs.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler pages deploy dist"

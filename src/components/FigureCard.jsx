@@ -54,6 +54,9 @@ export default function FigureCard({ item, onSelect, badges, fetchData }) {
         {/* contain: letterbox inside the 4:3 screen instead of overflowing it
             (portrait figures used to get cropped by the screen's overflow) */}
         <AsciiPlayer data={hovering && full ? full : thumbData(item)} fit contain loop />
+        {/* Same muted note the dialog shows while the full figure is in flight;
+            the static thumb stays visible underneath. */}
+        {hovering && !full && <span className="gallery-card__loading">loading…</span>}
       </div>
       {badges && <div className="gallery-card__badges">{badges}</div>}
       <div className="gallery-card__caption">
