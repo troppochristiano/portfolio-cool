@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { ScrambleText } from "./ScrambleText";
 
 // Fixed top header: the name on the left returns to the hero; the right-side
 // shortcuts open the About overlay and scroll to that section. "Create" routes
@@ -17,7 +18,7 @@ export function Nav({ onHome, onNavigate }) {
   return (
     <nav className={`nav${menuOpen ? " nav--open" : ""}`}>
       <button type="button" className="nav__link" onClick={go(onHome)}>
-        Christian Bianchi
+        <ScrambleText text="Christian Bianchi" />
       </button>
       <div className="nav__menu">
         <button
@@ -35,20 +36,20 @@ export function Nav({ onHome, onNavigate }) {
             className="nav__link"
             onClick={go(() => onNavigate("works"))}
           >
-            Works
+            <ScrambleText text="Works" />
           </button>
           <button
             type="button"
             className="nav__link"
             onClick={go(() => onNavigate("contact"))}
           >
-            Contact
+            <ScrambleText text="Contact" />
           </button>
           <Link className="nav__link" to="/gallery">
-            Gallery
+            <ScrambleText text="Gallery" />
           </Link>
           <Link className="nav__link" to="/create">
-            Create
+            <ScrambleText text="Create" />
           </Link>
         </div>
       </div>

@@ -6,9 +6,18 @@
 // text-layer raster as it pans into view; the full figure swaps in on hover
 // (desktop) and in the info dialog.
 
-export function downsampleFigure(data, maxCols) {
+export function downsampleFigure(data, maxCols, maxRows = Infinity) {
   const { cols, rows } = data;
-  const step = Math.max(1, Math.ceil(cols / maxCols));
+  // Cap BOTH dimensions with a single (aspect-preserving) stride. Capping only
+  // columns leaves tall figures dense: a 90×300 portrait is <=96 cols, so a
+  // cols-only cap gives step 1 and passes 27,000 glyphs through untouched — and
+  // rasterizing that <pre> as it scales into view is the wall's look-around
+  // stutter. The row cap forces the stride up so the glyph count stays bounded.
+  const step = Math.max(
+    1,
+    Math.ceil(cols / maxCols),
+    Number.isFinite(maxRows) ? Math.ceil(rows / maxRows) : 1,
+  );
   if (step === 1) return data; // already small — same object, no copy
   // Color frames are HTML span runs — stride-sampling would shred the markup.
   // The converter always bakes color:false, so this is a defensive no-op.

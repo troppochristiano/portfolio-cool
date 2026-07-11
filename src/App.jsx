@@ -93,6 +93,11 @@ const PREVIEW_GRID = (() => {
 // and a reload picks the change up.
 const REDUCED_MOTION = prefersReducedMotion();
 
+// Code-side toggle: play the face's scripted look-around gesture while the
+// containers fly through the intro tunnel. Off for now — the circular gaze was
+// choreographed for the old orbit roam; flip to true to bring it back.
+const INTRO_LOOK_AROUND = false;
+
 // `suspended` (from HeroLayout): a routed page (/create, /gallery) covers the
 // hero. The layer above is already visibility:hidden + inert; this prop pauses
 // everything that would still run underneath — render loops, blinking, the
@@ -216,11 +221,13 @@ export default function App({ suspended = false }) {
   // flipping it off arms the viewer's eased return to mouse tracking.
   const viewerRef = useRef(null);
 
-  // During the roam the face looks around — a scripted sweep through every extreme
-  // gaze pose (the viewer's own gesture engine), ending back at neutral. Skipping
-  // mid-sweep aborts the gesture so mouse-look isn't locked for its remainder.
+  // Optional (INTRO_LOOK_AROUND): during the tunnel the face looks around — a
+  // scripted sweep through every extreme gaze pose (the viewer's own gesture
+  // engine), ending back at neutral. Skipping mid-sweep aborts the gesture so
+  // mouse-look isn't locked for its remainder. With the toggle off the face
+  // holds its neutral forward pose until the intro ends.
   useEffect(() => {
-    if (introPhase !== "roam") return;
+    if (!INTRO_LOOK_AROUND || introPhase !== "roam") return;
     viewerRef.current?.playGesture("lookAround");
     return () => viewerRef.current?.stopGesture();
   }, [introPhase]);
@@ -399,9 +406,11 @@ export default function App({ suspended = false }) {
               figures={figures}
               onSelect={setDialogFigure}
               suspended={suspended}
-              introState={
-                introDone ? "done" : introPhase === "roam" ? "roam" : "waiting"
-              }
+              // The live phase flows through (forming/face/disperse/roam/done)
+              // so the wall can time its own work: figure fetches/parses hold
+              // during "forming" (the main thread belongs to the swarm) and
+              // flush in the face/disperse gap before the tunnel.
+              introState={introPhase}
               onSettled={() =>
                 setIntroPhase((p) => (p === "roam" ? "done" : p))
               }

@@ -299,6 +299,33 @@ body {
     opacity: 0.85;
 }
 
+/* Scramble hover labels (ScrambleText.jsx). Idle: plain inline spans, zero
+   layout impact. While the pointer is over the pill (.scramble--locked) every
+   glyph cell becomes an inline-block frozen at its measured natural width, so
+   flickering replacement glyphs never nudge their neighbours or resize the
+   pill. The measured widths already contain the pill's 0.04em tracking; it is
+   zeroed while locked so browsers that add letter-spacing after atomic
+   inline-blocks (Chrome) can't add it a second time. */
+.scramble__sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+.scramble--locked .scramble__chars {
+    letter-spacing: 0;
+}
+
+.scramble--locked .scramble__char {
+    display: inline-block;
+    text-align: center;
+    /* Keep the space glyph from collapsing inside its inline-block cell. */
+    white-space: pre;
+}
+
 /* The eye-ballz avatar replaces the reference title text as the centerpiece. */
 .hero-avatar {
     position: fixed;

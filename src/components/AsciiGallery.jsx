@@ -14,7 +14,9 @@ import { isCoarsePointer } from "../lib/utils.js";
 // A curved wall of floating ASCII players, ported from the Three.js video gallery
 // (REFERENCE CODE/cg-threejs-video-gallery) — same camera parallax, per-plane
 // oscillation, and hover label, but each plane is a real DOM <AsciiPlayer> positioned
-// in 3D via CSS3DRenderer instead of a WebGL video plane.
+// in 3D via CSS3DRenderer instead of a WebGL video plane. The intro flies the planes
+// through a layered 3D tunnel (a time-driven port of CodeGrid's 3D scroll tunnel)
+// before they settle into the wall.
 
 // Human-facing label for a figure, e.g. "GunInverted" -> "GUNINVERTED".
 function labelFor(name) {
@@ -56,9 +58,13 @@ const MAX_PLAYER_H = COARSE_OR_SMALL ? 280 : 400;
 
 // The wall displays a downsampled copy of each figure (client-side twin of the
 // gallery's server-side thumbs): high-res figures were the look-around jank —
-// panning a 280-col <pre> into view forces a huge text-layer raster. 96 cols
-// is indistinguishable at plane size; hover swaps the full figure in.
-const WALL_MAX_COLS = 96;
+// panning a dense <pre> into view forces a huge text-layer raster. BOTH axes
+// are capped (see downsampleFigure): capping only cols let tall portraits
+// (<=96 cols but hundreds of rows) through at full density — one dense figure
+// scaling into view was enough to stutter the whole wall. Hover swaps the full
+// figure in (desktop only). Phones render smaller/lighter copies.
+const WALL_MAX_COLS = COARSE_OR_SMALL ? 72 : 96;
+const WALL_MAX_ROWS = COARSE_OR_SMALL ? 64 : 84;
 
 const params = {
   rows: GRID,
@@ -75,9 +81,11 @@ export function AsciiGallery({
   figures,
   onReady,
   onSelect,
-  // Intro choreography: "waiting" builds the wall invisible, "roam" plays the
-  // scattered fly-in -> drift -> settle sequence, "done" is the normal wall
-  // (also the skip target). Defaults keep the component usable standalone.
+  // Intro choreography: App passes the live intro phase. Anything before "roam"
+  // builds the wall invisible ("forming" additionally holds figure fetches off
+  // the swarm's main thread), "roam" plays the tunnel fly-through -> settle
+  // sequence, "done" is the normal wall (also the skip target). Defaults keep
+  // the component usable standalone.
   introState = "done",
   // A routed page covers the hero: skip all per-frame work (same idea as the
   // document.hidden check in the loop) and pause every player's rAF.
@@ -119,12 +127,12 @@ export function AsciiGallery({
     const mount = mountRef.current;
     if (!mount) return;
 
-    // Intro roam: planes start scattered off-screen, drift on a slowly revolving
-    // shell around the center (where the face sits), then settle into their wall
-    // slots. `introActive` gates the per-frame compose and bypasses the idle-skip.
+    // Intro tunnel: layered rings of planes stream past the camera (time-driven
+    // port of the CodeGrid 3D scroll tunnel — fog in the distance, fade at the
+    // exit), then settle into their wall slots. `introActive` gates the
+    // per-frame compose and bypasses the idle-skip.
     const introMode = introStateRef.current !== "done";
     let introActive = introMode;
-    const spin = { value: 0 };
     let introTl = null;
     // Throttle every AsciiPlayer to the busy fps for the whole intro (the wall
     // is invisible or roaming until settle) so their textContent rewrites don't
@@ -135,6 +143,12 @@ export function AsciiGallery({
       introActive = false;
       setRoaming(false);
       mount.classList.remove("is-intro");
+      // Hand opacity back to CSS (hover swap, .plane-body load fade): composed
+      // opacity is exactly 1 at settle, so clearing is visually a no-op.
+      objects.forEach((o) => {
+        o.element.style.opacity = "";
+        o.element.style.visibility = "";
+      });
       onSettledRef.current?.();
     };
 
@@ -147,6 +161,48 @@ export function AsciiGallery({
       100000,
     );
     camera.position.set(0, 0, 40 * SCALE);
+
+    // ── Intro tunnel geometry (world units; CSS3D: 1 unit = 1 CSS px) ──
+    // Groups of 4 billboard planes sit on an ellipse (top/right/bottom/left);
+    // layers are stacked LAYER_GAP apart and recycled with a positive modulo so
+    // the fly-through is seamless. Ratios follow the reference demo (gap =
+    // 2.5× the perspective distance), with the radii sized against the camera
+    // frustum — like the old roam ring — so the tunnel stays in frame on any
+    // viewport. One divergence: the demo lets panels fly past the viewer, but a
+    // CSS3D transform mirrors once a plane crosses the camera plane, so the
+    // exit fade completes at EXIT_POINT, well short of CAM_Z.
+    const CAM_Z = camera.position.z;
+    const halfH0 = CAM_Z * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const halfW0 = halfH0 * camera.aspect;
+    const RADIUS_X = halfW0 * 0.5;
+    const RADIUS_Y = halfH0 * 0.6;
+    const LAYER_GAP = 2.5 * CAM_Z;
+    const EXIT_POINT = 0.72 * CAM_Z;
+    const VISIBLE_DEPTH = 3 * LAYER_GAP;
+    const PLANE_COUNT = params.rows * params.columns;
+    const LAYER_COUNT = Math.ceil(PLANE_COUNT / 4);
+    const TUNNEL_DEPTH = LAYER_COUNT * LAYER_GAP;
+    const TRAVEL_START = 0.3 * LAYER_GAP;
+    const TRAVEL_DIST = 4.5 * LAYER_GAP;
+    const travel = { value: TRAVEL_START };
+    const layerZs = new Array(LAYER_COUNT); // per-frame scratch
+
+    function layerZAt(li, t) {
+      const z =
+        (((-li * LAYER_GAP + t) % TUNNEL_DEPTH) + TUNNEL_DEPTH) % TUNNEL_DEPTH;
+      return z - TUNNEL_DEPTH + EXIT_POINT; // ∈ [EXIT_POINT − TUNNEL_DEPTH, EXIT_POINT)
+    }
+    // Fade factor per depth (demo port): 1 = fully dark. Quadratic distance fog
+    // coming in, linear fade-out while a plane crosses the exit window.
+    function calculateOverlay(z) {
+      if (z > EXIT_POINT) return 1;
+      if (z > 0) return z / EXIT_POINT;
+      if (z > -VISIBLE_DEPTH) {
+        const p = -z / VISIBLE_DEPTH;
+        return p * p;
+      }
+      return 1;
+    }
 
     const renderer = new CSS3DRenderer();
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -264,43 +320,25 @@ export function AsciiGallery({
           };
 
           if (introMode) {
-            // Roam poses: a scattered ring loosely around the face — random per-plane
-            // radius/depth keeps the drifting-cloud character, while the whole cloud
-            // revolves around the screen axis (see the spin compose in the loop) so it
-            // reads as clips looping around the face before peeling off to the wall.
-            // The ring is sized against the camera frustum at the plane's depth (not
-            // against `spacing`) so the orbit stays in frame on any viewport size.
-            const theta = Math.random() * Math.PI * 2;
-            const ringZ = params.spacing * (0.5 + Math.random() * 1.0);
-            const halfH =
-              (camera.position.z - ringZ) *
-              Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-            const halfMin = Math.min(halfH, halfH * camera.aspect);
-            const ringR = halfMin * (0.55 + Math.random() * 0.35);
-            const shell = {
-              x: Math.cos(theta) * ringR,
-              y: Math.sin(theta) * ringR * 0.6,
-              z: ringZ,
+            // Tunnel slot: 4 billboard panels per layer on an ellipse
+            // (top/right/bottom/left, demo layout). Panels never rotate during
+            // the fly-through — the camera perspective does all the work.
+            const planeIndex = row * params.columns + col;
+            const layer = Math.floor(planeIndex / 4);
+            const angle = ((planeIndex % 4) / 4) * Math.PI * 2 - Math.PI / 2;
+            const slot = {
+              x: Math.cos(angle) * RADIUS_X,
+              y: Math.sin(angle) * RADIUS_Y,
             };
-            object.userData.intro = {
-              arrive: 0,
-              settle: 0,
-              shell,
-              start: {
-                x: shell.x * 8,
-                y: shell.y * 8,
-                z: shell.z - params.spacing * 6,
-              },
-              startRot: {
-                x: (Math.random() - 0.5) * 1.0,
-                y: (Math.random() - 0.5) * 1.6,
-                z: (Math.random() - 0.5) * 0.6,
-              },
-            };
-            // Park the plane at its start pose so the roam's first frame is right.
-            const it = object.userData.intro;
-            object.position.set(it.start.x, it.start.y, it.start.z);
-            object.rotation.set(it.startRot.x, it.startRot.y, it.startRot.z);
+            object.userData.intro = { settle: 0, layer, slot, zOff: null, lastO: -1 };
+            // Park at the initial tunnel pose so the synchronous first render
+            // (and frame 0 of the fly) is right.
+            const z0 = layerZAt(layer, TRAVEL_START);
+            object.position.set(slot.x, slot.y, z0);
+            object.rotation.set(0, 0, 0);
+            const o0 = 1 - Math.min(1, Math.max(0, calculateOverlay(z0)));
+            el.style.opacity = String(o0);
+            el.style.visibility = o0 <= 0.01 ? "hidden" : "";
           }
 
           // Hover label: set on enter, cleared on leave (positioned per-frame below).
@@ -417,8 +455,8 @@ export function AsciiGallery({
       // Idle skip: once the target has stopped easing AND the oscillation amplitude
       // (∝ mouseDistance) is negligible, the wall is at rest — skip all per-plane
       // math and the CSS3D render until the next input. rAF stays alive (cheap).
-      // The intro roam writes transforms from GSAP-tweened values, so it must keep
-      // the loop hot even with zero mouse input.
+      // The intro tunnel writes transforms from GSAP-tweened values, so it must
+      // keep the loop hot even with zero mouse input.
       const eased =
         Math.abs(targetX - prevTX) > IDLE_EPS ||
         Math.abs(targetY - prevTY) > IDLE_EPS;
@@ -433,9 +471,13 @@ export function AsciiGallery({
       const tx3 = targetX * 3;
       const ty3 = targetY * 3;
 
-      // Shell revolution for the intro roam — computed once per frame.
-      const spinCos = introActive ? Math.cos(spin.value) : 1;
-      const spinSin = introActive ? Math.sin(spin.value) : 0;
+      // Tunnel layer depths — computed once per frame (planes in a layer share
+      // the wrapped z until their settle starts).
+      if (introActive) {
+        for (let li = 0; li < LAYER_COUNT; li++) {
+          layerZs[li] = layerZAt(li, travel.value);
+        }
+      }
 
       // update each plane (parallax + oscillation), identical to the reference
       objects.forEach((object) => {
@@ -492,24 +534,36 @@ export function AsciiGallery({
 
         const it = object.userData.intro;
         if (introActive && it) {
-          // Compose: start --arrive--> orbiting ring point --settle--> wall slot.
-          // The spin revolves the scattered ring in the screen plane (around Z), so
-          // the cloud visibly loops around the face while it drifts.
-          const roamX = it.shell.x * spinCos - it.shell.y * spinSin;
-          const roamY = it.shell.x * spinSin + it.shell.y * spinCos;
-          const ax = it.start.x + (roamX - it.start.x) * it.arrive;
-          const ay = it.start.y + (roamY - it.start.y) * it.arrive;
-          const az = it.start.z + (it.shell.z - it.start.z) * it.arrive;
+          const s = it.settle;
+          // Tunnel depth: the shared wrapped layer z until this plane's settle
+          // starts; from then on advance linearly from a frozen offset (a modulo
+          // wrap mid-settle would jump the lerp start by TUNNEL_DEPTH) and clamp
+          // at EXIT_POINT (an unwrapped z must never cross the camera plane —
+          // CSS3D mirrors past it).
+          let tz;
+          if (s > 0) {
+            if (it.zOff === null) it.zOff = layerZs[it.layer] - travel.value;
+            tz = Math.min(it.zOff + travel.value, EXIT_POINT);
+          } else {
+            tz = layerZs[it.layer];
+          }
+          const tunnelO = 1 - Math.min(1, Math.max(0, calculateOverlay(tz)));
+          // Compose: moving tunnel pose --settle--> wall slot (the lerp start
+          // keeps moving, so motion stays continuous under the settle wave).
           object.position.set(
-            ax + (px - ax) * it.settle,
-            ay + (py - ay) * it.settle,
-            az + (pz - az) * it.settle,
+            it.slot.x + (px - it.slot.x) * s,
+            it.slot.y + (py - it.slot.y) * s,
+            tz + (pz - tz) * s,
           );
-          object.rotation.set(
-            it.startRot.x + (rx - it.startRot.x) * it.settle,
-            it.startRot.y + (ry - it.startRot.y) * it.settle,
-            it.startRot.z + (rz - it.startRot.z) * it.settle,
-          );
+          object.rotation.set(rx * s, ry * s, rz * s); // billboard → wall curvature
+          // Fog/exit fade; lands at exactly 1 when settled even mid-fog. The
+          // lastO cache skips style writes for the ~35 fully-hidden planes.
+          const o = tunnelO + (1 - tunnelO) * s;
+          if (Math.abs(o - it.lastO) > 0.001) {
+            it.lastO = o;
+            object.element.style.opacity = o.toFixed(3);
+            object.element.style.visibility = o <= 0.01 ? "hidden" : "";
+          }
         } else {
           object.position.set(px, py, pz);
           object.rotation.set(rx, ry, rz);
@@ -547,27 +601,25 @@ export function AsciiGallery({
     buildGallery();
 
     if (introMode) {
-      // The roam timeline: fly-in to the shell (staggered), a slow revolution
-      // around the center, then a staggered settle into the wall slots. Created
-      // paused; the introState watcher effect plays it when the phase arrives.
+      // The tunnel timeline: `travel` flies the viewer forward through the layer
+      // rings (fog reveals each ring, the exit fade retires it), then a staggered
+      // settle peels the planes into their wall slots. Created paused; the
+      // introState watcher effect plays it when the phase arrives.
+      // Tuning invariant: settleStart + each·(N−1) < travel duration, so every
+      // plane's settle begins while the tunnel is still moving.
       mount.classList.add("is-intro");
       const intros = objects
         .map((o) => o.userData.intro)
         .filter(Boolean);
       introTl = gsap.timeline({ paused: true, onComplete: finishIntro });
       introTl.to(
-        intros,
+        travel,
         {
-          arrive: 1,
-          duration: 1.6,
-          ease: "power2.out",
-          stagger: { each: 0.035, from: "random" },
+          value: TRAVEL_START + TRAVEL_DIST,
+          duration: 4.6,
+          // Gentle spin-up; the end-of-travel decel hides under the settle wave.
+          ease: "power1.inOut",
         },
-        0,
-      );
-      introTl.to(
-        spin,
-        { value: Math.PI * 1.5, duration: 4.6, ease: "power1.inOut" },
         0,
       );
       introTl.to(
@@ -578,11 +630,11 @@ export function AsciiGallery({
           ease: "power3.inOut",
           stagger: { each: 0.03, from: "center" },
         },
-        1.8,
+        2.4,
       );
     }
     roamApiRef.current = {
-      // Reveal the wall and play the roam (the fade-in and the fly-in overlap).
+      // Reveal the wall and play the tunnel (the fade-in and the first rings overlap).
       start() {
         mount.classList.add("is-ready");
         introTl?.play();
@@ -593,15 +645,21 @@ export function AsciiGallery({
           introTl.kill();
           introTl = null;
         }
+        mount.classList.add("is-ready");
+        // The App watcher re-calls this on the normal post-settle "done" — no-op.
+        if (!introActive) return;
         objects.forEach((o) => {
           const it = o.userData.intro;
-          if (it) {
-            it.arrive = 1;
-            it.settle = 1;
-          }
+          if (!it) return;
+          it.settle = 1;
+          const { basePosition: p, baseRotation: r } = o.userData;
+          o.position.set(p.x, p.y, p.z);
+          o.rotation.set(r.x, r.y, r.z);
         });
-        mount.classList.add("is-ready");
-        finishIntro();
+        finishIntro(); // flips introActive, clears the inline fade styles
+        // Paint the final wall now — the idle-skip won't render again until the
+        // mouse moves, and the skip must not leave a mid-tunnel frame on screen.
+        renderer.render(scene, camera);
       },
     };
 
@@ -650,7 +708,13 @@ export function AsciiGallery({
       elListeners.forEach(([el, type, fn]) => el.removeEventListener(type, fn));
       elListeners.length = 0;
 
-      objects.forEach((object) => scene.remove(object));
+      objects.forEach((object) => {
+        // React reuses these divs across rerolls/StrictMode remounts — stale
+        // inline fade styles would leave rebuilt planes invisible.
+        object.element.style.opacity = "";
+        object.element.style.visibility = "";
+        scene.remove(object);
+      });
       objects.length = 0;
 
       if (renderer.domElement.parentNode === mount) {
@@ -683,7 +747,11 @@ export function AsciiGallery({
             <LazyPlane
               desc={fig}
               index={i}
-              hold={introState === "roam"}
+              // Two hold windows: "forming" (fetch/parse/first-paint must not
+              // stutter the headline swarm) and "roam" (must not spike a
+              // tunnel frame). The face/disperse gap between them is when the
+              // parked work flushes.
+              hold={introState === "forming" || introState === "roam"}
               // Phones: the wall is stills-only (frame 0, no playback loop at
               // all) — a dozen autoplaying clips re-rastering their text layer
               // mid-drag were the look-around jank. Clips still play in the
@@ -706,10 +774,10 @@ export function AsciiGallery({
 // per-plane stagger, then fades in — the wall populates plane by plane instead
 // of blocking on one big up-front download.
 //
-// `hold` is true while the roam timeline is flying the planes around: a fetch
-// whose stagger fires mid-roam is deferred until settle, so its JSON.parse and
-// first full-frame paint can't spike a frame of the animation. Planes that
-// loaded before the roam (the common case) are untouched.
+// `hold` is true during the intro's busy windows (the headline swarm forming,
+// the tunnel roam): any fetch/parse/first-paint that would land inside one is
+// parked and flushed (staggered) in the next quiet window, so a JSON.parse or
+// a <pre>'s first raster can't spike a frame of either animation.
 function LazyPlane({ desc, index, hold, paused }) {
   const [data, setData] = useState(null);
   // Desktop hover swaps the full-resolution figure in (gallery-card pattern).
@@ -732,7 +800,11 @@ function LazyPlane({ desc, index, hold, paused }) {
     const startFetch = () => {
       getFigureData(desc.url)
         .then((d) => {
-          if (alive) setData(d);
+          if (!alive) return;
+          // Landed mid-hold (fetch started just before the window opened):
+          // park the apply too — the first paint waits for the next gap.
+          if (holdRef.current) deferredRef.current = () => setData(d);
+          else setData(d);
         })
         .catch(() => {}); // failed plane stays empty — ambient, not critical
     };
@@ -747,19 +819,44 @@ function LazyPlane({ desc, index, hold, paused }) {
     };
   }, [desc, index]);
 
-  // Flush a parked fetch once the roam is over.
+  // Flush the parked thunk once the current hold window ends — staggered, so
+  // the burst of planes parked during "forming" doesn't fetch/parse/paint in
+  // one frame. A flush still pending when the next hold window starts (the
+  // roam) re-parks itself and runs after settle.
   useEffect(() => {
-    if (!hold && deferredRef.current) {
-      const go = deferredRef.current;
-      deferredRef.current = null;
-      go();
-    }
-  }, [hold]);
+    if (hold || !deferredRef.current) return;
+    const go = deferredRef.current;
+    deferredRef.current = null;
+    let fired = false;
+    const timer = setTimeout(() => {
+      fired = true;
+      if (holdRef.current) deferredRef.current = go;
+      else go();
+    }, index * 40);
+    return () => {
+      clearTimeout(timer);
+      if (!fired) deferredRef.current = go;
+    };
+  }, [hold, index]);
 
-  // Downsampled display copy (computed once per figure) — see WALL_MAX_COLS.
+  // Phones show a single frame ("image", not a clip): the wall is paused there,
+  // so the extra frames only cost memory + per-frame downsample work. Slicing to
+  // frame 0 before the downsample keeps ~16 dense multi-frame figures off the
+  // main thread. Desktop keeps every frame (it autoplays after settle).
+  const source = useMemo(() => {
+    if (!data || !COARSE_OR_SMALL || (data.frames?.length ?? 0) <= 1) return data;
+    return {
+      ...data,
+      frames: [data.frames[0]],
+      ...(data.edgeFrames ? { edgeFrames: [data.edgeFrames[0]] } : null),
+    };
+  }, [data]);
+
+  // Downsampled display copy — both axes capped (WALL_MAX_COLS/ROWS) so a dense
+  // portrait can't ship a huge <pre> that stutters when it scales into view.
   const display = useMemo(
-    () => (data ? downsampleFigure(data, WALL_MAX_COLS) : null),
-    [data],
+    () => (source ? downsampleFigure(source, WALL_MAX_COLS, WALL_MAX_ROWS) : null),
+    [source],
   );
 
   // Native listeners, not React synthetic: CSS3DRenderer reparents this div
