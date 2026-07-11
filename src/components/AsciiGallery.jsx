@@ -684,7 +684,11 @@ export function AsciiGallery({
               desc={fig}
               index={i}
               hold={introState === "roam"}
-              paused={suspended || introState !== "done"}
+              // Phones: the wall is stills-only (frame 0, no playback loop at
+              // all) — a dozen autoplaying clips re-rastering their text layer
+              // mid-drag were the look-around jank. Clips still play in the
+              // tap dialog.
+              paused={suspended || introState !== "done" || COARSE_OR_SMALL}
             />
             {FRAMED && (
               <div className="ascii-frame-label">{labelFor(fig.name)}</div>
@@ -804,6 +808,9 @@ function LazyPlane({ desc, index, hold, paused }) {
           width={PLAYER_W}
           maxHeight={MAX_PLAYER_H}
           paused={paused}
+          // Wall planes are the only players that follow the galleryBus
+          // (frame hold during the roam, low fps during drags).
+          busGated
           loop
         />
       )}

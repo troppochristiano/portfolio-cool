@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import FigureCard from "../components/FigureCard.jsx";
 import FigureDialog from "../components/FigureDialog.jsx";
 import { getGalleryPage } from "../lib/api.js";
+import { usePageActive } from "../lib/pageActiveContext.js";
 import "./Gallery.css";
 
 // Community gallery: an infinite-scroll grid of approved figures. Cards render
@@ -27,6 +28,10 @@ export default function Gallery() {
   const [selected, setSelected] = useState(null);
   const loadingRef = useRef(false);
   const sentinelRef = useRef(null);
+  // False while this page sits parked in a hidden keep-alive layer — the
+  // layer is visibility:hidden, which does NOT stop IntersectionObservers,
+  // so the infinite scroll must switch itself off explicitly.
+  const pageActive = usePageActive();
 
   const loadMore = useCallback(async (cur) => {
     if (loadingRef.current) return;
@@ -49,9 +54,11 @@ export default function Gallery() {
   }, [loadMore]);
 
   // Infinite scroll: fetch the next page whenever the sentinel enters view.
+  // Not observed while parked; re-arms (and fires if the sentinel is still in
+  // view) when the page becomes active again.
   useEffect(() => {
     const el = sentinelRef.current;
-    if (!el || exhausted) return;
+    if (!el || exhausted || !pageActive) return;
     const io = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting) && cursor) loadMore(cursor);
@@ -60,7 +67,7 @@ export default function Gallery() {
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [cursor, exhausted, loadMore]);
+  }, [cursor, exhausted, loadMore, pageActive]);
 
   return (
     <div className="gallery-page">

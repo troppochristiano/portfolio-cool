@@ -68,6 +68,27 @@
     margin: 0 auto;
 }
 
+/* free-tier storage meter above the library grid */
+.admin-meter {
+    max-width: 960px;
+    margin: 0 auto 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.admin-meter__bar {
+    height: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.admin-meter__bar span {
+    display: block;
+    height: 100%;
+    background: #0000ff;
+}
+
 /* Same neon pill as Gallery's .home-pill — defined here too so /admin works
    without the gallery chunk having loaded. */
 .admin-page .home-pill {

@@ -96,3 +96,17 @@ export function adminSetVisibility(id, secret, changes) {
 export function adminReject(id, secret) {
   return getJson(`/api/admin/figures/${id}/reject`, { method: 'POST', headers: bearer(secret) });
 }
+
+/** Site-wide switches. Currently just { uploadsEnabled: boolean }. */
+export function adminGetSettings(secret) {
+  return getJson('/api/admin/settings', { headers: bearer(secret) });
+}
+
+/** Open/close public uploads (admin bearer uploads are never blocked). */
+export function adminSetUploadsEnabled(secret, enabled) {
+  return getJson('/api/admin/settings', {
+    method: 'POST',
+    headers: { ...bearer(secret), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uploadsEnabled: enabled }),
+  });
+}

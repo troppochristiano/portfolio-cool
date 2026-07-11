@@ -36,3 +36,14 @@ CREATE INDEX IF NOT EXISTS idx_figures_status_created
   ON figures (status, created_at DESC, id);
 CREATE INDEX IF NOT EXISTS idx_figures_ip
   ON figures (ip_hash, created_at);
+
+-- Site-wide switches, one row per key. Currently only 'uploads_enabled'
+-- ('1'/'0', missing row = enabled) — flipped from the hero's admin pill and
+-- enforced in /api/upload for public (non-admin) submissions.
+-- IF NOT EXISTS, so re-running this file on an existing DB adds it safely:
+--   npx wrangler d1 execute ascii-figures --local  --file=schema.sql
+--   npx wrangler d1 execute ascii-figures --remote --file=schema.sql
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);

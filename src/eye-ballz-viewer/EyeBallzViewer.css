@@ -128,6 +128,20 @@
   height: 100%;
 }
 
+/* Backplate tint layer: sits between the (hidden) WebGL canvas and the ASCII DOM
+   by DOM order alone. Each rendered frame it mirrors the WebGL bitmap and recolors
+   the model silhouette to the exact backdropColor hex (source-in fill) — replaces
+   the old brightness(0)+filter-chain recolor, which iOS Safari rendered at the
+   wrong hue and opacity. Its inline opacity IS settings.ascii.backplate. */
+.eye-ballz-backplate {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none; /* pointer look / OrbitControls target the canvas below */
+  display: none; /* settings effect reveals it when backplate > 0 */
+}
+
 /* Calibration overlay for the forehead "rub to smile" trigger zone (debugForehead prop).
    Sits above the rendered avatar; pointer-events:none so it never blocks interaction. */
 .eye-ballz-forehead-debug {
@@ -168,6 +182,10 @@
   color: #fff;
   pointer-events: none;
   overflow: hidden;
+  /* iOS Safari: never inflate the tiny glyph text (~4px on phones) — autosizing
+     blows the art out of its fixed-px cell and off the canvas behind it. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 /* CSS CRT effect, after njbair's "Pure CSS CRT Effect" (codepen ZVPomJ).
@@ -262,8 +280,11 @@
   }
 }
 
-/* ---- Content-layer treatment (canvas + ASCII), keyed on the root CRT class. ---- */
+/* ---- Content-layer treatment (canvas + backplate + ASCII), keyed on the root CRT
+   class. The backplate tint canvas gets the same treatment the WebGL canvas does —
+   the old backplate WAS the canvas, so without this it would poke outside the bezel. */
 .eye-ballz--crt-curved .eye-ballz-canvas,
+.eye-ballz--crt-curved .eye-ballz-backplate,
 .eye-ballz--crt-curved .eye-ballz-ascii {
   clip-path: url(#eye-ballz-crt-path);
 }
@@ -275,11 +296,13 @@
     0.08em 0 0.08em fuchsia;
 }
 .eye-ballz--crt.glow-on .eye-ballz-canvas,
+.eye-ballz--crt.glow-on .eye-ballz-backplate,
 .eye-ballz--crt.glow-on .eye-ballz-ascii {
   filter: contrast(1) brightness(1.2) saturate(1.3);
 }
 /* replays once whenever CRT is switched on (the property is freshly applied). */
 .eye-ballz--crt .eye-ballz-canvas,
+.eye-ballz--crt .eye-ballz-backplate,
 .eye-ballz--crt .eye-ballz-ascii {
   animation: eye-ballz-crt-power-on 1.6s ease-out;
 }

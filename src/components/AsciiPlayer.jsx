@@ -34,6 +34,12 @@ import { prefersReducedMotion } from '../lib/utils.js';
  *   paused    render frame 0 and never animate — no rAF loop at all. Used by
  *             the hero wall on phones, where dozens of autoplaying players are
  *             the main scroll/first-visit cost; the info dialog still plays.
+ *   busGated  participate in the hero wall's galleryBus signals: hold the
+ *             frame during the intro roam, drop to a low fps during wall
+ *             drags. Only the wall's own planes pass this — page players
+ *             (gallery cards, dialogs) must keep playing: a deep-linked
+ *             session parks the roam flag on for as long as the hero stays
+ *             covered, which used to freeze them solid.
  *   className extra class on the <pre> (or the edge-stack wrapper)
  *   style     extra inline styles merged over the base (e.g. color, background)
  *   label     accessible name; when given the art is exposed via aria-label,
@@ -48,6 +54,7 @@ export default function AsciiPlayer({
   fontSize,
   loop = true,
   paused = false,
+  busGated = false,
   className,
   style,
   label,
@@ -105,12 +112,12 @@ export default function AsciiPlayer({
       // (rAF stays alive so playback resumes the moment the wall settles).
       // Drags keep the gentler busy rate below — the wall is at rest-ish and
       // fully visible then, so a frozen wall would read as broken.
-      if (isRoaming()) {
+      if (busGated && isRoaming()) {
         last = now;
         raf = requestAnimationFrame(tick);
         return;
       }
-      const gate = isBusy() ? busyInterval : interval;
+      const gate = busGated && isBusy() ? busyInterval : interval;
       if (now - last >= gate) {
         last = now;
         const next = i + 1;
@@ -122,7 +129,7 @@ export default function AsciiPlayer({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [data, loop, hasEdges, paused]);
+  }, [data, loop, hasEdges, paused, busGated]);
 
   const sized = width != null || fit;
 

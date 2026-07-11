@@ -79,10 +79,21 @@ async function handlePost({ request, env, waitUntil }) {
        (SELECT COUNT(*) FROM figures WHERE ip_hash = ?1
           AND created_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day')) AS byIp,
        (SELECT COUNT(*) FROM figures WHERE status = 'pending') AS pending,
-       (SELECT COUNT(*) FROM figures) AS total`,
+       (SELECT COUNT(*) FROM figures) AS total,
+       (SELECT value FROM settings WHERE key = 'uploads_enabled') AS uploadsEnabled`,
   )
     .bind(hash)
     .first();
+  // Kill switch flipped from the hero's admin pill (missing row = enabled).
+  // Checked after Turnstile so a stale page can't probe it for free, and only
+  // for the public path — admin uploads keep working while the gate is down.
+  if (!admin && counts.uploadsEnabled === '0') {
+    return error(
+      "uploads_closed",
+      "uploads are closed right now — the gallery is full",
+      403,
+    );
+  }
   if (!admin && counts.byIp >= MAX_PER_IP_PER_DAY) {
     return error(
       "rate_limited",

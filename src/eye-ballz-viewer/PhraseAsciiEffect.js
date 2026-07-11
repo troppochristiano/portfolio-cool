@@ -69,6 +69,10 @@ class PhraseAsciiEffect {
 			// A resize changes the cell's inline width/height, so the next frame must
 			// write even if the glyphs come out identical.
 			strLastFrame = null;
+			// Re-arm the one-shot size compensation, and clear any stale scale so the
+			// fresh grid is never measured through the previous compensation.
+			bNeedsMeasure = true;
+			oAscii.style.transform = '';
 
 			oImg = renderer.domElement;
 
@@ -95,6 +99,11 @@ class PhraseAsciiEffect {
 			// regardless of small font-metric differences across resolutions.
 			oStyle.textAlign = 'center';
 			oStyle.textDecoration = 'none';
+			// iOS Safari text autosizing inflates tiny text (the glyphs run as small as
+			// ~4px on phones), which blows the art out of its fixed-px cell. Disable it
+			// here (not just in the host CSS) so the vendored effect stays portable.
+			oStyle.webkitTextSizeAdjust = '100%';
+			oStyle.textSizeAdjust = '100%';
 
 		}
 
@@ -190,6 +199,60 @@ class PhraseAsciiEffect {
 		// innerHTML rewrite + reflow (expensive) whenever nothing visible changed.
 		let strLastFrame = null;
 
+		// Re-measure trigger: after every build/resize, measure the art the browser
+		// actually laid out and transform the table to fit its cell. Cleared only once
+		// a real measurement lands (0-rects while hidden/detached retry on a later
+		// frame), then refreshed periodically so metrics that settle late (font load,
+		// iOS layout passes) can't leave a stale correction.
+		let bNeedsMeasure = false;
+		let iLastMeasure = 0;
+		const MEASURE_INTERVAL_MS = 1000;
+
+		// The glyph grid's physical size assumes the browser honors the fractional
+		// letter-spacing and tiny font-size computed above. iOS Safari rounds
+		// letter-spacing to whole px (at mobile resolutions the spacing is ~-0.4px, a
+		// ~0.6px/char error across a 150+ char row), so the art can render wider or
+		// taller than its fixed-px cell — cropped by overflow:hidden and misaligned
+		// with the canvas layers behind it. Measure the real art bounds via a Range
+		// (reports true, unclipped, fractional geometry) and map them onto the cell's
+		// own measured rect with a translate+scale on the table. Both rects live in
+		// the same transform space, so ancestor transforms cancel. The translate
+		// matters as much as the scale: the art flows from the cell's TOP, so when
+		// its height is off, its center is off too — a bare center-origin scale fixes
+		// the size but keeps that offset (this was visibly wrong on iOS).
+		// Desktop computes ~identity and is left untouched. Returns false when
+		// nothing measurable exists yet.
+		function compensateScale( oAscii ) {
+
+			const oCell = oAscii.rows[ 0 ] && oAscii.rows[ 0 ].cells[ 0 ];
+			if ( ! oCell ) return false;
+
+			oAscii.style.transform = ''; // measure unscaled (repainted only after this task)
+			const oRange = document.createRange();
+			oRange.selectNodeContents( oCell );
+			const art = oRange.getBoundingClientRect();
+			const box = oCell.getBoundingClientRect();
+			const tab = oAscii.getBoundingClientRect();
+			if ( art.width <= 0 || art.height <= 0 || box.width <= 0 || box.height <= 0 ) return false;
+
+			const sx = box.width / art.width;
+			const sy = box.height / art.height;
+			// Solve translate so the scaled art's top-left lands exactly on the box's
+			// top-left (transform maps p -> tab.origin + t + s*(p - tab.origin)).
+			const tx = box.left - tab.left - sx * ( art.left - tab.left );
+			const ty = box.top - tab.top - sy * ( art.top - tab.top );
+			// Metrics are honest (desktop path) => leave the transform empty.
+			if ( Math.abs( sx - 1 ) < 0.005 && Math.abs( sy - 1 ) < 0.005
+				&& Math.abs( tx ) < 0.5 && Math.abs( ty ) < 0.5 ) return true;
+
+			// Transform the TABLE, not the wrapper div: the host's CRT power-on
+			// animation owns the wrapper's transform.
+			oAscii.style.transformOrigin = '0 0';
+			oAscii.style.transform = `translate(${tx}px, ${ty}px) scale(${sx}, ${sy})`;
+			return true;
+
+		}
+
 		function asciifyImage( oAscii ) {
 
 			oCtx.clearRect( 0, 0, iWidth, iHeight );
@@ -280,10 +343,28 @@ class PhraseAsciiEffect {
 
 			}
 
-			if ( strChars === strLastFrame ) return;
-			strLastFrame = strChars;
+			if ( strChars !== strLastFrame ) {
 
-			oAscii.innerHTML = `<tr><td style="display:block;width:${width}px;height:${height}px;overflow:hidden">${strChars}</td></tr>`;
+				strLastFrame = strChars;
+				oAscii.innerHTML = `<tr><td style="display:block;width:${width}px;height:${height}px;overflow:hidden">${strChars}</td></tr>`;
+
+			}
+
+			// Runs even on content-identical frames so a pending measurement isn't
+			// starved by the strLastFrame skip. Re-measures on a slow heartbeat too:
+			// deterministic layouts re-produce the identical transform (no jitter),
+			// but late-settling metrics get corrected within a second.
+			const iNow = Date.now();
+			if ( bNeedsMeasure || iNow - iLastMeasure > MEASURE_INTERVAL_MS ) {
+
+				if ( compensateScale( oAscii ) ) {
+
+					bNeedsMeasure = false;
+					iLastMeasure = iNow;
+
+				}
+
+			}
 
 		}
 

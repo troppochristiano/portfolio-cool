@@ -33,6 +33,7 @@ function loadTurnstile() {
 const ERROR_TEXT = {
   rate_limited: 'daily upload limit reached — try again tomorrow.',
   capacity: 'the review queue is full right now — try again later.',
+  uploads_closed: 'uploads are closed right now — the gallery is full. check back later.',
   turnstile_failed: 'the human check failed — close and try again.',
   too_large: 'this figure is too large to upload (3 MB max) — lower the resolution or fps and rebake.',
   turnstile_load_failed: 'could not load the verification widget — check your connection.',

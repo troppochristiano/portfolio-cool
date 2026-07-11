@@ -42,6 +42,14 @@ body {
     pointer-events: auto;
 }
 
+/* Kept-alive pages (RouteTransition): parked layers stay mounted but hidden.
+   visibility (not display) preserves layout and the page's own scroll
+   position — the same trick as .hero-layer.is-covered. inert comes from the
+   component. */
+.page-layer.is-parked {
+    visibility: hidden;
+}
+
 /* Route-change block reveal canvas (blockRevealTransition.js). Above
    .page-layer (z-40); pointer-events:none so a covered screen never eats
    clicks. */
@@ -417,6 +425,42 @@ body {
 
 .about-trigger:hover {
     opacity: 0.85;
+}
+
+/* Admin-only corner pill (hero): open/close public gallery uploads. Same neon
+   pill language, tucked bottom-left so it never competes with the About pill. */
+.uploads-pill {
+    position: fixed;
+    left: 16px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+    z-index: 2;
+    pointer-events: auto;
+    cursor: pointer;
+    border: none;
+    font: inherit;
+    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 6px 12px;
+    color: #fff;
+    background-color: #0000ff;
+    transition: opacity 0.15s ease;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.uploads-pill.is-off {
+    background-color: #a1130b;
+}
+
+.uploads-pill:hover:not(:disabled) {
+    opacity: 0.85;
+}
+
+.uploads-pill:disabled {
+    opacity: 0.5;
+    cursor: wait;
 }
 
 /* Full-screen overlay: a second "page" of readable content. Sits above the scene; only

@@ -23,6 +23,7 @@ const AsciiGallery = lazy(() =>
 );
 import { photos } from "./photos";
 import { Nav } from "./components/Nav";
+import { UploadsToggle } from "./components/UploadsToggle";
 import { IntroOverlay } from "./components/IntroOverlay";
 import { AboutOverlay } from "./components/AboutOverlay";
 import FigureDialog from "./components/FigureDialog";
@@ -467,6 +468,9 @@ export default function App({ suspended = false }) {
                 About
               </button>
             </div>
+            {/* Renders nothing unless the admin secret in localStorage checks
+                out against the API — visitors never see it. */}
+            <UploadsToggle />
           </div>
           <AboutOverlay
             open={aboutOpen}

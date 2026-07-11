@@ -27,6 +27,42 @@ import './Create.css';
 
 const typeOf = (item) => ((item.framesCount ?? 1) > 1 ? 'clip' : 'photo');
 
+// Free-tier budget for the library storage meter. Figure JSONs live in R2
+// (Cloudflare free tier: 10 GB stored); thumbs ride along in D1 rows and are
+// negligible next to the docs. FIGURE_CAP mirrors MAX_TOTAL in
+// functions/api/upload.js — the server refuses public uploads past it.
+const R2_FREE_BYTES = 10 * 1024 ** 3;
+const FIGURE_CAP = 1000;
+
+const fmtBytes = (n) =>
+  n >= 1024 ** 3
+    ? `${(n / 1024 ** 3).toFixed(2)} GB`
+    : n >= 1024 ** 2
+      ? `${(n / 1024 ** 2).toFixed(1)} MB`
+      : `${Math.ceil(n / 1024)} KB`;
+
+// "How much can this fill before I pay?" — sums size_bytes over the already-
+// loaded library list (every figure, hidden ones included), so it costs zero
+// extra API calls. It reads low by the D1 thumb bytes, but the R2 docs dwarf
+// those and the practical ceiling is the 1000-figure cap anyway (1000 × 3 MB
+// max ≈ 3 GB, well inside the free 10 GB).
+function StorageMeter({ items }) {
+  const used = items.reduce((sum, i) => sum + (i.sizeBytes || 0), 0);
+  const pct = (used / R2_FREE_BYTES) * 100;
+  return (
+    <div className="admin-meter">
+      <div className="admin-meter__bar" role="presentation">
+        <span style={{ width: `${Math.max(pct, 0.5)}%` }} />
+      </div>
+      <div className="admin-muted">
+        {fmtBytes(used)} of 10 GB free-tier storage used ({pct.toFixed(2)}%) ·{' '}
+        {fmtBytes(R2_FREE_BYTES - used)} left before R2 costs money ·{' '}
+        {items.length}/{FIGURE_CAP} figures (server cap)
+      </div>
+    </div>
+  );
+}
+
 // Light sanity check for a "download json" file before handing it to the
 // share modal (which reads frames/cols/style unguarded). Mirrors just enough
 // of the server's validation to give a readable error instead of a crash or
@@ -307,6 +343,7 @@ export default function Admin() {
       {tab === 'library' && (
         <>
           {library === null && <p className="admin-muted">loading…</p>}
+          {library && <StorageMeter items={library} />}
           {library?.length === 0 && <p className="admin-muted">no figures yet.</p>}
           <div className="gallery-grid admin-library">
             {library?.map((item) => (

@@ -162,6 +162,8 @@ function EyeBallzViewerInner(
         resolution: 0.27,
         fgColor: "#0000ff",
         bgColor: "#000000",
+        backplate: 0.2,
+        backdropColor: "#7a7aff",
       },
       distortion: {
         waveAmp: 0.003,
@@ -390,6 +392,16 @@ function EyeBallzViewerInner(
     canvas.className = "eye-ballz-canvas";
     container.appendChild(canvas);
 
+    // Backplate tint layer: a 2D canvas that mirrors the WebGL frame each rendered
+    // frame and recolors the silhouette to the exact backdropColor hex (source-in
+    // fill). Replaces the old CSS brightness(0)+filter-chain recolor, which iOS
+    // Safari rendered at the wrong hue and opacity (P3 filter math + accelerated-
+    // canvas compositing bugs). Not willReadFrequently: write-only, keep it GPU-backed.
+    const tintCanvas = document.createElement("canvas");
+    tintCanvas.className = "eye-ballz-backplate";
+    container.appendChild(tintCanvas);
+    const tintCtx = tintCanvas.getContext("2d");
+
     const scene = new Scene();
     const camera = new PerspectiveCamera(30, width / height, 0.01, 10);
     camera.position.z = 2.4;
@@ -444,6 +456,8 @@ function EyeBallzViewerInner(
       mesh,
       controls,
       canvas,
+      tintCanvas,
+      tintCtx,
       container,
       uniforms,
       // Normalized [-1,1] cursor position the mesh eases its tilt toward each frame.
@@ -637,7 +651,11 @@ function EyeBallzViewerInner(
       // needs ~30fps — the ASCII grid quantizes to glyphs, so faster is invisible.
       // Fully static scenes just heartbeat at 2fps as a missed-dirty-site safety net.
       const hardActive =
-        h.animMode || h.gesture || h.look.animating || tiltActive || h.needsRender;
+        h.animMode ||
+        h.gesture ||
+        h.look.animating ||
+        tiltActive ||
+        h.needsRender;
       // Phones: cap EVERY active render at 30fps — look-around easing, tilt,
       // gestures, the intro choreography, and texture-swap dirty flags alike.
       // A render here is not just WebGL: the asciify pass does a synchronous
@@ -660,6 +678,31 @@ function EyeBallzViewerInner(
           h.asciiEffect.render(scene, camera);
         } else {
           renderer.render(scene, camera);
+        }
+        // Backplate: mirror the just-rendered WebGL frame into the tint canvas and
+        // recolor the silhouette (source-in keeps the frame's alpha, replaces its
+        // color — the keyed background stays transparent). Same-task drawImage from
+        // a WebGL canvas works without preserveDrawingBuffer for the same reason
+        // the asciify getImageData does: the drawing buffer isn't cleared until the
+        // frame is composited.
+        const plate = settingsRef.current.ascii;
+        if (h.asciiEnabled && (plate.backplate ?? 0) > 0 && h.tintCtx) {
+          if (
+            h.tintCanvas.width !== canvas.width ||
+            h.tintCanvas.height !== canvas.height
+          ) {
+            // Backing store tracks the WebGL canvas (DPR-scaled), CSS size is 100%,
+            // so the tint stays crisp at the DPR-2 render backplate mode forces.
+            h.tintCanvas.width = canvas.width;
+            h.tintCanvas.height = canvas.height;
+          }
+          const ctx = h.tintCtx;
+          ctx.clearRect(0, 0, h.tintCanvas.width, h.tintCanvas.height);
+          ctx.drawImage(canvas, 0, 0);
+          ctx.globalCompositeOperation = "source-in";
+          ctx.fillStyle = plate.backdropColor || "#0000ff";
+          ctx.fillRect(0, 0, h.tintCanvas.width, h.tintCanvas.height);
+          ctx.globalCompositeOperation = "source-over";
         }
       }
       controls.update();
@@ -809,6 +852,9 @@ function EyeBallzViewerInner(
       three.current?.asciiEffect?.setSize(w, hgt);
       if (three.current) three.current.needsRender = true; // setSize cleared the canvas
     };
+    // Shared with the settings effect (DPR flip) so every resize path keeps the
+    // camera aspect, renderer, and ASCII grid in lockstep.
+    handles.resizeViewer = resizeViewer;
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const cr = entry.contentRect;
@@ -844,6 +890,7 @@ function EyeBallzViewerInner(
       handles.asciiEffect?.domElement.remove();
       renderer.dispose();
       canvas.remove();
+      tintCanvas.remove();
       three.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -882,9 +929,13 @@ function EyeBallzViewerInner(
     );
     if (h.renderer.getPixelRatio() !== nextRatio) {
       h.renderer.setPixelRatio(nextRatio);
-      const w = h.container.clientWidth || width;
-      const hgt = h.container.clientHeight || height;
-      h.renderer.setSize(w, hgt);
+      // Full resize path (not a bare renderer.setSize): keeps camera.aspect and the
+      // ASCII grid in sync with the new backing store, and re-arms the ASCII size
+      // compensation pass.
+      h.resizeViewer(
+        h.container.clientWidth || width,
+        h.container.clientHeight || height,
+      );
     }
 
     h.asciiEnabled = settings.ascii.enabled;
@@ -913,21 +964,19 @@ function EyeBallzViewerInner(
       }
     }
     // Hide the canvas visually but keep it interactive (opacity, not display) so
-    // OrbitControls stays bound and AsciiEffect still reads its bitmap. In ASCII mode a
-    // non-zero `backplate` reveals the keyed model behind the glyphs (fills the model
-    // silhouette only — the keyed background stays transparent).
-    h.canvas.style.opacity = settings.ascii.enabled
-      ? String(settings.ascii.backplate ?? 0)
-      : "";
-    // The revealed backplate is a solid accent-blue silhouette, not the photographic
-    // render: brightness(0) flattens the keyed head to black (alpha untouched), the
-    // rest of the chain tints that black to #0000ff. Display-only — AsciiEffect
-    // samples the framebuffer, not the CSS-filtered canvas. Raw-canvas mode (ASCII
-    // off) must stay photographic, so the filter clears with the reveal.
-    h.canvas.style.filter =
-      settings.ascii.enabled && (settings.ascii.backplate ?? 0) > 0
-        ? "brightness(0) invert(8%) sepia(94%) saturate(7481%) hue-rotate(247deg) brightness(97%) contrast(147%)"
-        : "";
+    // OrbitControls stays bound and AsciiEffect still reads its bitmap. The backplate
+    // reveal is the tint canvas's job now, so ASCII mode always fully hides this one.
+    h.canvas.style.opacity = settings.ascii.enabled ? "0" : "";
+    // Tint canvas: visible only in ASCII mode with a non-zero backplate. Its CSS
+    // opacity IS the backplate amount — the silhouette is painted at full alpha in
+    // the exact backdropColor hex, so the slider stays live without a redraw and the
+    // color is identical on every browser (no filter math involved). The repaint for
+    // a backdropColor change rides the needsRender below.
+    const plate = settings.ascii.enabled ? (settings.ascii.backplate ?? 0) : 0;
+    // Explicit "block" (not "") — clearing the inline style would fall back to the
+    // stylesheet's display:none default.
+    h.tintCanvas.style.display = plate > 0 ? "block" : "none";
+    h.tintCanvas.style.opacity = String(plate);
     h.needsRender = true; // demand rendering: repaint with the new settings
   }, [settings, transparent]);
 
@@ -1375,95 +1424,96 @@ function EyeBallzViewerInner(
           ))}
         </>
       )}
-      {isDebug && renderDebug(
-        <>
-          <input
-            className="eye-ballz-depth"
-            type="range"
-            min={0}
-            max={5}
-            step={0.1}
-            value={settings.displacementScale}
-            onChange={(e) => setDepth(parseFloat(e.target.value))}
-          />
-
-          <button
-            className={`eye-ballz-ascii-toggle${settings.ascii.enabled ? " active" : ""}`}
-            onClick={() => updateAscii({ enabled: !settings.ascii.enabled })}
-          >
-            ASCII: {settings.ascii.enabled ? "on" : "off"}
-          </button>
-
-          <button
-            className={`eye-ballz-crt-toggle${settings.crt.enabled ? " active" : ""}`}
-            onClick={() => updateCrt({ enabled: !settings.crt.enabled })}
-          >
-            CRT: {settings.crt.enabled ? "on" : "off"}
-          </button>
-
-          <ExpressionPanel
-            expressions={hasExpressions ? expressionNames : []}
-            status={status}
-            onStatus={setStatus}
-            gestures={gestureNames}
-            onGesture={playGesture}
-            autoBlink={autoBlink}
-            onAutoBlink={setAutoBlink}
-            animMode={animMode}
-            onAnimMode={setAnimMode}
-          />
-
-          <AsciiPanel ascii={settings.ascii} onChange={updateAscii} />
-          <DistortionPanel
-            distortion={settings.distortion}
-            onChange={updateDistortion}
-          />
-          <TiltPanel tilt={settings.tilt} onChange={updateTilt} />
-          <CRTPanel crt={settings.crt} onChange={updateCrt} />
-          <GridPanel
-            value={effPreviewGrid}
-            onChange={setGridOverride}
-            stats={loadStats}
-          />
-
-          <div className="eye-ballz-panel eye-ballz-panel--export">
-            <span className="eye-ballz-title">settings</span>
-            <div className="eye-ballz-buttons">
-              <button className="eye-ballz-btn" onClick={handleExport}>
-                Export
-              </button>
-              <button className="eye-ballz-btn" onClick={handleImport}>
-                Import
-              </button>
-            </div>
-            <textarea
-              className="eye-ballz-export-text"
-              spellCheck={false}
-              placeholder="Export copies JSON here (and to your clipboard). Paste a config and click Import."
-              value={exportText || importText}
-              onChange={(e) => {
-                setImportText(e.target.value);
-                setExportText("");
-              }}
+      {isDebug &&
+        renderDebug(
+          <>
+            <input
+              className="eye-ballz-depth"
+              type="range"
+              min={0}
+              max={5}
+              step={0.1}
+              value={settings.displacementScale}
+              onChange={(e) => setDepth(parseFloat(e.target.value))}
             />
-          </div>
 
-          {photos.length > 1 && (
-            <div className="eye-ballz-switcher">
-              {photos.map((p) => (
-                <button
-                  key={p.key}
-                  className={`eye-ballz-switcher-btn${p.key === activeKey ? " active" : ""}`}
-                  onClick={() => setActiveKey(p.key)}
-                >
-                  {p.thumbnail && <img src={p.thumbnail} alt={p.key} />}
-                  <span>{p.key}</span>
+            <button
+              className={`eye-ballz-ascii-toggle${settings.ascii.enabled ? " active" : ""}`}
+              onClick={() => updateAscii({ enabled: !settings.ascii.enabled })}
+            >
+              ASCII: {settings.ascii.enabled ? "on" : "off"}
+            </button>
+
+            <button
+              className={`eye-ballz-crt-toggle${settings.crt.enabled ? " active" : ""}`}
+              onClick={() => updateCrt({ enabled: !settings.crt.enabled })}
+            >
+              CRT: {settings.crt.enabled ? "on" : "off"}
+            </button>
+
+            <ExpressionPanel
+              expressions={hasExpressions ? expressionNames : []}
+              status={status}
+              onStatus={setStatus}
+              gestures={gestureNames}
+              onGesture={playGesture}
+              autoBlink={autoBlink}
+              onAutoBlink={setAutoBlink}
+              animMode={animMode}
+              onAnimMode={setAnimMode}
+            />
+
+            <AsciiPanel ascii={settings.ascii} onChange={updateAscii} />
+            <DistortionPanel
+              distortion={settings.distortion}
+              onChange={updateDistortion}
+            />
+            <TiltPanel tilt={settings.tilt} onChange={updateTilt} />
+            <CRTPanel crt={settings.crt} onChange={updateCrt} />
+            <GridPanel
+              value={effPreviewGrid}
+              onChange={setGridOverride}
+              stats={loadStats}
+            />
+
+            <div className="eye-ballz-panel eye-ballz-panel--export">
+              <span className="eye-ballz-title">settings</span>
+              <div className="eye-ballz-buttons">
+                <button className="eye-ballz-btn" onClick={handleExport}>
+                  Export
                 </button>
-              ))}
+                <button className="eye-ballz-btn" onClick={handleImport}>
+                  Import
+                </button>
+              </div>
+              <textarea
+                className="eye-ballz-export-text"
+                spellCheck={false}
+                placeholder="Export copies JSON here (and to your clipboard). Paste a config and click Import."
+                value={exportText || importText}
+                onChange={(e) => {
+                  setImportText(e.target.value);
+                  setExportText("");
+                }}
+              />
             </div>
-          )}
-        </>
-      )}
+
+            {photos.length > 1 && (
+              <div className="eye-ballz-switcher">
+                {photos.map((p) => (
+                  <button
+                    key={p.key}
+                    className={`eye-ballz-switcher-btn${p.key === activeKey ? " active" : ""}`}
+                    onClick={() => setActiveKey(p.key)}
+                  >
+                    {p.thumbnail && <img src={p.thumbnail} alt={p.key} />}
+                    <span>{p.key}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>,
+        )}
     </div>
   );
 }

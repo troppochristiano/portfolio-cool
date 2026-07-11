@@ -23,6 +23,10 @@ export const DEFAULT_SETTINGS = {
     // the model fully see-through (canvas hidden); higher fills just the model silhouette
     // (the keyed background is transparent, so the window background is unaffected).
     backplate: 0,
+    // Color the revealed backplate silhouette is painted in (any CSS hex) — the tint
+    // canvas recolors the model silhouette to exactly this each rendered frame.
+    // Only visible while `backplate` > 0.
+    backdropColor: "#0000ff",
     // Gradient text color for the ASCII glyphs. When enabled, overrides the flat fgColor
     // (clipped to the glyphs via CSS). Ignored while per-pixel `color` mode is on.
     gradient: { enabled: false, from: "#00ff88", to: "#ff0088", angle: 90 },

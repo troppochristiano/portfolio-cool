@@ -51,10 +51,28 @@ function setAll(coveredState) {
   paintFromState();
 }
 
+// Size of the last build — lets pinch-driven resize events (which don't change
+// the layout viewport) bail out instead of rebuilding.
+let builtW = 0;
+let builtH = 0;
+let builtDpr = 0;
+
 function buildGrid() {
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
+  // Layout viewport, NOT window.innerWidth/Height: iOS Safari reports the
+  // visual viewport there and fires resize during pinch zoom, so zooming into
+  // the ascii art used to rebuild the grid at the zoomed-in size — the fixed
+  // 100%-sized canvas then stretched those few cells across the whole screen
+  // (giant blocks on the next route change). clientWidth/Height of the root
+  // element are pinch-immune; rotation and address-bar changes still differ.
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
   const dpr = window.devicePixelRatio || 1;
+  // Same geometry as the current grid: keep it — a rebuild here would also
+  // kill an in-flight tween via settle() for nothing.
+  if (vw === builtW && vh === builtH && dpr === builtDpr) return;
+  builtW = vw;
+  builtH = vh;
+  builtDpr = dpr;
   canvas.width = vw * dpr;
   canvas.height = vh * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

@@ -205,6 +205,13 @@ export function AsciiPanel({ ascii, onChange }) {
           onChange={(e) => onChange({ backplate: parseFloat(e.target.value) })}
         />
       </Row>
+      <Row label="backdrop">
+        <input
+          type="color"
+          value={ascii.backdropColor}
+          onChange={(e) => onChange({ backdropColor: e.target.value })}
+        />
+      </Row>
       <Row label="gradient">
         <input
           type="checkbox"
