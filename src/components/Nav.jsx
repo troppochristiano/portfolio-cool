@@ -2,12 +2,14 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ScrambleText } from "./ScrambleText";
 
-// Fixed top header: the name on the left returns to the hero; the right-side
-// shortcuts open the About overlay and scroll to that section. "Create" routes
-// to the merged ASCII media converter at /create. On narrow viewports (≤860px)
-// the shortcuts collapse behind a "menu" pill and drop down as a column, so
-// they never wrap over the hero.
-export function Nav({ onHome, onNavigate }) {
+// Fixed top header around the ▙▟ brand mark (rendered by App as .brand-logo so
+// it can sit above the About overlay). One set of links serves both layouts:
+// on desktop the menu wrappers collapse away (display:contents) and the pills
+// sit directly in the bar — Works/Contact left, Gallery/Create pushed to the
+// right edge by .nav__push — while the logo floats centered. On narrow
+// viewports (≤860px) the logo docks to the left corner and all four links
+// collapse behind the "menu" pill on the right, dropping down as a column.
+export function Nav({ onNavigate }) {
   const [menuOpen, setMenuOpen] = useState(false);
   // Every navigation closes the menu so it isn't left hanging open when the
   // About overlay (which covers the nav) closes again.
@@ -17,9 +19,6 @@ export function Nav({ onHome, onNavigate }) {
   };
   return (
     <nav className={`nav${menuOpen ? " nav--open" : ""}`}>
-      <button type="button" className="nav__link" onClick={go(onHome)}>
-        <ScrambleText text="Christian Bianchi" />
-      </button>
       <div className="nav__menu">
         <button
           type="button"
@@ -45,7 +44,7 @@ export function Nav({ onHome, onNavigate }) {
           >
             <ScrambleText text="Contact" />
           </button>
-          <Link className="nav__link" to="/gallery">
+          <Link className="nav__link nav__push" to="/gallery">
             <ScrambleText text="Gallery" />
           </Link>
           <Link className="nav__link" to="/create">

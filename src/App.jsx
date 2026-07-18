@@ -23,6 +23,7 @@ const AsciiGallery = lazy(() =>
 );
 import { photos } from "./photos";
 import { Nav } from "./components/Nav";
+import { BrandLogo } from "./components/BrandLogo";
 import { UploadsToggle } from "./components/UploadsToggle";
 import { IntroOverlay } from "./components/IntroOverlay";
 import { AboutOverlay } from "./components/AboutOverlay";
@@ -72,8 +73,12 @@ const STATIC_POOL = FIGURES.map((name) => ({
   fullUrl: `/data/${name}.json`,
 }));
 
-// How many random approved community figures to mix into each roll.
-const COMMUNITY_COUNT = 12;
+// How many random approved community figures to pull into each roll. Sized to
+// fill the widest wall (desktop 7×7 = 49 planes) so that, once enough hero
+// figures exist, the wall can give every plane a distinct one and drop the
+// static seeds entirely (see AsciiGallery's assignments). Capped server-side at
+// 64 (functions/api/figures/random.js).
+const COMMUNITY_COUNT = 49;
 
 // Dev/preview knob: `?grid=5` renders the avatar on a 5×5 sub-sample of the rendered
 // 10×10 grid (coarser head tracking, ~¼ the frames), `?grid=5x3` for a rectangle.
@@ -457,7 +462,6 @@ export default function App({ suspended = false }) {
         <>
           <div className="ui-chrome">
             <Nav
-              onHome={() => setAboutOpen(false)}
               onNavigate={(id) => {
                 setAboutTarget(id);
                 setAboutOpen(true);
@@ -469,18 +473,29 @@ export default function App({ suspended = false }) {
                   ^
                 </span>
               )}
+              {/* Scroll hint doubling as the overlay's open button. */}
               <button
                 type="button"
                 className="about-trigger"
                 onClick={() => setAboutOpen(true)}
               >
-                About
+                {isCoarsePointer() ? "swipe" : "scroll"}
               </button>
             </div>
             {/* Renders nothing unless the admin secret in localStorage checks
                 out against the API — visitors never see it. */}
             <UploadsToggle />
           </div>
+          {/* Brand mark, centered in the appbar but a SIBLING of .ui-chrome:
+              the chrome's fill-mode opacity animation makes it a permanent
+              stacking context, which would trap the logo's z-25 below the
+              About overlay (z-20). Out here the logo really paints above the
+              overlay, and clicking it closes it — on the bare hero it's a
+              no-op. It carries its own ui-chrome-in fade to enter in sync.
+              On hover the two quadrant glyphs part and the revealed text
+              cycles through phrases with a scramble swap (BrandLogo.jsx; the
+              split-reveal itself is CSS, see .brand-logo in global.css). */}
+          <BrandLogo onClick={() => setAboutOpen(false)} />
           <AboutOverlay
             open={aboutOpen}
             onOpenChange={setAboutOpen}
