@@ -24,7 +24,9 @@ import { isCoarsePointer, prefersReducedMotion } from "../lib/utils.js";
 // RAMP_PRESETS.classic) — the same noise the site renders media with. The
 // pills are text-transform:uppercase, so lowercase would display as caps
 // anyway; the pool stays caps to keep measurements honest.
-const POOL = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:-=+*#%@$&";
+// Exported: DecryptText (the About headline reveal) draws from the same pool
+// so every text-noise effect on the site speaks the same alphabet.
+export const POOL = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:-=+*#%@$&";
 const RADIUS = 22; // px each side of the cursor that scrambles (~2-3 glyphs)
 const SETTLE_MS = 300; // an excited glyph flickers this long, then settles
 const SWAP_MS = 34; // min hold per random glyph…
