@@ -1,0 +1,13 @@
+{
+  "cols": 12,
+  "rows": 6,
+  "fps": 5,
+  "color": false,
+  "cellPx": 8,
+  "name": "cursor-dog placeholder (hand-drawn, tail wag) — replace with a Create-page Export JSON bake",
+  "createdAt": "2026-07-18T00:00:00.000Z",
+  "frames": [
+    " -%@*       \n   ##     = \n   ######=  \n   #    #   \n            \n            ",
+    " -%@*       \n   ##       \n   ######=- \n   #    #   \n            \n            "
+  ]
+}

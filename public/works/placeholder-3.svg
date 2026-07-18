@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000" viewBox="0 0 800 1000">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#062a2a"/>
+      <stop offset="0.55" stop-color="#0aa"/>
+      <stop offset="1" stop-color="#0000ff"/>
+    </linearGradient>
+    <radialGradient id="v" cx="0.5" cy="0.42" r="0.75">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.55"/>
+    </radialGradient>
+  </defs>
+  <rect width="800" height="1000" fill="url(#g)"/>
+  <rect width="800" height="1000" fill="url(#v)"/>
+  <text x="60" y="150" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="34" letter-spacing="6" fill="#ffffff" fill-opacity="0.85">CH.01 / 03</text>
+  <text x="60" y="920" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="46" font-weight="700" letter-spacing="2" fill="#ffffff">PROJECT THREE</text>
+</svg>

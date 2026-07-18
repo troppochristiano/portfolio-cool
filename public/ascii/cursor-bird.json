@@ -1,0 +1,15 @@
+{
+  "cols": 16,
+  "rows": 6,
+  "fps": 8,
+  "color": false,
+  "cellPx": 8,
+  "name": "cursor-pet placeholder (hand-drawn bird) — replace with a Create-page Export JSON bake",
+  "createdAt": "2026-07-17T00:00:00.000Z",
+  "frames": [
+    "          **    \n         *#     \n        ##      \n -%@######+=-   \n                \n                ",
+    "                \n                \n        ###*    \n -%@######+=-   \n                \n                ",
+    "                \n                \n                \n -%@######+=-   \n        ##*     \n          **    ",
+    "                \n                \n        ###*    \n -%@######+=-   \n                \n                "
+  ]
+}
