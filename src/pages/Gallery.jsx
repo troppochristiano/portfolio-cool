@@ -72,10 +72,14 @@ export default function Gallery() {
   return (
     <div className="gallery-page">
       <header className="gallery-head">
-        <Link className="home-pill" to="/">
-          ← Christian Bianchi
-        </Link>
-        <h1 className="gallery-title">community gallery</h1>
+        {/* Slim single row (pill + squeezed title), matching the Create
+            masthead — no chapter eyebrow. */}
+        <div className="gallery-head__bar">
+          <Link className="home-pill" to="/">
+            ← Home
+          </Link>
+          <h1 className="chapter-band__line gallery-title">community gallery</h1>
+        </div>
         <p className="gallery-tagline">
           figures baked with the <Link to="/create">converter</Link> and shared
           by visitors

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { isBusy, isRoaming } from '../lib/galleryBus.js';
+import { isRoaming } from '../lib/galleryBus.js';
 import { resolveStyle, STYLE_DEFAULTS } from '../create/styleOptions.js';
 import { prefersReducedMotion } from '../lib/utils.js';
 
@@ -34,12 +34,11 @@ import { prefersReducedMotion } from '../lib/utils.js';
  *   paused    render frame 0 and never animate — no rAF loop at all. Used by
  *             the hero wall on phones, where dozens of autoplaying players are
  *             the main scroll/first-visit cost; the info dialog still plays.
- *   busGated  participate in the hero wall's galleryBus signals: hold the
- *             frame during the intro roam, drop to a low fps during wall
- *             drags. Only the wall's own planes pass this — page players
- *             (gallery cards, dialogs) must keep playing: a deep-linked
- *             session parks the roam flag on for as long as the hero stays
- *             covered, which used to freeze them solid.
+ *   busGated  participate in the hero wall's galleryBus signal: hold the
+ *             frame during the intro roam. Only the wall's own planes pass
+ *             this — page players (gallery cards, dialogs) must keep playing:
+ *             a deep-linked session parks the roam flag on for as long as the
+ *             hero stays covered, which used to freeze them solid.
  *   className extra class on the <pre> (or the edge-stack wrapper)
  *   style     extra inline styles merged over the base (e.g. color, background)
  *   label     accessible name; when given the art is exposed via aria-label,
@@ -97,28 +96,20 @@ export default function AsciiPlayer({
     if (paused || prefersReducedMotion() || frames.length <= 1) return;
 
     const interval = 1000 / (data.fps || 12);
-    // While the CSS3D wall is re-compositing every frame (a user drag OR the
-    // intro roam), throttle playback to a low fps instead of stopping it — the
-    // art keeps moving but the (expensive) innerHTML/textContent rewrites stop
-    // competing with the re-composite. Math.max never speeds a figure up if its
-    // own fps is already below this.
-    const BUSY_FPS = 6;
-    const busyInterval = Math.max(interval, 1000 / BUSY_FPS);
     let raf = 0;
     let i = 0;
     let last = performance.now();
     const tick = (now) => {
       // The intro roam owns the frame budget outright: hold the current frame
-      // (rAF stays alive so playback resumes the moment the wall settles).
-      // Drags keep the gentler busy rate below — the wall is at rest-ish and
-      // fully visible then, so a frozen wall would read as broken.
+      // (rAF stays alive so playback resumes the moment the wall settles). A
+      // user drag keeps playing — the wall is at rest-ish and fully visible
+      // then, so the ASCII rewrites are cheap enough to run alongside it.
       if (busGated && isRoaming()) {
         last = now;
         raf = requestAnimationFrame(tick);
         return;
       }
-      const gate = busGated && isBusy() ? busyInterval : interval;
-      if (now - last >= gate) {
+      if (now - last >= interval) {
         last = now;
         const next = i + 1;
         if (next >= frames.length && !loop) return; // hold on the last frame

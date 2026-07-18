@@ -29,8 +29,10 @@ const MAX_DECODE_MS = 5000; // wall-clock safety net (throttled/background tabs)
 
 // Characters that read as "light" — they appear instantly, like the sparse
 // half of the reference ramp; everything else scrambles before settling.
-const LIGHT_CHARS = new Set([' ', '.', ',', ':', ';', "'", '`', '^', '"', '-', '_']);
-const FALLBACK_POOL = '#@$%&*+=xX0369';
+// Exported: useAsciiPortrait bakes its ambient boil frames with the same
+// light/dense split and fallback pool, so the loop matches the decode.
+export const LIGHT_CHARS = new Set([' ', '.', ',', ':', ';', "'", '`', '^', '"', '-', '_']);
+export const FALLBACK_POOL = '#@$%&*+=xX0369';
 
 // Nearest-neighbor upscale of a small text grid onto rows×cols — the blocky
 // starting state that matches what the thumb already shows on the card.

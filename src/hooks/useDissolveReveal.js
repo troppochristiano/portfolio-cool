@@ -59,6 +59,7 @@ export function useDissolveReveal({
   const CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#@$%&*+=?!<>{}[]";
   const TRAVEL = 1 + SPREAD_ABOVE + SPREAD_BELOW; // 1.5 (-0.25 .. 1.25)
   const GESTURE_GAP = 200; // ms idle => a fresh wheel gesture
+  const CLOSE_DEADZONE = 140; // px of pull absorbed when a gesture ARRIVES at the top mid-flight
 
   // grid data (kept off React render)
   const gridRef = useRef({
@@ -87,7 +88,8 @@ export function useDissolveReveal({
   const wheelAccumRef = useRef(0);
   const wheelTimerRef = useRef(null);
   const lastWheelRef = useRef(0);
-  const armedRef = useRef(false); // close-pull armed (gesture began pinned at top)
+  const armedRef = useRef(false); // close-pull armed (gesture began — or arrived — at the top)
+  const closeSlackRef = useRef(0); // px of CLOSE_DEADZONE left to absorb before a late-armed pull scrubs
   const scrubbingRef = useRef(false); // a scrub is actively driving this gesture
   const lastTouchYRef = useRef(0);
   const touchOpenAllowedRef = useRef(true); // this touch gesture began inside the open-zone
@@ -265,6 +267,7 @@ export function useDissolveReveal({
     animatingRef.current = false;
     scrubbingRef.current = false;
     wheelAccumRef.current = 0;
+    closeSlackRef.current = 0;
     const content = contentRef.current;
     if (content) content.style.clipPath = "none";
     const scroll = scrollRef?.current;
@@ -284,6 +287,7 @@ export function useDissolveReveal({
     animatingRef.current = false;
     scrubbingRef.current = false;
     wheelAccumRef.current = 0;
+    closeSlackRef.current = 0;
     const overlay = overlayRef.current;
     if (overlay) {
       overlay.style.visibility = "hidden";
@@ -432,15 +436,33 @@ export function useDissolveReveal({
 
       // ---- open: native scroll + pull-to-close ----
       const el = scrollRef?.current;
-      const atTop = el ? el.scrollTop <= 0 : true;
+      // < 1 (not <= 0): on scaled displays (Windows 125% etc.) a scrolled-back
+      // container can rest at a fractional ~0.5px and never report exactly 0.
+      const atTop = el ? el.scrollTop < 1 : true;
       if (freshGesture) {
-        armedRef.current = atTop; // close-pull only arms when starting at the top
+        armedRef.current = atTop; // a gesture born at the top closes with no dead-zone
+        closeSlackRef.current = 0;
         if (dirRef.current === "close" && wheelAccumRef.current > 0) {
           wheelAccumRef.current = 0;
         }
+      } else if (!armedRef.current && atTop && deltaY < 0) {
+        // The gesture ARRIVED at the top mid-flight (e.g. a header shortcut
+        // deep-scrolled the overlay and the user is wheeling back up). Arm
+        // late, behind a dead-zone that soaks up momentum spill — so speed-
+        // scrolling through content can't rip straight into the close, but
+        // the same continuous pull does close once the intent is clear.
+        armedRef.current = true;
+        closeSlackRef.current = CLOSE_DEADZONE;
       }
 
       if (armedRef.current && atTop && deltaY < 0) {
+        let pull = deltaY;
+        if (closeSlackRef.current > 0) {
+          closeSlackRef.current += pull; // pull < 0 eats into the slack
+          if (closeSlackRef.current >= 0) return; // still absorbing — no scrub yet
+          pull = closeSlackRef.current; // negative overshoot feeds the scrub
+          closeSlackRef.current = 0;
+        }
         // pull-to-close scrub (wheel up / finger down at the top)
         dirRef.current = "close";
         scrubbingRef.current = true;
@@ -448,7 +470,7 @@ export function useDissolveReveal({
         wheelAccumRef.current = gsap.utils.clamp(
           0,
           openDistance,
-          wheelAccumRef.current + -deltaY
+          wheelAccumRef.current + -pull
         );
         const p = wheelAccumRef.current / openDistance;
         setProgress(p, "close");

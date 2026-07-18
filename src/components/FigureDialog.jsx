@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import AsciiPlayer from './AsciiPlayer.jsx';
 import { getFigureData, adminSetVisibility, adminReject } from '../lib/api.js';
 import { downloadJson, downloadPng } from '../create/exportMedia.js';
@@ -20,6 +20,15 @@ const fmtDate = (iso) => {
   return Number.isNaN(d.getTime())
     ? null
     : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+// Byte size of the figure JSON — the exact bytes the "↓ json" button downloads
+// (downloadJson stringifies the same `data`).
+const fmtBytes = (n) => {
+  if (!Number.isFinite(n)) return null;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 };
 
 export default function FigureDialog({ figure, onClose, admin }) {
@@ -53,6 +62,11 @@ export default function FigureDialog({ figure, onClose, admin }) {
   const created = fmtDate(figure.createdAt || data?.createdAt);
   const isAnim = (data?.frames?.length ?? figure.framesCount ?? 0) > 1;
   const canWebm = isAnim && webmSupported;
+  // Byte size of the loaded figure (matches the JSON download exactly).
+  const size = useMemo(
+    () => (data ? fmtBytes(new Blob([JSON.stringify(data)]).size) : null),
+    [data],
+  );
 
   // One guard for every moderation call: busy state + error surface + the
   // grid patch via onChanged.
@@ -108,13 +122,22 @@ export default function FigureDialog({ figure, onClose, admin }) {
               <div>
                 <dt>grid</dt>
                 <dd>
-                  {data.cols}×{data.rows} @ {data.fps} fps
+                  {data.cols}×{data.rows}
+                  {isAnim ? ` @ ${data.fps} fps` : ''}
                 </dd>
               </div>
-              <div>
-                <dt>frames</dt>
-                <dd>{data.frames.length}</dd>
-              </div>
+              {size && (
+                <div>
+                  <dt>size</dt>
+                  <dd>{size}</dd>
+                </div>
+              )}
+              {isAnim && (
+                <div>
+                  <dt>frames</dt>
+                  <dd>{data.frames.length}</dd>
+                </div>
+              )}
             </>
           )}
           {admin && (

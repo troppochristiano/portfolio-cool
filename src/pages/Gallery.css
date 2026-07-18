@@ -8,19 +8,28 @@
     overflow-x: hidden;
     background: #000;
     color: #fff;
-    padding: 20px 24px 48px;
+    padding: 20px 24px 0;
 }
 
 .gallery-head {
     max-width: 1280px;
-    margin: 0 auto 24px;
+    /* Bottom margin + padding match .create-page .masthead so both page
+       headers sit identically. */
+    margin: 0 auto 0.75rem;
     border-bottom: 2px solid #fff;
-    padding-bottom: 16px;
+    padding-bottom: 0.5rem;
+}
+
+/* Pill + squeezed title on one slim baseline row (mirrors .create-page
+   .masthead). */
+.gallery-head__bar {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
 }
 
 .home-pill {
     display: inline-block;
-    margin-bottom: 16px;
     text-decoration: none;
     text-transform: uppercase;
     font-size: 12px;
@@ -36,15 +45,15 @@
     opacity: 0.85;
 }
 
-.gallery-title {
-    font-size: clamp(1.4rem, 3vw, 2.1rem);
-    font-weight: 700;
-    letter-spacing: -0.02em;
+/* Squeezed band voice (NM Squeezed, uppercase from .chapter-band__line) at
+   toolbar scale — the 2-class selector beats the shared __line size. */
+.gallery-head .gallery-title {
+    font-size: clamp(18px, 2vw, 28px);
 }
 
 .gallery-tagline {
     color: rgba(255, 255, 255, 0.6);
-    margin-top: 5px;
+    margin-top: 8px;
 }
 
 .gallery-tagline a {

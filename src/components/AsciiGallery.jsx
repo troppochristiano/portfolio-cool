@@ -6,7 +6,7 @@ import {
   CSS3DObject,
 } from "three/examples/jsm/renderers/CSS3DRenderer.js";
 import AsciiPlayer from "./AsciiPlayer.jsx";
-import { setInteracting, setRoaming } from "../lib/galleryBus.js";
+import { setRoaming } from "../lib/galleryBus.js";
 import { downsampleFigure } from "../lib/downsampleFigure.js";
 import { getFigureData } from "../lib/api.js";
 import { isCoarsePointer } from "../lib/utils.js";
@@ -113,10 +113,30 @@ export function AsciiGallery({
   suspendedRef.current = suspended;
   const roamApiRef = useRef(null);
 
-  // Assign each of rows*columns planes a figure at random (same idea as the old video
-  // pool). Stable for the lifetime of the figures array so React never reorders nodes.
+  // Assign each of rows*columns planes a figure. Stable for the lifetime of the
+  // figures array so React never reorders nodes.
+  //
+  // Two regimes, chosen automatically by how many community figures exist:
+  //  • Enough hero uploads to fill every plane (community >= count): drop the
+  //    static seeds and give each plane a DISTINCT community figure (shuffle,
+  //    no replacement) — the "wall goes API-only" end state, no duplicates.
+  //  • Not enough yet: keep the static seeds as filler and assign at random
+  //    (with replacement), the original ambient behavior. Degrades gracefully
+  //    and flips over on its own once the hero pool crosses `count`.
   const assignments = useMemo(() => {
     const count = params.rows * params.columns;
+    const community = figures.filter(
+      (f) => !String(f?.key).startsWith("static:"),
+    );
+    if (community.length >= count) {
+      // Fisher–Yates shuffle, then take one figure per plane — all distinct.
+      const pool = community.slice();
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+      }
+      return pool.slice(0, count);
+    }
     return Array.from(
       { length: count },
       () => figures[Math.floor(Math.random() * figures.length)],
@@ -134,9 +154,9 @@ export function AsciiGallery({
     const introMode = introStateRef.current !== "done";
     let introActive = introMode;
     let introTl = null;
-    // Throttle every AsciiPlayer to the busy fps for the whole intro (the wall
-    // is invisible or roaming until settle) so their textContent rewrites don't
-    // compete with the swarm canvas / roam re-composite on the main thread.
+    // Hold every AsciiPlayer's frame for the whole intro (the wall is invisible
+    // or roaming until settle) so their textContent rewrites don't compete with
+    // the swarm canvas / roam re-composite on the main thread.
     if (introMode) setRoaming(true);
     const finishIntro = () => {
       if (!introActive) return;
@@ -224,11 +244,6 @@ export function AsciiGallery({
     let lastX = 0;
     let lastY = 0;
     const DRAG_SPEED = 1.5; // how far a full-viewport drag moves the normalized target
-    // While a drag is in flight (plus a short settle window after release) the ASCII
-    // players pause their frame rewrites so they don't compete with the CSS3D
-    // re-composite. SETTLE_MS lets the wall ease back to rest before art resumes.
-    let settleTimer = 0;
-    const SETTLE_MS = 250;
 
     // hover state (driven by DOM pointer events — CSS3D objects aren't raycastable)
     let currentHover = null;
@@ -391,12 +406,6 @@ export function AsciiGallery({
       downY = event.clientY;
       downTime = performance.now();
       mount.classList.add("is-grabbing");
-      // Pause ASCII playback for the duration of the interaction.
-      if (settleTimer) {
-        clearTimeout(settleTimer);
-        settleTimer = 0;
-      }
-      setInteracting(true);
     }
 
     function onPointerMove(event) {
@@ -421,12 +430,6 @@ export function AsciiGallery({
     function onPointerUp() {
       isDragging = false;
       mount.classList.remove("is-grabbing");
-      // Let the wall settle back to rest before resuming the ASCII rewrites.
-      if (settleTimer) clearTimeout(settleTimer);
-      settleTimer = setTimeout(() => {
-        settleTimer = 0;
-        setInteracting(false);
-      }, SETTLE_MS);
     }
 
     function onResize() {
@@ -695,8 +698,6 @@ export function AsciiGallery({
       }
       roamApiRef.current = null;
       mount.classList.remove("is-intro");
-      if (settleTimer) clearTimeout(settleTimer);
-      setInteracting(false);
       setRoaming(false);
       document.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("resize", onResize);

@@ -9,7 +9,7 @@ import { route } from '../_lib/route.js';
 
 async function handleGet({ request, env }) {
   const url = new URL(request.url);
-  const count = Math.min(25, Math.max(1, Number(url.searchParams.get('count')) || 12));
+  const count = Math.min(64, Math.max(1, Number(url.searchParams.get('count')) || 12));
   // ORDER BY RANDOM() is fine at this scale (total rows are capped at 1000).
   const { results } = await env.DB.prepare(
     `SELECT id, name, author, cols, rows, fps, cell_px AS cellPx,
