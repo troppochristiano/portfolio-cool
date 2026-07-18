@@ -19,6 +19,29 @@ body {
         sans-serif;
 }
 
+/* ── webfonts (About chapter display type) ─────────────────────── */
+/* Doto (OFL, self-hosted) — variable dot-matrix face; stands in for AS
+   Therma's thermal-printer role in the frontierdialogues-style band. */
+@font-face {
+    font-family: "Doto";
+    src: url("/fonts/Doto-Variable.ttf") format("truetype-variations");
+    font-weight: 100 900;
+    font-display: swap;
+}
+
+/* Neue Montreal Squeezed (Off Type trial — the trial license explicitly
+   covers portfolio use). Not vendored: download the free trial from
+   off-type.com and drop the file in public/fonts under one of these names
+   to activate; the condensed fallbacks carry the layout until then. */
+@font-face {
+    font-family: "NM Squeezed";
+    src:
+        url("/fonts/NeueMontrealSqueezed-Medium.woff2") format("woff2"),
+        url("/fonts/NeueMontrealSqueezed-Medium.otf") format("opentype");
+    font-weight: 500;
+    font-display: swap;
+}
+
 /* ── persistent hero + routed page layers ────────────────────────
    The hero (App) stays mounted for the whole session under /create and
    /gallery; RouteTransition renders the active page in .page-layer above it.
@@ -216,9 +239,11 @@ body {
     -moz-osx-font-smoothing: grayscale;
 }
 
-/* Fixed header, shown over the hero only — the About overlay (z-index 20) covers it. The
-   bar itself ignores pointer events so the top strip still drags the ascii gallery; only
-   the pills are interactive. */
+/* Fixed header, shown over the hero only — the About overlay (z-index 20) covers it;
+   only the .brand-logo (rendered by App, z-25) survives above the overlay. The bar
+   itself ignores pointer events so the top strip still drags the ascii gallery; only
+   the pills are interactive. Desktop layout: Works/Contact left, ▙▟ logo center
+   (floating), Gallery/Create right. Mobile: logo docks left, links behind the menu. */
 .nav {
     position: fixed;
     top: 0;
@@ -226,38 +251,45 @@ body {
     width: 100vw;
     padding: 2em;
     display: flex;
-    justify-content: space-between;
+    gap: 8px;
     align-items: flex-start;
     z-index: 2;
     pointer-events: none;
 }
 
-/* Right-side stack: the (mobile-only) menu toggle with the links under it.
-   Column + flex-end so the open menu drops down right-aligned under the pill. */
-.nav__menu {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 6px;
-}
-
+/* Desktop: the menu wrappers vanish from layout (display:contents) and the four
+   pills become direct flex items of the bar. */
+.nav__menu,
 .nav__links {
-    display: flex;
-    gap: 8px;
+    display: contents;
 }
 
-/* Mobile menu toggle — hidden on desktop where the links fit inline. */
+/* Gallery opens the right pair: pushed to the far edge, Create follows. */
+.nav__push {
+    margin-left: auto;
+}
+
+/* Mobile menu toggle — hidden on desktop where the links sit inline. */
 .nav__toggle {
     display: none;
 }
 
-/* Narrow viewports: the four shortcuts don't fit next to the name (they used to
-   wrap over the hero) — collapse them behind a menu pill instead. 860px matches
-   the mobile breakpoint used across Create.css. */
+/* Narrow viewports: the ▙▟ logo docks to the left corner and ALL FOUR links
+   collapse behind the menu pill on the right, dropping down as a column.
+   860px matches the mobile breakpoint used across Create.css. */
 @media (max-width: 860px) {
     .nav {
         padding: 16px;
-        gap: 12px;
+        justify-content: flex-end;
+    }
+
+    /* Re-materialize the right-side stack: the toggle with the links under it.
+       Column + flex-end so the open menu drops down right-aligned. */
+    .nav__menu {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
     }
 
     .nav__toggle {
@@ -273,6 +305,10 @@ body {
 
     .nav--open .nav__links {
         display: flex;
+    }
+
+    .nav__push {
+        margin-left: 0;
     }
 }
 
@@ -299,6 +335,111 @@ body {
     opacity: 0.85;
 }
 
+/* Centered ▙▟ brand mark (rendered by App, not inside .nav): unlike the rest
+   of the appbar (z-2, covered by the About overlay) it stays visible above the
+   overlay and its dissolve canvas (z-20/21) as persistent chrome — clicking it
+   closes the overlay. letter-spacing 0 fuses the two quadrant glyphs into one
+   mark; Segoe UI Symbol guarantees them on Windows when Akkurat lacks them.
+   Hover/focus splits the mark: the halves drift apart on the button's gap
+   while CHRISTIAN BIANCHI expands out between them. */
+.brand-logo {
+    position: fixed;
+    top: 2em;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 25;
+    /* Sibling of .ui-chrome (see App.jsx), so it fades in on its own. */
+    animation: ui-chrome-in 0.8s ease both;
+    pointer-events: auto;
+    cursor: pointer;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    font-family:
+        "Akkurat Trial TT",
+        "Segoe UI Symbol",
+        system-ui,
+        sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0;
+    padding: 4px 10px;
+    color: #fff;
+    background-color: #0000ff;
+    transition: gap 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* The name expands from zero via the 0fr→1fr grid-column trick — no magic
+   max-width, so the motion tracks the real text width whatever font loaded.
+   The lone grid item does the clipping. Because the button is centered with
+   translateX(-50%), the pill grows symmetrically around the mark. */
+.brand-logo__name {
+    display: grid;
+    grid-template-columns: 0fr;
+    transition: grid-template-columns 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.brand-logo__name > span {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0;
+    /* Quick fade-out on leave; the delayed fade-IN lives on the rules below. */
+    transition: opacity 0.12s ease;
+}
+
+.brand-logo:hover,
+.brand-logo:focus-visible {
+    gap: 0.45em;
+}
+
+.brand-logo:hover .brand-logo__name,
+.brand-logo:focus-visible .brand-logo__name {
+    grid-template-columns: 1fr;
+}
+
+.brand-logo:hover .brand-logo__name > span,
+.brand-logo:focus-visible .brand-logo__name > span {
+    opacity: 1;
+    /* Surface the name only once the halves have started parting. */
+    transition: opacity 0.25s ease 0.1s;
+}
+
+/* Phrase-cycling glyph cells (BrandLogo.jsx). Idle: plain inline spans, zero
+   layout impact. During a morph every cell is locked to the advance measured
+   from the target phrase (same model as .scramble--locked): inline-block so
+   flickering pool glyphs can't nudge their neighbours, and letter-spacing
+   zeroed while locked since the measured widths already contain the 0.04em
+   tracking — browsers that add spacing after atomic inline-blocks (Chrome)
+   must not add it a second time. */
+.brand-logo__cells--locked {
+    letter-spacing: 0;
+}
+
+.brand-logo__cells--locked .brand-logo__cell {
+    display: inline-block;
+    text-align: center;
+    /* Keep the space glyph from collapsing inside its inline-block cell. */
+    white-space: pre;
+}
+
+/* Mobile: the mark docks to the left corner (the menu pill owns the right).
+   Must come AFTER the base rule — equal specificity, later wins. */
+@media (max-width: 860px) {
+    .brand-logo {
+        top: 16px;
+        left: 16px;
+        transform: none;
+    }
+}
+
 /* Scramble hover labels (ScrambleText.jsx). Idle: plain inline spans, zero
    layout impact. While the pointer is over the pill (.scramble--locked) every
    glyph cell becomes an inline-block frozen at its measured natural width, so
@@ -323,6 +464,35 @@ body {
     display: inline-block;
     text-align: center;
     /* Keep the space glyph from collapsing inside its inline-block cell. */
+    white-space: pre;
+}
+
+/* Scramble-in reveal (DecryptText.jsx) — the About headline's on-open cousin
+   of the scramble above: the line types on left→right behind a fading noise
+   fringe. Same locking model, plus word wrappers: the headline wraps across
+   lines, and nowrap word spans keep the locked inline-block cells from
+   breaking mid-word — line breaks only ever land on the space cells between
+   words. */
+.decrypt__sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+.decrypt__word {
+    white-space: nowrap;
+}
+
+.decrypt--locked .decrypt__chars {
+    letter-spacing: 0;
+}
+
+.decrypt--locked .decrypt__char {
+    display: inline-block;
+    text-align: center;
     white-space: pre;
 }
 
@@ -560,73 +730,203 @@ body {
 }
 
 .about-overlay__inner {
-    width: min(900px, 90vw);
-    margin: 0 auto;
-    padding: 120px 0 120px;
+    /* Full-bleed with slim side margins (yutaabe.com/about: content runs
+       edge-to-edge behind ~3-4.5vw gutters — no centered column). Top padding
+       only needs to clear the fixed ▙▟ logo (top 2em, z-25).
+       position:relative anchors the cursor artifact's column-local coords. */
+    position: relative;
+    width: 100%;
+    padding: 72px clamp(20px, 4.4vw, 64px) 88px;
 }
 
-.about-overlay__close {
-    position: fixed;
-    top: 2em;
-    right: 2em;
-    z-index: 21;
-    cursor: pointer;
-    border: none;
-    font: inherit;
-    text-transform: uppercase;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    padding: 6px 12px;
-    color: #fff;
-    background-color: #0000ff;
-    transition: opacity 0.15s ease;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-}
-
-.about-overlay__close:hover {
-    opacity: 0.85;
-}
-
-/* Hide the close button during the open/close animation AND while scrubbing — it only
-   shows once the overlay is fully settled-open (the hook toggles .is-revealed). */
-.about-overlay:not(.is-revealed) .about-overlay__close {
-    opacity: 0;
-    pointer-events: none;
-}
-
-/* (Pull-to-close indicator removed — the dissolve band is the close feedback now.) */
+/* (Close × button removed — the ▙▟ brand logo above the overlay closes it.
+   Pull-to-close indicator removed — the dissolve band is the close feedback.) */
 
 /* Each section reads as a distinct scrollable panel. scroll-margin-top keeps a
    header-shortcut scroll from landing the heading behind the fixed nav. */
 .about-section {
-    padding: 48px 0;
+    padding: 32px 0;
     scroll-margin-top: 96px;
+}
+
+/* Cursor artifact (CursorArtifact.jsx): the little ascii pet trailing the
+   pointer across the chapter column — one face layer per section, each
+   clip-path'd to its section's y-band so crossing a border wipes one
+   creature out and the next in along the line itself (no fade between
+   sections). Portaled to <body> like .works-preview and stacked one above
+   it, so the pet flies OVER the image while orbiting (nothing inside the
+   overlay's own stacking context could). Never intercepts the pointer it
+   follows; its armed-gated opacity covers open/close instead of the
+   dissolve clip. The rAF loop drives transform + clips + glyphs; only the
+   whole-column opacity transitions. */
+.cursor-artifact {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 91;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.1;
+    color: #999;
+    opacity: 0;
+    transition: opacity 0.2s linear;
+    pointer-events: none;
+    user-select: none;
+    will-change: transform, opacity;
+}
+
+/* One stacked layer per section, all centered on the chase point; the
+   component drives each layer's clip-path from its section band. */
+.cursor-artifact__face {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform: translate(-50%, -50%);
+    will-change: clip-path;
+}
+
+/* Fixed 1ch cells so flickering glyphs never shift their neighbours (the
+   same lock idea as .scramble--locked, static here since the face is mono). */
+.cursor-artifact__cell {
+    display: inline-block;
+    width: 1ch;
+    text-align: center;
+    white-space: pre;
+}
+
+/* Figure mode: a baked mini figure.json (Create page → Export JSON) played as
+   the follower. Same <pre> discipline as AsciiPlayer so the grid aligns;
+   font-size is set by the component (capped mini). */
+.cursor-artifact__figure {
+    margin: 0;
+    font-family: inherit;
+    white-space: pre;
+    line-height: 1;
+    letter-spacing: 0;
+    color: #c9c9c9;
+}
+
+/* Noise cells flashed over the pet while it's chasing hard. */
+.cursor-artifact__glitch {
+    color: #0000ff;
 }
 
 .about-section + .about-section {
     border-top: 1px solid #1a1a1a;
 }
 
-.about-section__heading {
-    text-transform: uppercase;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    color: #fff;
-    margin-bottom: 28px;
+/* Sub-chapter bands (Works, Contact): eyebrow row + squeezed title only —
+   no wordmark or footer row, so the About band stays the overlay's anchor. */
+.chapter-band--sub {
+    margin-bottom: 24px;
 }
 
-.about-overlay__about-copy {
+/* Page headers (Gallery, Create): same band anatomy at utility scale — the
+   giant display sizes belong to the overlay; pages keep the title compact. */
+.chapter-band--page .chapter-band__line {
+    font-size: clamp(26px, 3.6vw, 48px);
+}
+
+/* ── About chapter: frontierdialogues-style band header + reading grid ──
+   Band anatomy (mirroring their article.chapter): a tiny mono eyebrow row,
+   a two-line display lockup (dot-matrix wordmark over squeezed role line),
+   a mono footer row justified apart — then the reading section: body copy
+   in a measured left column, the ascii portrait in the right aside. */
+
+.chapter-band__row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #888;
+}
+
+.chapter-band__lockup {
+    margin: 20px 0 16px;
+    color: #fff;
+}
+
+.chapter-band__wordmark {
+    font-family: "Doto", ui-monospace, monospace;
+    font-weight: 700;
+    /* Sized for the 16-cell greeting at the full-bleed width: Doto runs
+       ≈0.61em/cell, so (100vw − gutters)/9.76 ≈ 9.4vw, ceiling ~134px. */
+    font-size: clamp(30px, 9.4vw, 134px);
+    line-height: 0.95;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+    /* Locked (inline-block) decrypt cells can't kern across their boxes;
+       disabling kerning outright keeps the resolved unlock pixel-identical
+       to the locked layout. */
+    font-kerning: none;
+}
+
+.chapter-band__line {
+    font-family: "NM Squeezed", "Arial Narrow", "Helvetica Neue", Impact, sans-serif;
+    font-weight: 500;
+    /* Sized so "A FRONTEND DEVELOPER" holds one line even in the widest
+       fallback face (~0.5em/cap) at the full-bleed width; nowrap makes the
+       intent explicit. */
+    font-size: clamp(26px, 9vw, 128px);
+    line-height: 0.95;
+    letter-spacing: 0.005em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: #fff;
+}
+
+/* The name wears the site blue — same #0000ff as the nav pills and the
+   dissolve band. Applies to its scramble fringe too (cells inherit). */
+.decrypt__word--accent {
+    color: #0000ff;
+}
+.chapter-reading {
+    margin-top: clamp(24px, 3.5vw, 44px);
+}
+
+.chapter-reading__cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1.75fr) minmax(240px, 1fr);
+    gap: clamp(36px, 6vw, 90px);
+    align-items: start;
+}
+
+.chapter-reading__body {
     display: flex;
     flex-direction: column;
     gap: 1em;
-    max-width: 60ch;
+    max-width: 62ch;
+}
+
+.chapter-reading__body p {
+    color: #c9c9c9;
+    font-size: 17px;
+    line-height: 1.6;
+}
+
+.chapter-reading__aside {
+    min-width: 0;
+    /* AsciiPlayer inherits its glyph color from the host (figures without a
+       style block set none), and body never sets one — without this the
+       portrait renders black-on-black. */
     color: #fff;
-    font-size: clamp(20px, 3vw, 32px);
-    line-height: 1.35;
-    letter-spacing: -0.01em;
+}
+
+@media (max-width: 860px) {
+    .chapter-reading__cols {
+        grid-template-columns: 1fr;
+        gap: 40px;
+    }
+
+    /* Text first, portrait stacks under at a hand-friendly width. */
+    .chapter-reading__aside {
+        max-width: 420px;
+    }
 }
 
 /* Works accordion (henriheymans.com Recognitions & Awards style). */
@@ -666,11 +966,13 @@ body {
     letter-spacing: -0.01em;
 }
 
+/* Year meta speaks the chapter bands' mono voice so the system reads whole. */
 .works-row__meta {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     text-transform: uppercase;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
     color: #888;
 }
 
@@ -712,6 +1014,44 @@ body {
     line-height: 1.5;
 }
 
+/* Cursor-trailing pixel-decode preview for the hovered Works row. Portaled to
+   <body>, so it floats over the overlay; JS writes translate3d every frame and
+   the margin nudges it up/right off the cursor. */
+.works-preview {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 220px;
+    height: 280px;
+    /* Vertically center on the cursor, sit to its right. */
+    margin: -140px 0 0 28px;
+    pointer-events: none;
+    z-index: 90;
+    overflow: hidden;
+    border: 1px solid #1a1a1a;
+    background: #000;
+    opacity: 0;
+    transform: translate3d(-9999px, -9999px, 0);
+    transition: opacity 0.22s ease;
+    will-change: transform, opacity;
+}
+
+.works-preview.is-visible {
+    opacity: 1;
+}
+
+.works-preview__canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .works-preview {
+        transition: none;
+    }
+}
+
 /* Contact links. */
 .contact-list {
     list-style: none;
@@ -736,6 +1076,13 @@ body {
 @media (prefers-reduced-motion: reduce) {
     .about-overlay,
     .works-row__panel {
+        transition: none;
+    }
+
+    /* Brand-mark split reveal snaps open/shut instead of animating. */
+    .brand-logo,
+    .brand-logo__name,
+    .brand-logo__name > span {
         transition: none;
     }
 
