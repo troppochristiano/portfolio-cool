@@ -21,8 +21,8 @@ export function useImageCanvas(compositeRef, {
   onNewImage,
 }) {
   const photoCanvasRef = useRef(null); // offscreen: the uploaded photo (or white paper); cut erases here
-  const strokeCanvasRef = useRef(null); // offscreen: brush strokes; eraser erases here only
-  const photoImgRef = useRef(null); // decoded photo, kept so "restore photo" can undo cuts
+  const strokeCanvasRef = useRef(null); // offscreen: brush strokes; eraser erases here + heals cuts
+  const originalCanvasRef = useRef(null); // pristine photo layer (photo or white) — erase/trash repaint from it
 
   const [hasPhoto, setHasPhoto] = useState(false);
   // Upload-first intro for the image source: landing straight on blank paper
@@ -31,7 +31,7 @@ export function useImageCanvas(compositeRef, {
   const [imageIntro, setImageIntro] = useState(true);
   const [imageName, setImageName] = useState("");
 
-  // image tools: draw (ink), fill (bucket), erase (ink only), cut (photo → transparent)
+  // image tools: draw (ink), fill (bucket), erase (ink + heals cuts), cut (photo → transparent)
   const [tool, setTool] = useState("draw");
   const [brush, setBrush] = useState(14);
   const [fillTolerance, setFillTolerance] = useState(0.15);
@@ -40,6 +40,13 @@ export function useImageCanvas(compositeRef, {
   const [brushShade, setBrushShade] = useState("#000000");
   const drawingRef = useRef(false);
   const lastPtRef = useRef(null);
+
+  // Undo history: each entry snapshots the layer(s) the action is about to
+  // dirty (draw/fill → stroke, cut → photo, erase/trash → both). The stacks
+  // live in refs; histTick only forces re-renders for canUndo/canRedo.
+  const historyRef = useRef([]);
+  const redoRef = useRef([]);
+  const [, setHistTick] = useState(0);
 
   // Strokes are composited unless "draw on photo" is off (photo-only output).
   // Read through a ref so compositeLayers stays a stable, dependency-free callback.
@@ -60,20 +67,29 @@ export function useImageCanvas(compositeRef, {
       const comp = compositeRef.current;
       const photo = photoCanvasRef.current;
       const stroke = strokeCanvasRef.current;
-      if (!comp || !photo || !stroke) return;
+      const orig = originalCanvasRef.current;
+      if (!comp || !photo || !stroke || !orig) return;
       comp.width = w;
-      comp.height = h; // resizing clears all three
+      comp.height = h; // resizing clears all four
       photo.width = w;
       photo.height = h;
       stroke.width = w;
       stroke.height = h;
-      const pctx = photo.getContext("2d");
+      orig.width = w;
+      orig.height = h;
+      const octx = orig.getContext("2d");
       if (drawPhoto) {
-        pctx.drawImage(drawPhoto, 0, 0, w, h);
+        octx.drawImage(drawPhoto, 0, 0, w, h);
       } else {
-        pctx.fillStyle = "#fff";
-        pctx.fillRect(0, 0, w, h);
+        octx.fillStyle = "#fff";
+        octx.fillRect(0, 0, w, h);
       }
+      // the photo layer starts as a copy of the pristine original
+      photo.getContext("2d").drawImage(orig, 0, 0);
+      // new layer dimensions orphan every snapshot
+      historyRef.current = [];
+      redoRef.current = [];
+      setHistTick((t) => t + 1);
       compositeLayers();
     },
     [compositeRef, compositeLayers],
@@ -83,6 +99,7 @@ export function useImageCanvas(compositeRef, {
   useEffect(() => {
     photoCanvasRef.current = document.createElement("canvas");
     strokeCanvasRef.current = document.createElement("canvas");
+    originalCanvasRef.current = document.createElement("canvas");
     resizeLayers(PAPER_W, PAPER_H, null);
   }, [resizeLayers]);
 
@@ -159,7 +176,6 @@ export function useImageCanvas(compositeRef, {
         );
         const w = Math.max(1, Math.round(img.naturalWidth * scale));
         const h = Math.max(1, Math.round(img.naturalHeight * scale));
-        photoImgRef.current = img;
         // resizing the layers clears the strokes — coordinates wouldn't survive
         // the aspect change anyway (hinted in the UI)
         resizeLayers(w, h, img);
@@ -187,36 +203,60 @@ export function useImageCanvas(compositeRef, {
     };
   };
   const strokeTo = (pt) => {
-    // draw/erase live on the stroke layer; cut punches through the photo layer
-    const target =
-      tool === "cut" ? photoCanvasRef.current : strokeCanvasRef.current;
-    const ctx = target.getContext("2d");
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.lineWidth = brush;
+    // One geometry pass per affected layer: draw inks the stroke layer, cut
+    // punches the photo layer, erase does both — it lifts ink AND heals cuts
+    // by repainting the pristine original through the stroke shape (a pattern
+    // keeps the pixels aligned; on blank paper the original is just white).
+    const passes = [];
     if (tool === "draw") {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = brushShade;
-      ctx.fillStyle = brushShade;
+      passes.push({
+        canvas: strokeCanvasRef.current,
+        gco: "source-over",
+        paint: brushShade,
+      });
+    } else if (tool === "cut") {
+      passes.push({
+        canvas: photoCanvasRef.current,
+        gco: "destination-out",
+        paint: "#000",
+      });
     } else {
-      // erase and cut both remove pixels from their layer → transparent
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.strokeStyle = "#000";
-      ctx.fillStyle = "#000";
+      passes.push({
+        canvas: strokeCanvasRef.current,
+        gco: "destination-out",
+        paint: "#000",
+      });
+      passes.push({
+        canvas: photoCanvasRef.current,
+        gco: "source-over",
+        paint: null, // → pattern of the original
+      });
     }
     const last = lastPtRef.current;
-    if (last) {
-      ctx.beginPath();
-      ctx.moveTo(last.x, last.y);
-      ctx.lineTo(pt.x, pt.y);
-      ctx.stroke();
-    } else {
-      // first touch → a dot so a tap leaves a mark
-      ctx.beginPath();
-      ctx.arc(pt.x, pt.y, brush / 2, 0, Math.PI * 2);
-      ctx.fill();
+    for (const pass of passes) {
+      const ctx = pass.canvas.getContext("2d");
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = brush;
+      ctx.globalCompositeOperation = pass.gco;
+      const paint =
+        pass.paint ??
+        ctx.createPattern(originalCanvasRef.current, "no-repeat");
+      ctx.strokeStyle = paint;
+      ctx.fillStyle = paint;
+      if (last) {
+        ctx.beginPath();
+        ctx.moveTo(last.x, last.y);
+        ctx.lineTo(pt.x, pt.y);
+        ctx.stroke();
+      } else {
+        // first touch → a dot so a tap leaves a mark
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, brush / 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalCompositeOperation = "source-over";
     }
-    ctx.globalCompositeOperation = "source-over";
     lastPtRef.current = pt;
     compositeLayers();
   };
@@ -285,14 +325,64 @@ export function useImageCanvas(compositeRef, {
     compositeLayers();
   };
 
+  // ── undo history ──────────────────────────────────────────────
+  const HISTORY_MAX = 15; // ~5 MB per captured layer at MAX_PHOTO — keep it shallow
+  const layerData = (canvas) =>
+    canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
+  // capture the layers an action is about to dirty; a new action always
+  // abandons the redo branch
+  const pushHistory = (withStroke, withPhoto) => {
+    const entry = {};
+    if (withStroke) entry.stroke = layerData(strokeCanvasRef.current);
+    if (withPhoto) entry.photo = layerData(photoCanvasRef.current);
+    historyRef.current.push(entry);
+    if (historyRef.current.length > HISTORY_MAX) historyRef.current.shift();
+    redoRef.current = [];
+    setHistTick((t) => t + 1);
+  };
+  // restore an entry's layers, returning the displaced pixels — the same
+  // entry shape travels back and forth between the undo and redo stacks
+  const applyEntry = (entry) => {
+    const swapped = {};
+    if (entry.stroke) {
+      const s = strokeCanvasRef.current;
+      swapped.stroke = layerData(s);
+      s.getContext("2d").putImageData(entry.stroke, 0, 0);
+    }
+    if (entry.photo) {
+      const p = photoCanvasRef.current;
+      swapped.photo = layerData(p);
+      p.getContext("2d").putImageData(entry.photo, 0, 0);
+    }
+    compositeLayers();
+    return swapped;
+  };
+  const undo = () => {
+    const entry = historyRef.current.pop();
+    if (!entry) return;
+    redoRef.current.push(applyEntry(entry));
+    setHistTick((t) => t + 1);
+  };
+  const redo = () => {
+    const entry = redoRef.current.pop();
+    if (!entry) return;
+    historyRef.current.push(applyEntry(entry));
+    setHistTick((t) => t + 1);
+  };
+  const canUndo = historyRef.current.length > 0;
+  const canRedo = redoRef.current.length > 0;
+
   const onDrawDown = (e) => {
     if (picking || cropMode) return; // the overlay owns the pointer then
     if (hasPhoto && !drawOnPhoto) return; // drawing disabled (converting the photo only)
     e.preventDefault();
     if (tool === "fill") {
+      pushHistory(true, false);
       floodFill(drawPos(e));
       return;
     } // click action, no drag
+    // checkpoint once per stroke (down fires once; up can multi-fire)
+    pushHistory(tool !== "cut", tool === "cut" || tool === "erase");
     // capture keeps the stroke tracking outside the canvas; a pointer that
     // vanished between events must not kill the stroke, so failure is fine
     try {
@@ -339,23 +429,16 @@ export function useImageCanvas(compositeRef, {
     hideBrushCursor();
     onDrawUp(e);
   };
-  const clearInk = () => {
+  // One-tap reset: wipe the ink AND heal every cut — the old separate
+  // "clear ink" / "restore photo" buttons folded into the palette's trash chip.
+  const trashAll = () => {
+    pushHistory(true, true);
     const s = strokeCanvasRef.current;
     s.getContext("2d").clearRect(0, 0, s.width, s.height);
-    compositeLayers();
-  };
-  // Redraw the photo layer from the kept decoded image — undoes every cut.
-  const restorePhoto = () => {
     const photo = photoCanvasRef.current;
-    const img = photoImgRef.current;
     const pctx = photo.getContext("2d");
     pctx.clearRect(0, 0, photo.width, photo.height);
-    if (img) {
-      pctx.drawImage(img, 0, 0, photo.width, photo.height);
-    } else {
-      pctx.fillStyle = "#fff";
-      pctx.fillRect(0, 0, photo.width, photo.height);
-    }
+    pctx.drawImage(originalCanvasRef.current, 0, 0);
     compositeLayers();
   };
 
@@ -383,7 +466,10 @@ export function useImageCanvas(compositeRef, {
     moveBrushCursor,
     onCanvasMove,
     onCanvasLeave,
-    clearInk,
-    restorePhoto,
+    trashAll,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   };
 }

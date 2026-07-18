@@ -19,7 +19,15 @@ import { useMiniMonitor } from "../create/hooks/useMiniMonitor.js";
 import Slider from "../create/controls/Slider.jsx";
 import SegmentedControl from "../create/controls/SegmentedControl.jsx";
 import ToggleRow from "../create/controls/ToggleRow.jsx";
-import { SettingsBlock, SourceSection } from "../create/controls/Sections.jsx";
+import {
+  PencilIcon,
+  EraserIcon,
+  FillIcon,
+  TrashIcon,
+  UndoIcon,
+  RedoIcon,
+} from "../create/controls/DrawIcons.jsx";
+import { SettingsBlock } from "../create/controls/Sections.jsx";
 import UploadModal from "../components/UploadModal.jsx";
 import PngFrameModal from "../components/PngFrameModal.jsx";
 import { fmtTime, MONO_ADVANCE } from "../lib/utils.js";
@@ -43,8 +51,9 @@ export default function Create({ adminSecret = null }) {
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState("");
-  // source stage display size
-  const [sourceScale, setSourceScale] = useState("m"); // 's' | 'm' | 'l'
+  // source stage display height — drag-resizable via the grip under the stage
+  const [stageH, setStageH] = useState(360);
+  const stageDragRef = useRef(null); // { startY, startH } while the grip is held
 
   // settings
   const [cols, setCols] = useState(110);
@@ -78,25 +87,24 @@ export default function Create({ adminSecret = null }) {
   const [rampKey, setRampKey] = useState("classic");
   const [blockAvg, setBlockAvg] = useState(false);
   const [dither, setDither] = useState("off"); // 'off' | 'floyd' | 'bayer'
-  // background key: drop a green / black / white / custom-color background to
-  // transparent. threshold 0..1, higher removes more. keyColor is the hex used
-  // by 'custom' mode (RGB-distance keyed).
+  // background key: drop the keyColor background to transparent (RGB-distance
+  // keyed). threshold 0..1, higher removes more. keyMode is 'off' | 'custom'
+  // in the UI now; the engine still understands the old preset modes.
   const [keyMode, setKeyMode] = useState("off");
   const [keyThreshold, setKeyThreshold] = useState(0.4);
   const [keyColor, setKeyColor] = useState("#3cba54");
 
-  // which settings categories are expanded (key/edges live under the source
-  // preview, the rest are the rail blocks)
+  // which rail settings categories are expanded
   const [openBlocks, setOpenBlocks] = useState({
     resolution: true,
     playback: true,
     characters: true,
     typography: true,
     effects: true,
-    key: true,
-    edges: true,
   });
   const toggleBlock = (id) => setOpenBlocks((o) => ({ ...o, [id]: !o[id] }));
+  // last non-off edge mode, restored when the toggle comes back on
+  const lastEdgeModeRef = useRef("overlay");
 
   // fit the frame into the monitor
   const [previewScale, setPreviewScale] = useState(1);
@@ -196,8 +204,11 @@ export default function Create({ adminSecret = null }) {
     moveBrushCursor,
     onCanvasMove,
     onCanvasLeave,
-    clearInk,
-    restorePhoto,
+    trashAll,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   } = useImageCanvas(compositeRef, {
     sourceType,
     picking,
@@ -378,15 +389,50 @@ export default function Create({ adminSecret = null }) {
     }
   };
 
-  const onDrop = (e) => {
-    e.preventDefault();
-    setDragOver(false);
-    loadFile(e.dataTransfer.files?.[0]);
+  // One intake for both media kinds: sniff the MIME and route to the right
+  // pipeline, switching the source type when the kind changes.
+  const loadAny = (file) => {
+    if (!file) return;
+    if (file.type.startsWith("video/")) {
+      if (sourceType !== "video") switchSource("video");
+      loadFile(file);
+    } else if (file.type.startsWith("image/")) {
+      if (sourceType !== "image") switchSource("image");
+      loadImage(file);
+    } else {
+      setError(
+        `"${file.name}" isn't an image or video — try jpg, png, webp, mp4, mov, or webm`,
+      );
+    }
   };
-  const onDropImage = (e) => {
+  const startBlankPaper = () => {
+    if (sourceType !== "image") switchSource("image");
+    setImageIntro(false);
+  };
+  const onDropAny = (e) => {
     e.preventDefault();
     setDragOver(false);
-    loadImage(e.dataTransfer.files?.[0]);
+    loadAny(e.dataTransfer.files?.[0]);
+  };
+
+  // Drag-resize the stage from the grip under it (clamped 200–640px).
+  const onStageResizeDown = (e) => {
+    e.preventDefault();
+    stageDragRef.current = { startY: e.clientY, startH: stageH };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* drag still tracks while the pointer stays on the grip */
+    }
+  };
+  const onStageResizeMove = (e) => {
+    const drag = stageDragRef.current;
+    if (!drag) return;
+    const next = Math.round(drag.startH + (e.clientY - drag.startY));
+    setStageH(Math.min(640, Math.max(200, next)));
+  };
+  const onStageResizeUp = () => {
+    stageDragRef.current = null;
   };
 
   // Each cell renders at exactly cellPx — a direct handle on block size.
@@ -467,69 +513,107 @@ export default function Create({ adminSecret = null }) {
     },
   };
 
-  // Tool modes + shade swatches + size slider — rendered both in the rail and in
-  // the fullscreen bar, so it's defined once (closes over the shared state).
+  // One palette row — shades, then cut/fill/erase as inline "colors"/chips —
+  // plus the size slider. Rendered both in the rail flyout and the fullscreen
+  // bar, so it's defined once (closes over the shared state). "draw" mode has
+  // no button of its own: picking any shade returns to it.
+  const toolRow = (
+    <div className="swatches" role="group" aria-label="draw tools">
+      {BRUSH_SHADES.map((c) => (
+        <button
+          key={c}
+          className={`swatch ${(tool === "draw" || tool === "fill") && brushShade === c ? "is-active" : ""}`}
+          style={{ background: c }}
+          // pick a shade for draw/fill; if erase/cut is active, jump to draw
+          onClick={() => {
+            setBrushShade(c);
+            if (tool !== "fill") setTool("draw");
+          }}
+          aria-label={`brush shade ${c}`}
+        />
+      ))}
+      <button
+        className={`swatch swatch--cut ${tool === "cut" ? "is-active" : ""}`}
+        onClick={() => setTool(tool === "cut" ? "draw" : "cut")}
+        aria-pressed={tool === "cut"}
+        aria-label="cut tool"
+        title="remove a section of the photo — cut areas become transparent"
+      />
+      <span className="swatches__divider" aria-hidden="true" />
+      <button
+        className={`tool-chip ${tool === "fill" ? "is-active" : ""}`}
+        onClick={() => setTool(tool === "fill" ? "draw" : "fill")}
+        aria-pressed={tool === "fill"}
+        aria-label="fill tool"
+        title="bucket-fill the clicked region with the selected shade"
+      >
+        <FillIcon />
+      </button>
+      <button
+        className={`tool-chip ${tool === "erase" ? "is-active" : ""}`}
+        onClick={() => setTool(tool === "erase" ? "draw" : "erase")}
+        aria-pressed={tool === "erase"}
+        aria-label="erase tool"
+        title="erase ink & cuts"
+      >
+        <EraserIcon />
+      </button>
+      <span className="swatches__divider" aria-hidden="true" />
+      <button
+        className="tool-chip"
+        onClick={undo}
+        disabled={!canUndo}
+        aria-label="undo draw action"
+        title="undo draw action"
+      >
+        <UndoIcon />
+      </button>
+      <button
+        className="tool-chip"
+        onClick={redo}
+        disabled={!canRedo}
+        aria-label="redo draw action"
+        title="redo"
+      >
+        <RedoIcon />
+      </button>
+      <button
+        className="tool-chip"
+        onClick={trashAll}
+        aria-label="clear drawing and restore photo"
+        title="clear drawing & restore photo"
+      >
+        <TrashIcon />
+      </button>
+    </div>
+  );
+  const toolSlider =
+    tool === "fill" ? (
+      <Slider
+        label="fill tolerance"
+        value={fillTolerance}
+        min={0}
+        max={1}
+        step={0.01}
+        onChange={setFillTolerance}
+        fixed={2}
+        suffix=" · higher spreads more"
+      />
+    ) : (
+      <Slider
+        label="brush"
+        value={brush}
+        min={2}
+        max={80}
+        step={1}
+        onChange={setBrush}
+        suffix="px"
+      />
+    );
   const drawControls = (
     <>
-      <div className="draw-tools__row">
-        <SegmentedControl
-          className="toolmodes"
-          value={tool}
-          onChange={setTool}
-          options={[
-            { value: "draw", label: "draw" },
-            {
-              value: "fill",
-              label: "fill",
-              title: "bucket-fill the clicked region with the selected shade",
-            },
-            { value: "erase", label: "erase" },
-            {
-              value: "cut",
-              label: "cut",
-              title:
-                "remove a section of the photo — cut areas become transparent",
-            },
-          ]}
-        />
-        <div className="swatches" role="group" aria-label="brush shade">
-          {BRUSH_SHADES.map((c) => (
-            <button
-              key={c}
-              className={`swatch ${(tool === "draw" || tool === "fill") && brushShade === c ? "is-active" : ""}`}
-              style={{ background: c }}
-              // pick a shade for draw/fill; if erase/cut is active, jump to draw
-              onClick={() => {
-                setBrushShade(c);
-                if (tool !== "fill") setTool("draw");
-              }}
-              aria-label={`brush shade ${c}`}
-            />
-          ))}
-        </div>
-      </div>
-      {tool === "fill" ? (
-        <Slider
-          label="fill tolerance"
-          value={fillTolerance}
-          min={0}
-          max={1}
-          step={0.01}
-          onChange={setFillTolerance}
-          fixed={2}
-          suffix=" · higher spreads more"
-        />
-      ) : (
-        <Slider
-          label="brush"
-          value={brush}
-          min={2}
-          max={80}
-          step={1}
-          onChange={setBrush}
-          suffix="px"
-        />
-      )}
+      <div className="draw-tools__row">{toolRow}</div>
+      {toolSlider}
     </>
   );
 
@@ -563,10 +647,12 @@ export default function Create({ adminSecret = null }) {
       <div className="app">
         <header className="masthead">
           <Link to={adminSecret ? "/admin" : "/"} className="home-link">
-            {adminSecret ? "← moderation" : "← Christian Bianchi"}
+            {adminSecret ? "← moderation" : "← Home"}
           </Link>
-          <h1 className="title">
-            ascii media converter{adminSecret ? " · admin" : ""}
+          {/* Single slim row — the tool below should own the viewport, so no
+              chapter rows here: just the pill and the squeezed title. */}
+          <h1 className="chapter-band__line masthead__title">
+            ASCII media converter{adminSecret ? " · admin" : ""}
           </h1>
         </header>
 
@@ -798,29 +884,10 @@ export default function Create({ adminSecret = null }) {
                 <div className="block-label">source</div>
                 <div className="source-body">
                   <div className="source-toolbar">
-                    {/* video · image — both source elements stay mounted so their
-                      refs exist and each source's state persists across tabs. */}
-                    <SegmentedControl
-                      className="source-tabs"
-                      value={sourceType}
-                      onChange={switchSource}
-                      options={[
-                        { value: "video", label: "video" },
-                        { value: "image", label: "image" },
-                      ]}
-                    />
+                    {/* the source kind is auto-detected from whatever file lands
+                      in loadAny; both source elements stay mounted so their
+                      refs exist and each source's state persists across swaps. */}
                     <div className="toolbar-right">
-                      <SegmentedControl
-                        className="size-modes"
-                        role="group"
-                        ariaLabel="source preview size"
-                        value={sourceScale}
-                        onChange={setSourceScale}
-                        options={["s", "m", "l"].map((k) => ({
-                          value: k,
-                          label: k.toUpperCase(),
-                        }))}
-                      />
                       {hasMedia &&
                         (drawEnabled ? (
                           // While drawing, the live crop editor would sit over the
@@ -860,25 +927,28 @@ export default function Create({ adminSecret = null }) {
                             {crop ? "✕ reset crop" : "▦ crop"}
                           </button>
                         ))}
+                      {drawEnabled && (
+                        <button
+                          className="keymode"
+                          onClick={() => setDrawFullscreen(true)}
+                          title="fullscreen drawing"
+                          aria-label="fullscreen drawing"
+                        >
+                          ⛶
+                        </button>
+                      )}
                     </div>
                   </div>
 
                   <div
-                    className={`source-stage source-stage--${sourceScale} ${drawFullscreen ? "is-fullscreen" : ""}`}
-                    onDragOver={
-                      sourceType === "image"
-                        ? (e) => {
-                            e.preventDefault();
-                            setDragOver(true);
-                          }
-                        : undefined
-                    }
-                    onDragLeave={
-                      sourceType === "image"
-                        ? () => setDragOver(false)
-                        : undefined
-                    }
-                    onDrop={sourceType === "image" ? onDropImage : undefined}
+                    className={`source-stage ${drawFullscreen ? "is-fullscreen" : ""}`}
+                    style={{ "--stage-h": `${stageH}px` }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOver(true);
+                    }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={onDropAny}
                   >
                     <div
                       className={`stage-media ${sourceType === "image" ? "is-image" : ""}`}
@@ -969,61 +1039,49 @@ export default function Create({ adminSecret = null }) {
                         )}
                     </div>
 
-                    {sourceType === "video" && !hasVideo && (
-                      <label
-                        className={`dropzone ${dragOver ? "is-over" : ""}`}
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          setDragOver(true);
-                        }}
-                        onDragLeave={() => setDragOver(false)}
-                        onDrop={onDrop}
-                      >
+                    {/* one intake for both kinds — the file's MIME decides the
+                      pipeline; blank paper is the no-file opt-in underneath */}
+                    {((sourceType === "video" && !hasVideo) ||
+                      showImageIntro) && (
+                      <label className={`dropzone ${dragOver ? "is-over" : ""}`}>
                         <input
                           type="file"
-                          accept="video/*"
-                          onChange={(e) => loadFile(e.target.files?.[0])}
+                          accept="image/*,video/*"
+                          onChange={(e) => loadAny(e.target.files?.[0])}
                           hidden
                         />
                         <div className="dropzone-art">{"[  +  ]"}</div>
                         <div>
-                          drop a video here
+                          drop a photo or video here
                           <br />
                           or click to choose
                         </div>
-                        <div className="hint">mp4 · mov · webm</div>
-                      </label>
-                    )}
-
-                    {/* image source: photo upload first — blank paper is an opt-in */}
-                    {showImageIntro && (
-                      <label
-                        className={`dropzone ${dragOver ? "is-over" : ""}`}
-                      >
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) => loadImage(e.target.files?.[0])}
-                          hidden
-                        />
-                        <div className="dropzone-art">{"[  +  ]"}</div>
-                        <div>
-                          drop a photo here
-                          <br />
-                          or click to choose
+                        <div className="hint">
+                          jpg · png · webp · mp4 · mov · webm
                         </div>
-                        <div className="hint">jpg · png · webp</div>
                         <button
                           type="button"
                           className="btn dropzone-alt"
                           onClick={(e) => {
                             e.preventDefault();
-                            setImageIntro(false);
+                            startBlankPaper();
                           }}
                         >
                           ✎ or start with blank paper
                         </button>
                       </label>
+                    )}
+
+                    {!drawFullscreen && (
+                      <button
+                        className="stage-resize"
+                        aria-label="resize preview"
+                        title="drag to resize the preview"
+                        onPointerDown={onStageResizeDown}
+                        onPointerMove={onStageResizeMove}
+                        onPointerUp={onStageResizeUp}
+                        onPointerCancel={onStageResizeUp}
+                      />
                     )}
                   </div>
 
@@ -1148,11 +1206,11 @@ export default function Create({ adminSecret = null }) {
                       <label className="relink">
                         <input
                           type="file"
-                          accept="video/*"
-                          onChange={(e) => loadFile(e.target.files?.[0])}
+                          accept="image/*,video/*"
+                          onChange={(e) => loadAny(e.target.files?.[0])}
                           hidden
                         />
-                        ↺ replace clip
+                        ↺ replace source
                       </label>
                     </>
                   )}
@@ -1160,41 +1218,33 @@ export default function Create({ adminSecret = null }) {
                   {/* image tools: photo + drawing share one canvas */}
                   {sourceType === "image" && !showImageIntro && (
                     <div className="draw-tools">
-                      {/* with a photo loaded, choose photo-only vs drawing over it */}
-                      {hasPhoto && (
-                        <ToggleRow checked={drawOnPhoto} onChange={setDrawOnPhoto}>
-                          draw on photo{" "}
-                        </ToggleRow>
-                      )}
-                      {drawEnabled && drawControls}
+                      {/* with a photo loaded, the pencil toggles draw-on-photo;
+                          the palette flies out to its right while it's on */}
+                      <div className="draw-tools__row draw-tools__row--main">
+                        {hasPhoto && (
+                          <button
+                            className={`draw-launch ${drawOnPhoto ? "is-active" : ""}`}
+                            aria-pressed={drawOnPhoto}
+                            aria-label="draw on photo"
+                            title="draw on photo"
+                            onClick={() => setDrawOnPhoto(!drawOnPhoto)}
+                          >
+                            <PencilIcon size={15} />
+                          </button>
+                        )}
+                        {drawEnabled && toolRow}
+                      </div>
+                      {drawEnabled && toolSlider}
                       <div className="draw-tools__row">
                         <div className="draw-actions">
-                          {drawEnabled && (
-                            <button className="btn" onClick={clearInk}>
-                              clear ink
-                            </button>
-                          )}
-                          {drawEnabled && (
-                            <button
-                              className="btn"
-                              onClick={() => setDrawFullscreen(true)}
-                            >
-                              ⛶ fullscreen
-                            </button>
-                          )}
-                          {hasPhoto && (
-                            <button className="btn" onClick={restorePhoto}>
-                              restore photo
-                            </button>
-                          )}
                           <label className="btn file-btn">
                             <input
                               type="file"
-                              accept="image/*"
-                              onChange={(e) => loadImage(e.target.files?.[0])}
+                              accept="image/*,video/*"
+                              onChange={(e) => loadAny(e.target.files?.[0])}
                               hidden
                             />
-                            {hasPhoto ? "↺ replace photo" : "+ add photo"}
+                            {hasPhoto ? "↺ replace source" : "+ add source"}
                           </label>
                         </div>
                       </div>
@@ -1212,131 +1262,123 @@ export default function Create({ adminSecret = null }) {
                     </p>
                   )}
 
-                  {/* background removal — keyed on the source you see above */}
+                  {/* background removal — one keyed color (RGB distance): the
+                      wheel or the eyedropper picks it, everything inline with
+                      the toggle; the old green/black/white presets are gone */}
                   {hasMedia && (
-                    <SourceSection
-                      label="background removal"
-                      status={keyMode === "off" ? "off" : keyMode}
-                      statusOn={keyMode !== "off"}
-                      open={openBlocks.key}
-                      onToggle={() => toggleBlock("key")}
-                    >
-                      <SegmentedControl
-                        value={keyMode}
-                        onChange={setKeyMode}
-                        options={[
-                          { value: "off", label: "keep" },
-                          { value: "green", label: "green" },
-                          { value: "black", label: "black" },
-                          { value: "white", label: "white" },
-                          { value: "custom", label: "custom" },
-                        ]}
-                      >
-                        <button
-                          className={`keymode ${picking ? "is-active" : ""}`}
-                          onClick={() => setPicking((p) => !p)}
-                          title="click a pixel on the preview to key out that color"
+                    <div className="keyzone">
+                      <div className="keyzone__row">
+                        <ToggleRow
+                          checked={keyMode !== "off"}
+                          onChange={(on) => {
+                            setKeyMode(on ? "custom" : "off");
+                            if (!on) setPicking(false);
+                          }}
                         >
-                          ⌖ pick
-                        </button>
-                      </SegmentedControl>
-                      {keyMode === "custom" && (
-                        <label className="keycolor">
-                          <span className="keycolor-label">key color</span>
-                          {/* native swatch + text field stay in sync — pick or type a hex */}
-                          <input
-                            type="color"
-                            className="keycolor-swatch"
-                            value={
-                              /^#[0-9a-f]{6}$/i.test(keyColor)
-                                ? keyColor
-                                : "#000000"
-                            }
-                            onChange={(e) => setKeyColor(e.target.value)}
-                            aria-label="pick key color"
-                          />
-                          <input
-                            type="text"
-                            className="keycolor-hex"
-                            value={keyColor}
-                            onChange={(e) => setKeyColor(e.target.value)}
-                            spellCheck={false}
-                            placeholder="#00ff00"
-                            aria-label="key color hex"
-                          />
-                        </label>
-                      )}
-                      {/* Reserved slot: the slider keeps its layout box while
-                          the key is off so toggling modes never resizes the
-                          panel (border-pop + preview refit flicker). */}
-                      <div
-                        className={`zone-slot${keyMode !== "off" ? " is-active" : ""}`}
-                      >
-                        <Slider
-                          label="threshold"
-                          value={keyThreshold}
-                          min={0}
-                          max={1}
-                          step={0.02}
-                          onChange={setKeyThreshold}
-                          fixed={2}
-                          suffix=" · higher removes more"
-                        />
+                          <span className="field-label">background removal</span>
+                        </ToggleRow>
+                        {keyMode !== "off" && (
+                          <>
+                            <input
+                              type="color"
+                              className="keycolor-swatch"
+                              value={
+                                /^#[0-9a-f]{6}$/i.test(keyColor)
+                                  ? keyColor
+                                  : "#000000"
+                              }
+                              onChange={(e) => setKeyColor(e.target.value)}
+                              aria-label="color to remove"
+                              title="the color to remove"
+                            />
+                            <button
+                              className={`keymode ${picking ? "is-active" : ""}`}
+                              onClick={() => setPicking((p) => !p)}
+                              title="click a pixel on the preview to key out that color"
+                            >
+                              ⌖ pick
+                            </button>
+                          </>
+                        )}
                       </div>
-                    </SourceSection>
+                      {keyMode !== "off" && (
+                        <div className="zone-body">
+                          <Slider
+                            label="threshold"
+                            value={keyThreshold}
+                            min={0}
+                            max={1}
+                            step={0.02}
+                            onChange={setKeyThreshold}
+                            fixed={2}
+                            suffix=" · higher removes more"
+                          />
+                        </div>
+                      )}
+                    </div>
                   )}
 
-                  {/* edge detection — strong luma gradients become direction glyphs */}
+                  {/* edge detection — strong luma gradients become direction glyphs;
+                      the two modes sit inline with the toggle */}
                   {hasMedia && (
-                    <SourceSection
-                      label="edge detection"
-                      status={edgeMode === "only" ? "edges only" : edgeMode}
-                      statusOn={edgeMode !== "off"}
-                      open={openBlocks.edges}
-                      onToggle={() => toggleBlock("edges")}
-                    >
-                      <SegmentedControl
-                        value={edgeMode}
-                        onChange={setEdgeMode}
-                        options={[
-                          { value: "off", label: "off" },
-                          { value: "overlay", label: "overlay" },
-                          { value: "only", label: "edges only" },
-                        ]}
-                      />
-                      {/* Same reserved-slot trick as the key threshold above. */}
-                      <div
-                        className={`zone-slot${edgeMode !== "off" ? " is-active" : ""}`}
-                      >
-                        <Slider
-                          label="edge threshold"
-                          value={edgeThreshold}
-                          min={0.05}
-                          max={0.8}
-                          step={0.01}
-                          onChange={setEdgeThreshold}
-                          fixed={2}
-                        />
-                        <div className="keycolor">
-                          <span className="keycolor-label">edge color</span>
-                          <input
-                            type="color"
-                            className="keycolor-swatch"
-                            value={effectiveEdgeColor}
-                            onChange={(e) => setEdgeColor(e.target.value)}
-                            aria-label="edge color"
+                    <div className="keyzone">
+                      <div className="keyzone__row">
+                        <ToggleRow
+                          checked={edgeMode !== "off"}
+                          onChange={(on) => {
+                            if (on) {
+                              setEdgeMode(lastEdgeModeRef.current);
+                            } else {
+                              lastEdgeModeRef.current = edgeMode;
+                              setEdgeMode("off");
+                            }
+                          }}
+                        >
+                          <span className="field-label">edge detection</span>
+                        </ToggleRow>
+                        {edgeMode !== "off" && (
+                          <SegmentedControl
+                            value={edgeMode}
+                            onChange={setEdgeMode}
+                            options={[
+                              { value: "overlay", label: "overlay" },
+                              { value: "only", label: "edges only" },
+                            ]}
                           />
-                          <button
-                            className="keymode"
-                            onClick={() => setEdgeColor(null)}
-                            disabled={edgeColor === null}
-                            title="match the text color"
-                          >
-                            {edgeColor === null ? "matches text" : "match text"}
-                          </button>
-                        </div>
+                        )}
                       </div>
-                    </SourceSection>
+                      {edgeMode !== "off" && (
+                        <div className="zone-body">
+                          <Slider
+                            label="edge threshold"
+                            value={edgeThreshold}
+                            min={0.05}
+                            max={0.8}
+                            step={0.01}
+                            onChange={setEdgeThreshold}
+                            fixed={2}
+                          />
+                          <div className="keycolor">
+                            <span className="keycolor-label">edge color</span>
+                            <input
+                              type="color"
+                              className="keycolor-swatch"
+                              value={effectiveEdgeColor}
+                              onChange={(e) => setEdgeColor(e.target.value)}
+                              aria-label="edge color"
+                            />
+                            <button
+                              className="keymode"
+                              onClick={() => setEdgeColor(null)}
+                              disabled={edgeColor === null}
+                              title="match the text color"
+                            >
+                              {edgeColor === null ? "matches text" : "match text"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               </section>
@@ -1577,14 +1619,6 @@ export default function Create({ adminSecret = null }) {
           <div className="fs-drawbar">
             {drawControls}
             <div className="fs-actions">
-              <button className="btn" onClick={clearInk}>
-                clear ink
-              </button>
-              {hasPhoto && (
-                <button className="btn" onClick={restorePhoto}>
-                  restore photo
-                </button>
-              )}
               {/* same arm → confirm crop flow as the windowed draw toolbar: the
                   overlay/handles live inside .stage-media, which fullscreens
                   with the stage, so the existing pointer math works unchanged */}
