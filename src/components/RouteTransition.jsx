@@ -82,6 +82,30 @@ export function RouteTransition({ onCoverChange }) {
       setActiveKey(to);
     };
 
+    // enter() fires right after swap(), but the destination layer's DOM only
+    // commits on React's schedule — and a lazy route (Suspense fallback null)
+    // may still be fetching its chunk. Revealing before the layer has content
+    // flashes whatever sits beneath the empty layer (the page just left), so
+    // hold the cover until real children exist. Capped so a failed chunk
+    // strands the user on a visible page, never under a permanent cover.
+    const waitForContent = (key) =>
+      new Promise((resolve) => {
+        const started = performance.now();
+        const check = () => {
+          const el = elFor(key);
+          if (
+            stale() ||
+            (el && el.children.length > 0) ||
+            performance.now() - started > 4000
+          ) {
+            resolve();
+          } else {
+            setTimeout(check, 32);
+          }
+        };
+        check();
+      });
+
     (async () => {
       const from = shownKeyRef.current;
       if (from === to) {
@@ -98,6 +122,9 @@ export function RouteTransition({ onCoverChange }) {
       await leave(elFor(from), { from, to });
       if (stale()) return;
       swap();
+      // "/" renders no outlet by design — the hero beneath IS the page.
+      if (to !== "/") await waitForContent(to);
+      if (stale()) return;
       await enter(elFor(to), { from, to });
       if (stale()) return;
       if (to !== "/") onCoverChangeRef.current?.(true);
