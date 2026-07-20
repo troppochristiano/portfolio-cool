@@ -231,7 +231,9 @@ export function AboutOverlay({
                       active={revealed}
                     />
                   </h2>
-                  <p className="chapter-band__line">A Frontend Developer</p>
+                  <p className="chapter-band__line">
+                    A Frontend Developer from italy
+                  </p>
                 </div>
                 <div className="chapter-band__row">
                   <span>Building for the web</span>

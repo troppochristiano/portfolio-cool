@@ -57,13 +57,10 @@ export default function Create({ adminSecret = null }) {
 
   // settings
   const [cols, setCols] = useState(110);
-  // typography + colors — display styling that rides into the baked figure's
-  // optional `style` block (validated server-side on upload).
+  // font + colors — display styling that rides into the baked figure's
+  // optional `style` block (validated server-side on upload). Spacing/line
+  // height knobs are gone: cell aspect shapes the grid at the sampling stage.
   const [fontKey, setFontKey] = useState(STYLE_DEFAULTS.font);
-  const [letterSpacing, setLetterSpacing] = useState(
-    STYLE_DEFAULTS.letterSpacing,
-  ); // em
-  const [lineHeight, setLineHeight] = useState(STYLE_DEFAULTS.lineHeight);
   const [fgColor, setFgColor] = useState(STYLE_DEFAULTS.color);
   const [bgColor, setBgColor] = useState(STYLE_DEFAULTS.background);
   // resolution: 'auto' locks rows to the source aspect; 'custom' sets rows freely
@@ -99,7 +96,6 @@ export default function Create({ adminSecret = null }) {
     resolution: true,
     playback: true,
     characters: true,
-    typography: true,
     effects: true,
   });
   const toggleBlock = (id) => setOpenBlocks((o) => ({ ...o, [id]: !o[id] }));
@@ -449,8 +445,8 @@ export default function Create({ adminSecret = null }) {
   // pixel-identical. Exports are untouched (they render their own canvas from
   // the true cellPx), only the readout must divide the measurement back.
   const MAX_PRE_PX = 4000;
-  const estNatW = cols * cellPx * MONO_ADVANCE * (1 + (letterSpacing || 0));
-  const estNatH = rows * cellPx * lineHeight;
+  const estNatW = cols * cellPx * MONO_ADVANCE;
+  const estNatH = rows * cellPx;
   const fitK = Math.min(
     1,
     MAX_PRE_PX / Math.max(estNatW, 1),
@@ -505,8 +501,6 @@ export default function Create({ adminSecret = null }) {
     fileName,
     style: {
       font: fontKey,
-      letterSpacing,
-      lineHeight,
       background: bgColor,
       color: fgColor,
       edgeColor: splitEdges ? effectiveEdgeColor : undefined,
@@ -752,6 +746,9 @@ export default function Create({ adminSecret = null }) {
               </SettingsBlock>
             )}
 
+            {/* characters + typography merged: what the ascii is drawn with —
+                glyph ramp, font, colors. Spacing/line-height knobs removed
+                (cell aspect owns proportions at the sampling stage). */}
             <SettingsBlock
               label="characters"
               open={openBlocks.characters}
@@ -769,13 +766,6 @@ export default function Create({ adminSecret = null }) {
                   </button>
                 ))}
               </div>
-            </SettingsBlock>
-
-            <SettingsBlock
-              label="typography"
-              open={openBlocks.typography}
-              onToggle={() => toggleBlock("typography")}
-            >
               <div className="field-label">font</div>
               <SegmentedControl
                 value={fontKey}
@@ -784,25 +774,6 @@ export default function Create({ adminSecret = null }) {
                   value: k,
                   label: k,
                 }))}
-              />
-              <Slider
-                label="char spacing"
-                value={letterSpacing}
-                min={0}
-                max={0.5}
-                step={0.01}
-                onChange={setLetterSpacing}
-                suffix="em"
-                fixed={2}
-              />
-              <Slider
-                label="line height"
-                value={lineHeight}
-                min={0.7}
-                max={1.6}
-                step={0.05}
-                onChange={setLineHeight}
-                fixed={2}
               />
               <div className="keycolor">
                 <span className="keycolor-label">text</span>
@@ -1434,10 +1405,6 @@ export default function Create({ adminSecret = null }) {
                           style={{
                             fontSize: previewFontSize,
                             fontFamily: FONT_STACKS[fontKey],
-                            letterSpacing: letterSpacing
-                              ? `${letterSpacing}em`
-                              : undefined,
-                            lineHeight,
                             color: fgColor,
                             transform:
                               previewScale !== 1
@@ -1453,10 +1420,6 @@ export default function Create({ adminSecret = null }) {
                             style={{
                               fontSize: previewFontSize,
                               fontFamily: FONT_STACKS[fontKey],
-                              letterSpacing: letterSpacing
-                                ? `${letterSpacing}em`
-                                : undefined,
-                              lineHeight,
                               color: effectiveEdgeColor,
                               transform:
                                 previewScale !== 1
@@ -1573,8 +1536,6 @@ export default function Create({ adminSecret = null }) {
               style={{
                 fontSize: previewFontSize,
                 fontFamily: FONT_STACKS[fontKey],
-                letterSpacing: letterSpacing ? `${letterSpacing}em` : undefined,
-                lineHeight,
                 color: fgColor,
                 transform: `scale(${miniScale})`,
               }}
@@ -1587,10 +1548,6 @@ export default function Create({ adminSecret = null }) {
                 style={{
                   fontSize: previewFontSize,
                   fontFamily: FONT_STACKS[fontKey],
-                  letterSpacing: letterSpacing
-                    ? `${letterSpacing}em`
-                    : undefined,
-                  lineHeight,
                   color: effectiveEdgeColor,
                   transform: `scale(${miniScale})`,
                 }}

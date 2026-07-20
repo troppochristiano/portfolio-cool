@@ -14,7 +14,8 @@ import { isCoarsePointer, prefersReducedMotion } from "../lib/utils.js";
 // It listens on the *parent* pill (closest button/a), not on itself, so the
 // pill's padding is part of the hover surface.
 //
-// Akkurat is proportional, so swapped glyphs would nudge their neighbours.
+// The main face is mono now (PP Neue Montreal Mono), but the fallbacks are
+// not guaranteed to be, so swapped glyphs could nudge their neighbours.
 // While armed, every cell is locked to its measured natural width (see
 // .scramble--locked in global.css); idle, the spans are plain inline text with
 // zero layout impact. Locked widths are re-measured on every arm, so late font

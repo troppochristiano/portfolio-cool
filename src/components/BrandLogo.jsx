@@ -12,7 +12,7 @@ import { isCoarsePointer, prefersReducedMotion } from "../lib/utils.js";
 //
 // The label is one span per glyph, driven imperatively (textContent) from a
 // rAF loop; React renders the resting phrase once and never re-renders during
-// the effect. Akkurat is proportional, so during a morph every cell is locked
+// the effect. The face may fall back to proportional, so during a morph every cell is locked
 // to the advance measured from the target phrase's real glyphs
 // (.brand-logo__cells--locked), and the name's grid track is pinned to
 // explicit px widths so the pill glides between phrase widths on the

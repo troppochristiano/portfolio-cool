@@ -5,40 +5,40 @@
     letter-spacing: -0.03;
 }
 
+:root {
+    /* Site-wide main face — swap the family here to retheme everything. */
+    --font-main:
+        "PP Neue Montreal Mono", ui-monospace, "SF Mono", Menlo, Consolas,
+        monospace;
+}
+
 html,
 body {
     width: 100%;
     height: 100%;
     background-color: #000;
     overflow: hidden;
-    font-family:
-        "Akkurat Trial TT",
-        system-ui,
-        -apple-system,
-        "Segoe UI",
-        sans-serif;
+    font-family: var(--font-main);
 }
 
-/* ── webfonts (About chapter display type) ─────────────────────── */
+/* ── webfonts ──────────────────────────────────────────────────── */
+/* PP Neue Montreal Mono (Pangram Pangram free-to-try — personal use incl.
+   portfolios per their FAQ). The site-wide main face behind --font-main;
+   variable cut, one file covers every weight (browser clamps to the real
+   wght axis). */
+@font-face {
+    font-family: "PP Neue Montreal Mono";
+    src: url("/fonts/PPNeueMontrealMono-Variable.woff2") format("woff2-variations");
+    font-weight: 100 900;
+    font-display: swap;
+}
+
 /* Doto (OFL, self-hosted) — variable dot-matrix face; stands in for AS
    Therma's thermal-printer role in the frontierdialogues-style band. */
 @font-face {
     font-family: "Doto";
     src: url("/fonts/Doto-Variable.ttf") format("truetype-variations");
     font-weight: 100 900;
-    font-display: swap;
-}
-
-/* Neue Montreal Squeezed (Off Type trial — the trial license explicitly
-   covers portfolio use). Not vendored: download the free trial from
-   off-type.com and drop the file in public/fonts under one of these names
-   to activate; the condensed fallbacks carry the layout until then. */
-@font-face {
-    font-family: "NM Squeezed";
-    src:
-        url("/fonts/NeueMontrealSqueezed-Medium.woff2") format("woff2"),
-        url("/fonts/NeueMontrealSqueezed-Medium.otf") format("opentype");
-    font-weight: 500;
     font-display: swap;
 }
 
@@ -339,7 +339,7 @@ body {
    of the appbar (z-2, covered by the About overlay) it stays visible above the
    overlay and its dissolve canvas (z-20/21) as persistent chrome — clicking it
    closes the overlay. letter-spacing 0 fuses the two quadrant glyphs into one
-   mark; Segoe UI Symbol guarantees them on Windows when Akkurat lacks them.
+   mark; Segoe UI Symbol guarantees them on Windows when the main face lacks them.
    Hover/focus splits the mark: the halves drift apart on the button's gap
    while CHRISTIAN BIANCHI expands out between them. */
 .brand-logo {
@@ -356,11 +356,12 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 0;
+    /* Main face + Segoe UI Symbol so the ▙▟ block glyphs always render. */
     font-family:
-        "Akkurat Trial TT",
+        "PP Neue Montreal Mono",
         "Segoe UI Symbol",
-        system-ui,
-        sans-serif;
+        ui-monospace,
+        monospace;
     font-size: 16px;
     font-weight: 600;
     line-height: 1;
@@ -764,7 +765,7 @@ body {
     top: 0;
     left: 0;
     z-index: 91;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-family: var(--font-main);
     font-size: 11px;
     line-height: 1.1;
     color: #999;
@@ -827,6 +828,14 @@ body {
     font-size: clamp(26px, 3.6vw, 48px);
 }
 
+/* The About role line ("A Frontend Developer") is a subtitle to the wordmark,
+   not a co-title — much smaller than the shared __line display size. Adjacent
+   sibling = only the line right after the wordmark (the About band); the
+   Works/Contact/page titles keep their own sizes. */
+.chapter-band__wordmark + .chapter-band__line {
+    font-size: clamp(15px, 1.9vw, 26px);
+}
+
 /* ── About chapter: frontierdialogues-style band header + reading grid ──
    Band anatomy (mirroring their article.chapter): a tiny mono eyebrow row,
    a two-line display lockup (dot-matrix wordmark over squeezed role line),
@@ -838,7 +847,7 @@ body {
     justify-content: space-between;
     align-items: baseline;
     gap: 16px;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-family: var(--font-main);
     font-size: 12px;
     font-weight: 500;
     letter-spacing: 0.12em;
@@ -867,12 +876,13 @@ body {
 }
 
 .chapter-band__line {
-    font-family: "NM Squeezed", "Arial Narrow", "Helvetica Neue", Impact, sans-serif;
+    font-family: var(--font-main);
     font-weight: 500;
-    /* Sized so "A FRONTEND DEVELOPER" holds one line even in the widest
-       fallback face (~0.5em/cap) at the full-bleed width; nowrap makes the
-       intent explicit. */
-    font-size: clamp(26px, 9vw, 128px);
+    /* Display size for the sub-band titles ("Works", "Contact"). Rescaled
+       from the squeezed face's 9vw/128px by ~0.83 so NM Mono's wider 0.6em
+       advance lands the same optical width (e.g. CONTACT ≈ 32vw either way);
+       nowrap makes the one-line intent explicit. */
+    font-size: clamp(22px, 7.5vw, 107px);
     line-height: 0.95;
     letter-spacing: 0.005em;
     text-transform: uppercase;
@@ -968,7 +978,7 @@ body {
 
 /* Year meta speaks the chapter bands' mono voice so the system reads whole. */
 .works-row__meta {
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-family: var(--font-main);
     text-transform: uppercase;
     font-size: 11px;
     font-weight: 500;

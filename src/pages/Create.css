@@ -2,7 +2,7 @@
    CRT/amber-on-paper look to the portfolio's black + neon-blue aesthetic.
    Every rule is scoped under .create-page so the converter's chrome can't leak
    into the home route, and the portfolio's global.css (which owns body/* resets
-   and the "Akkurat" face) doesn't fight it. */
+   and the main face) doesn't fight it. */
 
 .create-page {
     /* remapped palette: paper→black, ink→white, phosphor amber→neon blue */
@@ -17,9 +17,11 @@
     --screen-bg: #050505; /* the monitor interior (matches .ascii-plane) */
     --screen-ink: #fff; /* ascii on the monitor */
     --mono:
-        ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+        "PP Neue Montreal Mono", ui-monospace, "SF Mono", Menlo, Consolas,
+        "DejaVu Sans Mono", monospace;
     --display:
-        "Akkurat Trial TT", system-ui, -apple-system, "Segoe UI", sans-serif;
+        "PP Neue Montreal Mono", ui-monospace, "SF Mono", Menlo, Consolas,
+        monospace;
 
     /* Own the scroll: global.css locks body to overflow:hidden for the home hero,
      so this route becomes its own scroll container. Use dvh so the scroll area
@@ -78,7 +80,7 @@
     padding-bottom: 0.5rem;
     margin-bottom: 0.75rem;
 }
-/* Squeezed band voice at toolbar scale (overrides the shared __line size). */
+/* Band voice at toolbar scale (overrides the shared __line size). */
 .create-page .masthead__title {
     font-size: clamp(18px, 2vw, 28px);
 }

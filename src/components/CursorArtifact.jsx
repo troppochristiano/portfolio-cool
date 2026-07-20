@@ -79,8 +79,16 @@ const BLOB_GLITCH = 0.1; // chance a lit cell flashes a POOL glyph in blue
 const THRESH = [0.82, 0.55, 0.28, 0]; // excitement needed to light, by rank
 
 // ── figure faces ───────────────────────────────────────────────────
-const TARGET_W = 100; // aim a pet at roughly this many px wide…
-const MAX_CELL_PX = 8; // …but never above this cell size (mini, always)
+// Bakes arrive at wildly different grids (a 12x6 hand drawing, a 60x26
+// Create-page export), so a face is never trusted to size itself: dead
+// margins are trimmed off, then the cell size is solved to fit the trimmed
+// content inside PET_W x PET_H. Whatever the grid, every creature lands at
+// the same visual scale and its box center is its real center (which is what
+// the chase point anchors to).
+const PET_W = 104; // the pet fits inside this box (px) …
+const PET_H = 72; // … on both axes, whichever binds first
+const MAX_CELL_PX = 8; // never bigger than this (tiny grids stay mini)
+const MIN_CELL_PX = 3.2; // nor smaller (past this a glyph is just a smudge)
 const CHASE_SPEEDUP = 1.2; // playback runs up to (1 + this)× while chasing
 const GLITCH_MIN_EXCITE = 0.45; // below this the loop plays clean
 const GLITCH_CELLS_MAX = 6; // noise cells at full excitement
@@ -183,13 +191,54 @@ export function CursorArtifact({ active, boundsRef, scrollRef, faces }) {
         }),
       };
     };
+    // Crop the always-blank border off a clip (union bbox over every frame,
+    // so the creature never shifts between frames — only dead space goes).
+    // Exports routinely carry a third of their rows as padding, which would
+    // otherwise inflate the box and pull its center off the creature.
+    const trim = (frames) => {
+      const lines = frames.map((f) => f.split("\n"));
+      let top = Infinity;
+      let bottom = -1;
+      let left = Infinity;
+      let right = -1;
+      for (const ls of lines) {
+        ls.forEach((line, r) => {
+          const a = line.search(/\S/);
+          if (a === -1) return; // blank row in this frame
+          const b = line.trimEnd().length - 1;
+          if (r < top) top = r;
+          if (r > bottom) bottom = r;
+          if (a < left) left = a;
+          if (b > right) right = b;
+        });
+      }
+      if (bottom < 0) return null; // entirely blank clip — unusable
+      return {
+        cols: right - left + 1,
+        rows: bottom - top + 1,
+        frames: lines.map((ls) =>
+          ls
+            .slice(top, bottom + 1)
+            .map((line) => line.padEnd(right + 1).slice(left, right + 1))
+            .join("\n")
+        ),
+      };
+    };
+
     const out = {};
     for (const [id, fig] of Object.entries(figures)) {
+      const t = trim(fig.frames);
+      if (!t) continue; // blank clip → this section keeps the blob
       out[id] = {
         // Both orientations, ready to swap per tick: [as authored, mirrored].
-        o: [build(fig.frames), build(fig.frames.map(mirrorFrame))],
+        o: [build(t.frames), build(t.frames.map(mirrorFrame))],
         interval: 1000 / (fig.fps || 12),
-        cellPx: clamp(TARGET_W / (fig.cols * MONO_ADVANCE), 4, MAX_CELL_PX),
+        // Fit the trimmed grid inside the pet box; the tighter axis wins.
+        cellPx: clamp(
+          Math.min(PET_W / (t.cols * MONO_ADVANCE), PET_H / t.rows),
+          MIN_CELL_PX,
+          MAX_CELL_PX
+        ),
       };
     }
     return out;

@@ -45,7 +45,7 @@
     opacity: 0.85;
 }
 
-/* Squeezed band voice (NM Squeezed, uppercase from .chapter-band__line) at
+/* Band voice (main face, uppercase from .chapter-band__line) at
    toolbar scale — the 2-class selector beats the shared __line size. */
 .gallery-head .gallery-title {
     font-size: clamp(18px, 2vw, 28px);
