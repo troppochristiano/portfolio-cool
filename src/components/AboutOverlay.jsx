@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDissolveReveal } from "../hooks/useDissolveReveal";
-import { useAsciiDecode } from "../hooks/useAsciiDecode.js";
-import { useAsciiPortrait } from "../hooks/useAsciiPortrait.js";
+import { AsciiPortraitHover } from "./AsciiPortraitHover.jsx";
 import { DecryptText } from "./DecryptText.jsx";
-import { CursorArtifact } from "./CursorArtifact.jsx";
 import { WorksHoverPreview } from "./WorksHoverPreview.jsx";
-import AsciiPlayer from "./AsciiPlayer.jsx";
 
 // The intro copy. The old headline sentence ("I'm Christian — a frontend
 // developer building for the web since 2018.") is distributed across the
@@ -17,11 +14,9 @@ const BODY_1 =
 const BODY_2 =
   "This site is the other half. The part with no client and no spec, built for no reason beyond wanting to see it work.";
 
-// Placeholder portrait: the avatar's center-gaze neutral texture, already
-// served (and pre-warmed by the hero preload). Swap for a dedicated portrait
-// render later.
-const PORTRAIT_SRC =
-  "/outputs/meBW/expressions/neutral/meBW_055_5_5_yaw2.2_pitch2.2_px1.7_py-1.7.webp";
+// Full-body cutout (transparent bg), rendered by AsciiPortraitHover as the
+// blue canvas-ascii figure in the middle of the reading spread.
+const PORTRAIT_SRC = "/outputs/portrait/me-full.webp";
 
 // Placeholder Works entries — modeled on the henriheymans.com "Recognitions & Awards"
 // expandable list. Real entries (with links/thumbnails) get filled in later.
@@ -63,15 +58,63 @@ const SOCIALS = [
   { label: "LinkedIn", href: "#" },
 ];
 
-// Per-section cursor pets, keyed by section id (Create-page Export JSON
-// bakes; hand-drawn placeholders for now — overwrite the files to recast).
-// Module-level on purpose: CursorArtifact refetches when this object's
-// identity changes.
-const CURSOR_FACES = {
-  about: "/ascii/cursor-bird.json",
-  works: "/ascii/cursor-fish.json",
-  contact: "/ascii/cursor-dog.json",
-};
+// ?wrapdebug renders the generated wrap polygons as translucent overlays so
+// the text-wrap contours can be eyeballed against the figure.
+const WRAP_DEBUG =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).has("wrapdebug");
+
+// Tracks --hip-cut in global.css: the desktop About figure shows the top 46%
+// of the grid (cut just under the hands); mobile shows the full body.
+const DESKTOP_HIP_CUT = 0.46;
+
+// The About text wraps along the figure's real silhouette: AsciiPortraitHover
+// reports per-row opaque extents of the drawn glyph grid, and these become
+// shape-outside polygons (via CSS custom properties) for the desktop
+// half-box floats and the mobile full-box float. Auto-derived — survives
+// crop/size changes with no hand-tuned contours.
+function contourToPolygons({ bands }) {
+  if (!bands?.length) return null;
+  const pct = (v) => `${(Math.max(0, Math.min(1, v)) * 100).toFixed(1)}%`;
+  // Drop near-collinear points (x within 1.5% of the last kept one).
+  const simplify = (pts) => {
+    const out = [];
+    for (const p of pts) {
+      const prev = out[out.length - 1];
+      if (!prev || Math.abs(p[0] - prev[0]) > 0.015) out.push(p);
+    }
+    return out;
+  };
+  // Opaque side is RIGHT of the walked edge: (topX,0) → across the top and
+  // far side → (bottomX,100%) → back up the contour bottom→top.
+  const build = (pts, farX) => {
+    const top = pts[0];
+    const bottom = pts[pts.length - 1];
+    const walkUp = simplify(pts).reverse();
+    const edge = walkUp.map(([x, y]) => `${pct(x)} ${pct(y)}`).join(", ");
+    return `polygon(${pct(top[0])} 0%, ${farX} 0%, ${farX} 100%, ${pct(
+      bottom[0],
+    )} 100%, ${edge})`;
+  };
+  const visible = bands.filter((b) => b.y <= DESKTOP_HIP_CUT);
+  return {
+    // Desktop left-half box: x doubles (half box), y rescales to the crop.
+    "--wrap-l": build(
+      visible.map((b) => [b.left * 2, b.y / DESKTOP_HIP_CUT]),
+      "100%",
+    ),
+    // Desktop right-half box, mirrored: x maps from the figure's right edge.
+    "--wrap-r": build(
+      visible.map((b) => [(b.right - 0.5) * 2, b.y / DESKTOP_HIP_CUT]),
+      "0%",
+    ),
+    // Mobile full-body box (legs pocket included — concave is fine).
+    "--wrap-full-l": build(
+      bands.map((b) => [b.left, b.y]),
+      "100%",
+    ),
+  };
+}
 
 // Full-screen scrollable overlay reached from the scroll-hint pill under the
 // avatar and the Works/Contact header shortcuts. Owns its own scroll (the body
@@ -83,6 +126,9 @@ const CURSOR_FACES = {
 export function AboutOverlay({
   open,
   onOpenChange,
+  // Reports "fully settled open" (opaque over the hero) — App freezes the
+  // hero's render loops on it.
+  onSettledChange,
   ready = true,
   scrollTarget = null,
   onScrolled,
@@ -97,13 +143,16 @@ export function AboutOverlay({
   // True only while fully settled open — drives the headline decrypt and the
   // portrait decode, and resets them on close so both replay on every open.
   const [revealed, setRevealed] = useState(false);
+  // Auto-contour wrap polygons (CSS custom properties for the silh floats),
+  // derived from the drawn figure once its cell grid is built.
+  const [wrapVars, setWrapVars] = useState(null);
+  const handleContour = useCallback((contour) => {
+    setWrapVars(contourToPolygons(contour));
+  }, []);
   const overlayRef = useRef(null);
   const scrollRef = useRef(null);
   const canvasRef = useRef(null);
   const contentRef = useRef(null);
-  // The whole chapter column — the cursor artifact's hover zone and
-  // coordinate space (its faces clip themselves to each section's band).
-  const innerRef = useRef(null);
   // Section id queued by a header shortcut; consumed once the overlay is open + scrollable.
   const pendingScrollRef = useRef(null);
 
@@ -139,20 +188,10 @@ export function AboutOverlay({
     onSettle: (state) => {
       onOpenChange(state === "open");
       setRevealed(state === "open");
+      onSettledChange?.(state === "open");
       if (state === "open") scrollToSection();
     },
   });
-
-  // ASCII portrait for the About section: sparse thumb while closed/mid-sweep,
-  // decodes into the dense figure once the overlay settles open (same reveal
-  // as a gallery card, driven by `revealed` instead of hover).
-  const portrait = useAsciiPortrait(PORTRAIT_SRC);
-  const decoded = useAsciiDecode({
-    active: revealed,
-    item: portrait?.item,
-    display: portrait?.display ?? null,
-  });
-  const portraitShown = decoded ?? portrait?.thumbFigure;
 
   // Drive the dissolve from the `open` prop (ABOUT button / Escape / close button). Skip when
   // a scrub already settled us into that state, so we don't re-animate on the echoed prop.
@@ -217,7 +256,7 @@ export function AboutOverlay({
           this overlay and closes it; Escape and pull-to-close also work. */}
       <div className="about-overlay__scroll" ref={scrollRef}>
         <div className="about-overlay__content" ref={contentRef}>
-          <div className="about-overlay__inner" ref={innerRef}>
+          <div className="about-overlay__inner">
             <section id="about" className="about-section">
               <header className="chapter-band">
                 {/* No eyebrow row here: the About band is the overlay's
@@ -226,7 +265,7 @@ export function AboutOverlay({
                 <div className="chapter-band__lockup">
                   <h2 className="chapter-band__wordmark">
                     <DecryptText
-                      text="HI I'M CHRISTIAN"
+                      text="HI, I'M CHRISTIAN"
                       accent="CHRISTIAN"
                       active={revealed}
                     />
@@ -240,21 +279,58 @@ export function AboutOverlay({
                   <span>Since 2018</span>
                 </div>
               </header>
+              {/* Reading block: one text flow wrapping the centered ascii
+                  figure. Two shape-outside floats (silhouette half-masks)
+                  carve his outline out of the text on each side; the figure
+                  is absolutely centered on top. `revealed` drives the
+                  decode-in. Without shape-outside support it falls back to
+                  side columns (see global.css @supports block). */}
               <div className="chapter-reading">
-                <div className="chapter-reading__cols">
-                  <div className="chapter-reading__body">
-                    <p>{BODY_1}</p>
-                    <p>{BODY_2}</p>
-                  </div>
-                  <div className="chapter-reading__aside">
-                    {portraitShown && (
-                      <AsciiPlayer
-                        data={portraitShown}
-                        fit
-                        label="ASCII portrait of Christian"
+                <div
+                  className="chapter-reading__flow"
+                  style={wrapVars ?? undefined}
+                >
+                  <figure className="about-portrait">
+                    <AsciiPortraitHover
+                      src={PORTRAIT_SRC}
+                      active={revealed}
+                      label="ASCII portrait of Christian"
+                      onContour={handleContour}
+                    />
+                  </figure>
+                  {/* Each column carries its own silhouette float (separate
+                      formatting contexts, so they never collide) whose
+                      shape-outside hugs the near half of the figure. */}
+                  <p className="chapter-reading__col chapter-reading__col--left">
+                    <span
+                      className="about-silh about-silh--l"
+                      aria-hidden="true"
+                    />
+                    {BODY_1}
+                  </p>
+                  <p className="chapter-reading__col chapter-reading__col--right">
+                    <span
+                      className="about-silh about-silh--r"
+                      aria-hidden="true"
+                    />
+                    {BODY_2}
+                  </p>
+                  {WRAP_DEBUG && (
+                    <>
+                      <div
+                        className="wrap-debug wrap-debug--l"
+                        aria-hidden="true"
                       />
-                    )}
-                  </div>
+                      <div
+                        className="wrap-debug wrap-debug--r"
+                        aria-hidden="true"
+                      />
+                      <div
+                        className="wrap-debug wrap-debug--full"
+                        aria-hidden="true"
+                      />
+                    </>
+                  )}
                 </div>
               </div>
             </section>
@@ -345,18 +421,9 @@ export function AboutOverlay({
               </ul>
             </section>
 
-            {/* Little ascii pet trailing the cursor across the whole column —
-                a different creature per chapter, swapped at the section
-                borders by clipping (no fade between sections). Active once
-                settled open, same gate as the decrypt + portrait. Each face
-                is a Create-page JSON export (hand-drawn placeholders for
-                now); a missing file falls back to the procedural blob. */}
-            <CursorArtifact
-              active={revealed}
-              boundsRef={innerRef}
-              scrollRef={scrollRef}
-              faces={CURSOR_FACES}
-            />
+            {/* Cursor pets parked for now (2026-07-21) — CursorArtifact.jsx,
+                its CSS, and the public/ascii bakes are all still in place;
+                re-mounting the component here brings them back. */}
           </div>
         </div>
       </div>

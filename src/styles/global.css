@@ -28,7 +28,8 @@ body {
    wght axis). */
 @font-face {
     font-family: "PP Neue Montreal Mono";
-    src: url("/fonts/PPNeueMontrealMono-Variable.woff2") format("woff2-variations");
+    src: url("/fonts/PPNeueMontrealMono-Variable.woff2")
+        format("woff2-variations");
     font-weight: 100 900;
     font-display: swap;
 }
@@ -358,10 +359,7 @@ body {
     gap: 0;
     /* Main face + Segoe UI Symbol so the ▙▟ block glyphs always render. */
     font-family:
-        "PP Neue Montreal Mono",
-        "Segoe UI Symbol",
-        ui-monospace,
-        monospace;
+        "PP Neue Montreal Mono", "Segoe UI Symbol", ui-monospace, monospace;
     font-size: 16px;
     font-weight: 600;
     line-height: 1;
@@ -863,9 +861,17 @@ body {
 .chapter-band__wordmark {
     font-family: "Doto", ui-monospace, monospace;
     font-weight: 700;
-    /* Sized for the 16-cell greeting at the full-bleed width: Doto runs
-       ≈0.61em/cell, so (100vw − gutters)/9.76 ≈ 9.4vw, ceiling ~134px. */
-    font-size: clamp(30px, 9.4vw, 134px);
+    /* Full-line lockup on ONE line: sized so the 17-cell greeting ("HI, I'M
+       CHRISTIAN") fills ~97% of the content width — (100vw − gutters) /
+       divisor, where the divisor is measured to just clear the line (Doto's
+       real advance ran wider than the 0.61em/cell estimate, so a smaller
+       font than the old /9.76 which overflowed and wrapped). nowrap makes it
+       physically unable to wrap regardless of font-load/rounding; retune the
+       divisor if the greeting text length changes. */
+    font-size: max(30px, calc((100vw - 2 * clamp(20px, 4.4vw, 64px)) / 10.8));
+    white-space: nowrap;
+    /* Air between the lockup and its subtitle. */
+    margin-bottom: clamp(12px, 1.8vw, 28px);
     line-height: 0.95;
     letter-spacing: 0.01em;
     text-transform: uppercase;
@@ -895,47 +901,261 @@ body {
 .decrypt__word--accent {
     color: #0000ff;
 }
+
+/* Mobile band: the desktop wordmark:subtitle ratio (~5:1) collapses to
+   ~2.3:1 at phone widths, flattening the hierarchy. Restore it: the wordmark
+   goes big and wraps into the two-line lockup ("HI I'M" / "CHRISTIAN" —
+   DecryptText words are nowrap spans, so the wrap lands on the word gap and
+   stays stable mid-decrypt), while the subtitle and mono row drop to quiet
+   metadata sizes. Phones only (<768px) — tablets get the desktop band.
+   767.98 not 767 so a fractional-DPR viewport can't land the split on 767. */
+@media (max-width: 767.98px) {
+    .chapter-band__wordmark {
+        font-size: min(15.5vw, 64px);
+        /* Reverse the desktop nowrap: the phone lockup wraps to two lines
+           ("HI, I'M" / "CHRISTIAN") on purpose. */
+        white-space: normal;
+    }
+
+    .chapter-band__wordmark + .chapter-band__line {
+        font-size: 12px;
+    }
+
+    .chapter-band__row {
+        font-size: 10px;
+    }
+}
 .chapter-reading {
     margin-top: clamp(24px, 3.5vw, 44px);
 }
 
-.chapter-reading__cols {
+/* Reading block: two text columns flanking the centred ascii torso, each
+   column's inner edge shaped to the near half of his silhouette (baked masks
+   that match the drawn outline) so the copy hugs his contour — into the wedge
+   beside the narrow head, out around the spread arm — instead of a straight
+   edge. Each silhouette float lives in its OWN column (separate formatting
+   contexts) so the two never collide. The figure is absolutely centred on top
+   over the seam. --fig-* are shared so figure, floats and column height all
+   track one width + hip-cut. */
+.chapter-reading__flow {
+    --hip-cut: 0.46; /* share of the figure shown, cut just under the hands (matches masks) */
+    /* Figure width scales linearly so the two-column spread stays usable from
+       tablet portrait (≈768px → ~360px figure, ~170px text columns) up to
+       large desktop (1280 → ~768px, unchanged), capped at 900. A plain 60vw
+       left only ~110px columns at 768 once tablets joined the desktop layout;
+       this keeps the text readable at every width without a resize jump. */
+    --fig-w: clamp(340px, calc(80vw - 256px), 900px);
+    /* visible height = width ÷ (40 / (67·hip-cut)) */
+    --fig-h: calc(var(--fig-w) * (67 * var(--hip-cut)) / 40);
+    --fig-drop: 32px; /* hip-pull onto the divider */
+    /* Push the copy down so it sits centred on the figure's height instead of
+       starting at the head. Tied to the figure height so it auto-scales when
+       --fig-w changes. The silhouette floats cancel this with a negative
+       margin so the wrap contour stays pinned to the drawn figure. */
+    --text-drop: calc(var(--fig-h) * 0.08);
+    position: relative;
     display: grid;
-    grid-template-columns: minmax(0, 1.75fr) minmax(240px, 1fr);
-    gap: clamp(36px, 6vw, 90px);
+    grid-template-columns: 1fr 1fr;
     align-items: start;
+    /* Pull the whole block (figure AND in-flow silhouettes together) down
+       into .about-section's bottom padding so the figure's hip cut lands on
+       the Works divider — done here, not on the figure, so the wrap masks
+       stay aligned with the drawn outline. */
+    margin-bottom: calc(-1 * var(--fig-drop));
 }
 
-.chapter-reading__body {
-    display: flex;
-    flex-direction: column;
-    gap: 1em;
-    max-width: 62ch;
-}
-
-.chapter-reading__body p {
+.chapter-reading__col {
     color: #c9c9c9;
     font-size: 17px;
     line-height: 1.6;
+    padding-top: var(--text-drop);
 }
 
-.chapter-reading__aside {
-    min-width: 0;
-    /* AsciiPlayer inherits its glyph color from the host (figures without a
-       style block set none), and body never sets one — without this the
-       portrait renders black-on-black. */
-    color: #fff;
+/* Invisible wrap guide — a figure-half box at the column's inner edge (the
+   centre seam); its mask silhouette overlays the drawn figure so text wraps
+   the contour. Never painted. */
+.about-silh {
+    height: var(--fig-h);
+    width: calc(var(--fig-w) / 2);
+    /* Cancel the column's text-drop so the float (and its wrap contour) stays
+       pinned to the figure top while only the copy shifts down. */
+    margin-top: calc(-1 * var(--text-drop));
+    shape-image-threshold: 0.5;
+    /* Breathing room between the copy and the glyph cells — the generated
+       polygons trace the drawn cells exactly, so without this the text sits
+       against the ink and reads as overlap. */
+    shape-margin: 40px;
+    pointer-events: none;
 }
 
-@media (max-width: 860px) {
-    .chapter-reading__cols {
-        grid-template-columns: 1fr;
-        gap: 40px;
+/* The wrap contours are polygons generated at runtime from the drawn glyph
+   grid (AboutOverlay sets --wrap-l/--wrap-r/--wrap-full-l on the flow via
+   AsciiPortraitHover's onContour) — the text hugs the real silhouette with
+   no hand-tuning, and survives crop/size changes. The literals here are
+   first-paint fallbacks only. Load with ?wrapdebug to see the shapes. */
+.about-silh--l {
+    float: right; /* right edge = centre seam; text wraps his left contour */
+    shape-outside: var(
+        --wrap-l,
+        polygon(88% 0, 100% 0, 100% 100%, 30% 100%, 40% 60%, 88% 28%)
+    );
+}
+
+.about-silh--r {
+    float: left; /* left edge = centre seam; text wraps his right contour */
+    shape-outside: var(
+        --wrap-r,
+        polygon(12% 0, 0% 0, 0% 100%, 70% 100%, 60% 60%, 12% 28%)
+    );
+}
+
+/* ?wrapdebug overlays: the same polygons as clip-paths over translucent
+   boxes matching the float geometry, so the wrap can be eyeballed. */
+.wrap-debug {
+    position: absolute;
+    top: 0;
+    height: var(--fig-h);
+    width: calc(var(--fig-w) / 2);
+    background: rgba(0, 0, 255, 0.14);
+    outline: 1px dashed rgba(64, 64, 255, 0.7);
+    pointer-events: none;
+    z-index: 5;
+}
+
+.wrap-debug--l {
+    left: calc(50% - var(--fig-w) / 2);
+    clip-path: var(--wrap-l, none);
+}
+
+.wrap-debug--r {
+    left: 50%;
+    clip-path: var(--wrap-r, none);
+}
+
+.wrap-debug--full {
+    display: none;
+}
+
+/* The box shows the figure head→hips and clips the legs; the canvas keeps
+   its full 40×67-cell grid (numbers track AsciiPortraitHover's tunables).
+   Centred and bottom-aligned; the -32px pull cancels .about-section's bottom
+   padding so the hip cut lands on the section divider — he rises from it. */
+.about-portrait {
+    position: absolute;
+    /* TOP-anchored, matching the silhouette floats (which live at the flow
+       top): if the text columns outgrow the figure the wrap stays glued to
+       the drawn glyphs and the extra lines flow beneath it. Bottom-anchoring
+       let the figure slide down away from the wrap shapes at narrow desktop
+       widths — text landed on the figure. When the text fits (wide
+       viewports) the flow equals the figure height, so the hip cut still
+       lands on the works divider. */
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: var(--fig-w);
+    overflow: hidden;
+    aspect-ratio: calc(40 / (67 * var(--hip-cut)));
+}
+
+.about-portrait canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+/* Fallback: no shape-outside → the round-3 side-column spread. */
+@supports not (shape-outside: url("x")) {
+    .chapter-reading__flow {
+        --text-drop: 0px; /* no float to compensate — keep columns square */
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: clamp(28px, 4.5vw, 70px);
+        align-items: end;
+        min-height: 0;
     }
+    .about-silh {
+        display: none;
+    }
+    .chapter-reading__col {
+        max-width: 30ch;
+        padding-bottom: clamp(48px, 7vw, 96px);
+    }
+    .chapter-reading__col--left {
+        grid-column: 1;
+        justify-self: end;
+    }
+    .about-portrait {
+        position: static;
+        transform: none;
+        left: auto;
+        grid-column: 2;
+        margin: 0;
+    }
+    .chapter-reading__col--right {
+        grid-column: 3;
+        justify-self: start;
+    }
+}
 
-    /* Text first, portrait stacks under at a hand-friendly width. */
-    .chapter-reading__aside {
-        max-width: 420px;
+@media (max-width: 767.98px) {
+    /* Phones only — tablets (≥768px) keep the desktop two-column spread.
+       Magazine wrap: one block flow, the FULL-BODY figure floats top-right
+       carrying its auto-generated left-contour polygon (legs pocket
+       included), so the copy hugs head → arm → into the pocket beside the
+       legs, and the remainder flows full-width beneath. flow-root keeps both
+       <p>s in the float's BFC (flex items wouldn't wrap a sibling's float)
+       and contains the float. Trade-off: the torso sits inside the text, not
+       flush on the works divider — a single phone column can't have both. */
+    .chapter-reading__flow {
+        --text-drop: 0px; /* wrap starts at the top — no vertical centring */
+        --hip-cut: 1; /* legs visible: the box shows the whole 40×67 grid */
+        display: flow-root;
+        margin-bottom: 0;
+    }
+    .about-silh {
+        display: none;
+    }
+    .about-portrait {
+        float: right;
+        position: static;
+        transform: none;
+        left: auto;
+        width: min(56vw, 300px);
+        margin: 4px 0 10px 14px;
+        shape-outside: var(
+            --wrap-full-l,
+            polygon(
+                44% 0,
+                100% 0,
+                100% 100%,
+                36% 100%,
+                34% 46%,
+                13% 40%,
+                20% 26%,
+                44% 12%
+            )
+        );
+        shape-margin: 10px;
+    }
+    .chapter-reading__col {
+        font-size: 15px;
+        line-height: 1.55;
+        max-width: none;
+    }
+    .wrap-debug--l,
+    .wrap-debug--r {
+        display: none;
+    }
+    .wrap-debug--full {
+        /* Mirrors the floated figure box (top-right, same width/margins). */
+        display: block;
+        left: auto;
+        right: 0;
+        top: 4px;
+        width: min(56vw, 300px);
+        height: auto;
+        aspect-ratio: calc(40 / 67);
+        clip-path: var(--wrap-full-l, none);
     }
 }
 

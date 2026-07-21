@@ -123,6 +123,16 @@ export default function App({ suspended = false }) {
   // short-circuit, conditional mount) stays wired for when the control returns.
   const [avatarHidden] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  // True while the About overlay is fully settled open (opaque over the hero).
+  // Reported by the overlay's dissolve settle; used to freeze the hero's
+  // render loops while nothing of it is visible. `aboutOpen && aboutSettled`
+  // (not settled alone) so a button/Escape close — which flips aboutOpen
+  // before the close dissolve — resumes the hero the moment it starts to show.
+  const [aboutSettled, setAboutSettled] = useState(false);
+  // Freeze signal for the hero renderers only (wall + face). App's own
+  // `suspended` consumers (intro, preload, chrome listeners) stay keyed to
+  // the route cover alone.
+  const heroFrozen = suspended || (aboutOpen && aboutSettled);
   // Section the About overlay should scroll to once open (set by the header shortcuts).
   const [aboutTarget, setAboutTarget] = useState(null);
   // Show the "scroll to open" hint only where wheel-to-open is active (fine pointer) and
@@ -410,7 +420,9 @@ export default function App({ suspended = false }) {
             <AsciiGallery
               figures={figures}
               onSelect={setDialogFigure}
-              suspended={suspended}
+              // Also frozen while the About overlay fully covers the hero —
+              // stops the compositor AND all wall players' rAF loops.
+              suspended={heroFrozen}
               // The live phase flows through (forming/face/disperse/roam/done)
               // so the wall can time its own work: figure fetches/parses hold
               // during "forming" (the main thread belongs to the swarm) and
@@ -432,11 +444,12 @@ export default function App({ suspended = false }) {
                 photos={photoConfigs}
                 urlFor={urlFor}
                 status="neutral"
-                // Covered by a page: stop blinking (the existing autoBlink
-                // effect tears the timer down and reopens the eyes) and pause
-                // the render loop + cursor tracking via `suspended`.
-                autoBlink={!suspended}
-                suspended={suspended}
+                // Covered by a page OR the settled About overlay: stop
+                // blinking (the existing autoBlink effect tears the timer
+                // down and reopens the eyes) and pause the render loop +
+                // cursor tracking via `suspended`.
+                autoBlink={!heroFrozen}
+                suspended={heroFrozen}
                 transparent
                 // Intro: hold the face neutral and ignore the cursor until the intro
                 // is over (the lookAround gesture still plays over this). Flipping to
@@ -499,6 +512,7 @@ export default function App({ suspended = false }) {
           <AboutOverlay
             open={aboutOpen}
             onOpenChange={setAboutOpen}
+            onSettledChange={setAboutSettled}
             ready={warm}
             scrollTarget={aboutTarget}
             onScrolled={() => setAboutTarget(null)}
