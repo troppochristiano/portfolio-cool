@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import AsciiPlayer from './AsciiPlayer.jsx';
-import { getFigureData } from '../lib/api.js';
+import { figureDataUrl, getFigureData } from '../lib/api.js';
 import { isCoarsePointer } from '../lib/utils.js';
 import { usePageActive } from '../lib/pageActiveContext.js';
 import { useInView } from '../hooks/useInView.js';
+import { useRowHoverSlot } from '../hooks/useRowHover.jsx';
 import { useAsciiDecode } from '../hooks/useAsciiDecode.js';
 import '../pages/Gallery.css';
 
@@ -24,6 +25,10 @@ const COARSE = isCoarsePointer();
 
 // The thumb inherits the figure's style block so the grid shows each card
 // the way its creator styled it (font, colors) without fetching the full JSON.
+//
+// `index` is the card's position in the grid — inside a RowHoverProvider it's
+// what lets a hover decode the whole row (see useRowHover.jsx). Callers that
+// omit it (the admin library) fall back to one-card-at-a-time hover.
 const thumbData = (item) => ({
   cols: item.thumbCols,
   rows: item.thumbRows,
@@ -36,9 +41,12 @@ const thumbData = (item) => ({
   ...(item.edgeThumb ? { edgeFrames: [item.edgeThumb] } : {}),
 });
 
-export default function FigureCard({ item, onSelect, badges, fetchData }) {
+export default function FigureCard({ item, index, onSelect, badges, fetchData }) {
   const [full, setFull] = useState(null); // full figure.json once activated
-  const [hovering, setHovering] = useState(false); // fine-pointer trigger
+  // Fine-pointer trigger. Under a RowHoverProvider this is driven by the row
+  // controller (the whole row lights up, cascading from the hovered card);
+  // without one it's plain local hover state.
+  const { active: hovering, onEnter, onLeave, reset } = useRowHoverSlot(index);
   const rootRef = useRef(null);
 
   // Parked keep-alive gallery layers are visibility:hidden but still produce
@@ -48,18 +56,18 @@ export default function FigureCard({ item, onSelect, badges, fetchData }) {
   const inView = useInView(rootRef, { enabled: COARSE && pageActive });
   const active = pageActive && (COARSE ? inView : hovering);
 
-  // Parking the page never fires pointerleave — drop a stale hover so the
-  // card doesn't silently re-decode when the user navigates back.
+  // Parking the page never fires pointerleave — drop a stale hover (the whole
+  // row's, under a provider) so nothing silently re-decodes on the way back.
   useEffect(() => {
-    if (!pageActive) setHovering(false);
-  }, [pageActive]);
+    if (!pageActive) reset();
+  }, [pageActive, reset]);
 
   // Fetch the full figure on first activation. getFigureData is
   // promise-cached in api.js, so repeat hovers/scroll-bys are free.
   useEffect(() => {
     if (!active || full) return;
     let alive = true;
-    const fetcher = fetchData || ((id) => getFigureData(`/api/figures/${id}/data`));
+    const fetcher = fetchData || ((id) => getFigureData(figureDataUrl(id)));
     fetcher(item.id)
       .then((d) => {
         if (alive) setFull(d);
@@ -84,10 +92,10 @@ export default function FigureCard({ item, onSelect, badges, fetchData }) {
       className="gallery-card"
       // Touch devices activate via the in-view observer instead — a tap's
       // synthetic pointerenter should go straight to the dialog, not decode.
-      onPointerEnter={COARSE ? undefined : () => setHovering(true)}
-      onPointerLeave={COARSE ? undefined : () => setHovering(false)}
-      onFocus={COARSE ? undefined : () => setHovering(true)}
-      onBlur={COARSE ? undefined : () => setHovering(false)}
+      onPointerEnter={COARSE ? undefined : onEnter}
+      onPointerLeave={COARSE ? undefined : onLeave}
+      onFocus={COARSE ? undefined : onEnter}
+      onBlur={COARSE ? undefined : onLeave}
       onClick={() => onSelect(item)}
     >
       <div

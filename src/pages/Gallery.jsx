@@ -2,23 +2,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import FigureCard from "../components/FigureCard.jsx";
 import FigureDialog from "../components/FigureDialog.jsx";
-import { getGalleryPage } from "../lib/api.js";
+import { descriptorFor, getGalleryPage } from "../lib/api.js";
 import { usePageActive } from "../lib/pageActiveContext.js";
+import { isCoarsePointer } from "../lib/utils.js";
+import { RowHoverProvider } from "../hooks/useRowHover.jsx";
 import "./Gallery.css";
 
 // Community gallery: an infinite-scroll grid of approved figures. Cards render
 // the tiny text thumbnail stored in D1 (a few KB each — no R2 reads for the
-// grid); hovering/focusing a card lazily fetches the full JSON once and plays
-// it in place; clicking opens the shared info dialog.
+// grid); hovering/focusing a card decodes that card's whole ROW, each one
+// lazily fetching the full JSON once and playing it in place; clicking opens
+// the shared info dialog.
 
-const descriptorFor = (item) => ({
-  key: item.id,
-  name: item.name,
-  author: item.author,
-  url: `/api/figures/${item.id}/data`,
-  createdAt: item.createdAt,
-  framesCount: item.framesCount,
-});
+// Touch devices decode on scroll-into-view instead (FigureCard's own COARSE
+// branch), so the row choreography has nothing to drive there.
+const COARSE = isCoarsePointer();
 
 export default function Gallery() {
   const [items, setItems] = useState([]);
@@ -28,6 +26,7 @@ export default function Gallery() {
   const [selected, setSelected] = useState(null);
   const loadingRef = useRef(false);
   const sentinelRef = useRef(null);
+  const gridRef = useRef(null);
   // False while this page sits parked in a hidden keep-alive layer — the
   // layer is visibility:hidden, which does NOT stop IntersectionObservers,
   // so the infinite scroll must switch itself off explicitly.
@@ -86,15 +85,18 @@ export default function Gallery() {
         </p>
       </header>
 
-      <main className="gallery-grid">
-        {items.map((item) => (
-          <FigureCard
-            key={item.id}
-            item={item}
-            onSelect={(it) => setSelected(descriptorFor(it))}
-          />
-        ))}
-      </main>
+      <RowHoverProvider gridRef={gridRef} count={items.length} enabled={!COARSE}>
+        <main className="gallery-grid" ref={gridRef}>
+          {items.map((item, index) => (
+            <FigureCard
+              key={item.id}
+              item={item}
+              index={index}
+              onSelect={(it) => setSelected(descriptorFor(it))}
+            />
+          ))}
+        </main>
+      </RowHoverProvider>
 
       {items.length === 0 && exhausted && (
         <p className="gallery-empty">

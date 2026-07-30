@@ -28,22 +28,7 @@
     gap: 14px;
 }
 
-.home-pill {
-    display: inline-block;
-    text-decoration: none;
-    text-transform: uppercase;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    color: #fff;
-    background-color: #0000ff;
-    padding: 4px 8px;
-    transition: opacity 0.15s ease;
-}
-
-.home-pill:hover {
-    opacity: 0.85;
-}
+/* .home-pill lives in global.css — always loaded, shared with /admin. */
 
 /* Band voice (main face, uppercase from .chapter-band__line) at
    toolbar scale — the 2-class selector beats the shared __line size. */
@@ -52,7 +37,7 @@
 }
 
 .gallery-tagline {
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--muted);
     margin-top: 8px;
 }
 
@@ -74,7 +59,7 @@
     padding: 0;
     text-align: left;
     background: #000;
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    border: 1px solid var(--faint);
     color: #fff;
     font: inherit;
     cursor: pointer;
@@ -83,12 +68,12 @@
 
 .gallery-card:hover,
 .gallery-card:focus-visible {
-    border-color: #0000ff;
+    border-color: var(--blue);
 }
 
 .gallery-card__screen {
     position: relative;
-    background: #050505;
+    background: var(--screen-bg);
     aspect-ratio: 4 / 3;
     display: flex;
     align-items: center;
@@ -103,7 +88,7 @@
     position: absolute;
     right: 8px;
     bottom: 6px;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--muted);
     font-size: 12px;
 }
 
@@ -113,7 +98,7 @@
     align-items: baseline;
     gap: 8px;
     padding: 8px 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.14);
+    border-top: 1px solid var(--faint);
     min-width: 0;
 }
 
@@ -139,14 +124,9 @@
     max-width: 1280px;
     margin: 48px auto;
     text-align: center;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--muted);
 }
 
 .gallery-sentinel {
     height: 1px;
-}
-
-.gallery-page :focus-visible {
-    outline: 2px solid #0000ff;
-    outline-offset: 2px;
 }

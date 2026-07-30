@@ -70,6 +70,12 @@ export default function AsciiPlayer({
   // so stacking it over the base reproduces the converter's two-layer look.
   const hasEdges = Array.isArray(data?.edgeFrames) && data.edgeFrames.length > 0;
 
+  // What the DOM currently shows: which frames array, and which index into it.
+  // The playback effect re-runs on every paused/busGated flip (About settle,
+  // route cover) — without this it rewrote frame 0 into all ~49 wall players in
+  // one commit, a ~20ms style+layout spike plus a visible snap-to-frame-0.
+  const shownRef = useRef({ frames: null, i: 0 });
+
   // ── playback ──
   // Layout effect so frame 0 is committed to the DOM before paint whenever
   // `data` swaps (the hero wall trades a downsampled copy for the full figure
@@ -90,22 +96,34 @@ export default function AsciiPlayer({
       else el.textContent = frame;
       // The edge layer is always plain text → textContent (never innerHTML).
       if (edgeRef.current) edgeRef.current.textContent = edgeFrames?.[i] ?? '';
+      shownRef.current = { frames, i };
     };
 
-    write(0);
+    // Fresh mount or data swap paints from frame 0; a paused/busGated flip
+    // finds its own frames already committed and resumes from the held index
+    // without touching the DOM (see shownRef above for why that matters).
+    const shown = shownRef.current;
+    let i = shown.frames === frames && shown.i < frames.length ? shown.i : 0;
+    if (shown.frames !== frames || shown.i !== i) write(i);
     if (paused || prefersReducedMotion() || frames.length <= 1) return;
 
     const interval = 1000 / (data.fps || 12);
     let raf = 0;
-    let i = 0;
-    let last = performance.now();
+    // Phase-stagger the shared cadence: the wall's players all mount in one
+    // commit, so a common start time makes every player rewrite its <pre> on
+    // the SAME frame forever — one wall-wide style+layout pass every 4th frame
+    // (measured 12–33ms) instead of a few cheap ones spread over each frame.
+    let last = performance.now() - Math.random() * interval;
     const tick = (now) => {
       // The intro roam owns the frame budget outright: hold the current frame
       // (rAF stays alive so playback resumes the moment the wall settles). A
       // user drag keeps playing — the wall is at rest-ish and fully visible
       // then, so the ASCII rewrites are cheap enough to run alongside it.
+      // The hold keeps the random phase offset: a bare `last = now` here would
+      // re-sync every player the moment the roam ends (all held to the same
+      // clock), undoing the mount-time stagger.
       if (busGated && isRoaming()) {
-        last = now;
+        last = now - Math.random() * interval;
         raf = requestAnimationFrame(tick);
         return;
       }
