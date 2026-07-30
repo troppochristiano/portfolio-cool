@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { clamp01, rgbToHex } from "../../lib/utils.js";
+import { capturePointer, clamp, pointerFracInRect, rgbToHex } from "../../lib/utils.js";
 
 const MIN_CROP = 0.02;
 
@@ -41,11 +41,8 @@ export function useCrop({
 
   // ── crop marquee + eyedropper (shared stage overlay) ──────────
   const overlayPos = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return {
-      x: clamp01((e.clientX - rect.left) / rect.width),
-      y: clamp01((e.clientY - rect.top) / rect.height),
-    };
+    const { x, y } = pointerFracInRect(e, e.currentTarget);
+    return { x, y };
   };
   const draftRect = (a, b) => ({
     x: Math.min(a.x, b.x),
@@ -98,7 +95,7 @@ export function useCrop({
       return;
     }
     if (!cropMode) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
+    capturePointer(e);
     cropStartRef.current = pos;
     setCropDraft({ ...pos, w: 0, h: 0 });
   };
@@ -126,17 +123,14 @@ export function useCrop({
   // rect be dragged (move) or resized from any edge/corner — every change
   // calls setCrop immediately, so the ASCII preview follows live.
   const stagePos = (e) => {
-    const rect = mediaBoxRef.current.getBoundingClientRect();
-    return {
-      x: clamp01((e.clientX - rect.left) / rect.width),
-      y: clamp01((e.clientY - rect.top) / rect.height),
-    };
+    const { x, y } = pointerFracInRect(e, mediaBoxRef.current);
+    return { x, y };
   };
   const applyCropEdit = (r, role, dx, dy) => {
     if (role === "move") {
       return {
-        x: Math.min(Math.max(0, r.x + dx), 1 - r.w),
-        y: Math.min(Math.max(0, r.y + dy), 1 - r.h),
+        x: clamp(r.x + dx, 0, 1 - r.w),
+        y: clamp(r.y + dy, 0, 1 - r.h),
         w: r.w,
         h: r.h,
       };
@@ -145,16 +139,16 @@ export function useCrop({
       y0 = r.y,
       x1 = r.x + r.w,
       y1 = r.y + r.h;
-    if (role.includes("w")) x0 = Math.min(Math.max(0, x0 + dx), x1 - MIN_CROP);
-    if (role.includes("e")) x1 = Math.max(Math.min(1, x1 + dx), x0 + MIN_CROP);
-    if (role.includes("n")) y0 = Math.min(Math.max(0, y0 + dy), y1 - MIN_CROP);
-    if (role.includes("s")) y1 = Math.max(Math.min(1, y1 + dy), y0 + MIN_CROP);
+    if (role.includes("w")) x0 = clamp(x0 + dx, 0, x1 - MIN_CROP);
+    if (role.includes("e")) x1 = clamp(x1 + dx, x0 + MIN_CROP, 1);
+    if (role.includes("n")) y0 = clamp(y0 + dy, 0, y1 - MIN_CROP);
+    if (role.includes("s")) y1 = clamp(y1 + dy, y0 + MIN_CROP, 1);
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   };
   const onCropEditDown = (role) => (e) => {
     e.preventDefault();
     e.stopPropagation(); // don't fall through to the marquee overlay
-    e.currentTarget.setPointerCapture(e.pointerId);
+    capturePointer(e);
     cropEditRef.current = { role, start: stagePos(e), rect: { ...crop } };
     if (mode === "baked") setMode("live"); // editing invalidates the baked view
   };

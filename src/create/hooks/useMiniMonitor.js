@@ -1,13 +1,23 @@
 import { useEffect, useRef, useState } from "react";
+import { capturePointer, clamp } from "../../lib/utils.js";
 
 /**
  * Mobile floating mini-monitor: appears when the main monitor scrolls out of
  * view, drags anywhere, taps back to the monitor, and can be dismissed (it
  * re-arms when the monitor scrolls back into view).
  */
-export function useMiniMonitor({ pageRef, monitorRef, hasSource }) {
+// The viewport the floating mini belongs to. This is the ONE definition —
+// the CSS no longer carries a matching media query, because two copies of a
+// breakpoint that must agree is a bug waiting to happen and the loop needs
+// the answer in JS anyway (it skips writing to a mini nobody can see).
+const MINI_MQ = "(max-width: 860px)";
+
+export function useMiniMonitor({ monitorRef, hasSource, drawFullscreen }) {
   const [miniVisible, setMiniVisible] = useState(false); // shown when the monitor scrolls off
   const [miniDismissed, setMiniDismissed] = useState(false); // user closed it
+  const [narrow, setNarrow] = useState(
+    () => window.matchMedia?.(MINI_MQ).matches ?? false,
+  );
   const miniElRef = useRef(null); // the floating mini container (for drag)
   const miniPosRef = useRef(null); // dragged position {left, top} or null (default corner)
   const miniDragRef = useRef(null); // in-flight drag state
@@ -21,7 +31,6 @@ export function useMiniMonitor({ pageRef, monitorRef, hasSource }) {
   // and visualViewport (mobile address-bar show/hide), so it fires on real
   // devices regardless of which element owns the scroll.
   useEffect(() => {
-    const page = pageRef.current;
     const mon = monitorRef.current;
     if (!mon || !hasSource) {
       setMiniVisible(false);
@@ -34,22 +43,49 @@ export function useMiniMonitor({ pageRef, monitorRef, hasSource }) {
       setMiniVisible((prev) => (prev === off ? prev : off)); // no re-render unless it changed
       if (!off) setMiniDismissed((d) => (d ? false : d)); // re-arm when the monitor is back
     };
+    // Coalesced behind one frame. `check` forces layout, and it was bound to
+    // enough sources to run several times per scroll event — on mobile
+    // visualViewport alone fires continuously through momentum scrolling and
+    // the address bar showing/hiding, each read landing on a document the
+    // 30fps <pre> write had just invalidated. Nothing here needs to resolve
+    // faster than a frame.
+    let scheduled = 0;
+    const schedule = () => {
+      if (!scheduled)
+        scheduled = requestAnimationFrame(() => {
+          scheduled = 0;
+          check();
+        });
+    };
     check();
-    page?.addEventListener("scroll", check, { passive: true });
-    window.addEventListener("scroll", check, true);
-    window.addEventListener("resize", check);
+    // The window listener captures, so it already sees the page container's
+    // (non-bubbling) scroll events — a separate listener on `page` only
+    // doubled the work.
+    window.addEventListener("scroll", schedule, { capture: true, passive: true });
+    window.addEventListener("resize", schedule, { passive: true });
     const vv = window.visualViewport;
-    vv?.addEventListener("scroll", check);
-    vv?.addEventListener("resize", check);
+    vv?.addEventListener("scroll", schedule, { passive: true });
+    vv?.addEventListener("resize", schedule, { passive: true });
     return () => {
-      page?.removeEventListener("scroll", check);
-      window.removeEventListener("scroll", check, true);
-      window.removeEventListener("resize", check);
-      vv?.removeEventListener("scroll", check);
-      vv?.removeEventListener("resize", check);
+      if (scheduled) cancelAnimationFrame(scheduled);
+      window.removeEventListener("scroll", schedule, { capture: true });
+      window.removeEventListener("resize", schedule);
+      vv?.removeEventListener("scroll", schedule);
+      vv?.removeEventListener("resize", schedule);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasSource]);
+
+  // Viewport watch: the mini is a phone affordance, so above the breakpoint it
+  // must not merely be invisible — it must not be written to at all.
+  useEffect(() => {
+    const mq = window.matchMedia?.(MINI_MQ);
+    if (!mq) return;
+    const onChange = (e) => setNarrow(e.matches);
+    setNarrow(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   // ── drag (and tap-to-jump) ────────────────────────────────────
   // Position lives in a ref, mutated on the DOM directly during a drag so the
@@ -67,11 +103,7 @@ export function useMiniMonitor({ pageRef, monitorRef, hasSource }) {
       baseT: r.top,
     };
     draggedRef.current = false;
-    try {
-      el.setPointerCapture(e.pointerId);
-    } catch {
-      /* fine */
-    }
+    capturePointer(e, el);
   };
   const onMiniMove = (e) => {
     const d = miniDragRef.current;
@@ -81,14 +113,8 @@ export function useMiniMonitor({ pageRef, monitorRef, hasSource }) {
     if (!draggedRef.current && Math.hypot(dx, dy) < 5) return; // ignore jitter → keep tap semantics
     draggedRef.current = true;
     const el = miniElRef.current;
-    const left = Math.min(
-      Math.max(6, d.baseL + dx),
-      window.innerWidth - el.offsetWidth - 6,
-    );
-    const top = Math.min(
-      Math.max(6, d.baseT + dy),
-      window.innerHeight - el.offsetHeight - 6,
-    );
+    const left = clamp(d.baseL + dx, 6, window.innerWidth - el.offsetWidth - 6);
+    const top = clamp(d.baseT + dy, 6, window.innerHeight - el.offsetHeight - 6);
     miniPosRef.current = { left, top };
     el.style.left = `${left}px`;
     el.style.top = `${top}px`;
@@ -114,7 +140,17 @@ export function useMiniMonitor({ pageRef, monitorRef, hasSource }) {
       }
     : null;
 
+  // The single answer to "is the mini on screen right now" — CSS reads it as
+  // .is-visible, and Create uses it to decide whether the mini's <pre> exists
+  // at all. Fullscreen draw shows it on any viewport (it's the only preview
+  // you have in there); otherwise it's phones only.
+  const miniShown =
+    hasSource &&
+    !miniDismissed &&
+    (drawFullscreen || (narrow && miniVisible));
+
   return {
+    miniShown,
     miniVisible,
     miniDismissed,
     setMiniDismissed,

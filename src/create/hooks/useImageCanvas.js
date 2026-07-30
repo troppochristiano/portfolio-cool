@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { hexToRgb } from "../asciify.js";
+import { capturePointer } from "../../lib/utils.js";
 import { MAX_PHOTO, PAPER_W, PAPER_H } from "../createConstants.js";
 
 /**
@@ -23,6 +24,7 @@ export function useImageCanvas(compositeRef, {
   const photoCanvasRef = useRef(null); // offscreen: the uploaded photo (or white paper); cut erases here
   const strokeCanvasRef = useRef(null); // offscreen: brush strokes; eraser erases here + heals cuts
   const originalCanvasRef = useRef(null); // pristine photo layer (photo or white) — erase/trash repaint from it
+  const erasePatternRef = useRef(null); // cached CanvasPattern of the original (erase heals through it)
 
   const [hasPhoto, setHasPhoto] = useState(false);
   // Upload-first intro for the image source: landing straight on blank paper
@@ -51,6 +53,13 @@ export function useImageCanvas(compositeRef, {
   // Strokes are composited unless "draw on photo" is off (photo-only output).
   // Read through a ref so compositeLayers stays a stable, dependency-free callback.
   const includeStrokesRef = useRef(true);
+  // The composite canvas is the sampler's source, and a canvas — unlike a
+  // <video>'s currentTime — offers no way to ask "did your pixels change?".
+  // compositeLayers is the one choke point every mutation goes through
+  // (strokes, fill, undo/redo, trash, layer resize, the draw-on-photo
+  // toggle), so a counter bumped here IS that signal. The preview loop reads
+  // it to skip converting a frame that would come out byte-identical.
+  const sourceVersionRef = useRef(0);
   const compositeLayers = useCallback(() => {
     const comp = compositeRef.current;
     const photo = photoCanvasRef.current;
@@ -60,6 +69,7 @@ export function useImageCanvas(compositeRef, {
     ctx.clearRect(0, 0, comp.width, comp.height);
     ctx.drawImage(photo, 0, 0);
     if (includeStrokesRef.current) ctx.drawImage(stroke, 0, 0);
+    sourceVersionRef.current += 1;
   }, [compositeRef]);
 
   const resizeLayers = useCallback(
@@ -86,9 +96,12 @@ export function useImageCanvas(compositeRef, {
       }
       // the photo layer starts as a copy of the pristine original
       photo.getContext("2d").drawImage(orig, 0, 0);
+      // a pattern snapshots its source, so a new original invalidates it
+      erasePatternRef.current = null;
       // new layer dimensions orphan every snapshot
       historyRef.current = [];
       redoRef.current = [];
+      historyBytesRef.current = 0;
       setHistTick((t) => t + 1);
       compositeLayers();
     },
@@ -194,12 +207,14 @@ export function useImageCanvas(compositeRef, {
   );
 
   // ── drawing (on the composite canvas, into the layers) ────────
-  const drawPos = (e) => {
+  // `rect` is optional: handlers that already measured the canvas this event
+  // pass theirs in rather than forcing a second layout (see onCanvasMove).
+  const drawPos = (e, rect) => {
     const c = compositeRef.current;
-    const rect = c.getBoundingClientRect();
+    const r = rect || c.getBoundingClientRect();
     return {
-      x: (e.clientX - rect.left) * (c.width / rect.width),
-      y: (e.clientY - rect.top) * (c.height / rect.height),
+      x: (e.clientX - r.left) * (c.width / r.width),
+      y: (e.clientY - r.top) * (c.height / r.height),
     };
   };
   const strokeTo = (pt) => {
@@ -239,9 +254,16 @@ export function useImageCanvas(compositeRef, {
       ctx.lineJoin = "round";
       ctx.lineWidth = brush;
       ctx.globalCompositeOperation = pass.gco;
-      const paint =
-        pass.paint ??
-        ctx.createPattern(originalCanvasRef.current, "no-repeat");
+      // The heal pattern was rebuilt from the full (up to 1280px) original on
+      // every pointermove of an erase drag. The original only changes when the
+      // layers are resized, so build it once and let resizeLayers drop it.
+      if (pass.paint === null && !erasePatternRef.current) {
+        erasePatternRef.current = ctx.createPattern(
+          originalCanvasRef.current,
+          "no-repeat",
+        );
+      }
+      const paint = pass.paint ?? erasePatternRef.current;
       ctx.strokeStyle = paint;
       ctx.fillStyle = paint;
       if (last) {
@@ -326,7 +348,17 @@ export function useImageCanvas(compositeRef, {
   };
 
   // ── undo history ──────────────────────────────────────────────
-  const HISTORY_MAX = 15; // ~5 MB per captured layer at MAX_PHOTO — keep it shallow
+  // Two limits, and the byte budget is the one that matters. A depth cap alone
+  // is a lie about memory: an entry is 1–2 full-canvas ImageData, so at
+  // MAX_PHOTO a "shallow" 15 steps is up to ~150 MB of retained pixels —
+  // enough to get the tab killed on a phone mid-drawing. Budget first, depth
+  // as a secondary bound; a single entry over budget is still kept (one step
+  // of undo is the floor).
+  const HISTORY_MAX = 15;
+  const HISTORY_MAX_BYTES = 48 * 1024 * 1024;
+  const historyBytesRef = useRef(0);
+  const entryBytes = (entry) =>
+    (entry.stroke?.data.byteLength || 0) + (entry.photo?.data.byteLength || 0);
   const layerData = (canvas) =>
     canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
   // capture the layers an action is about to dirty; a new action always
@@ -336,7 +368,14 @@ export function useImageCanvas(compositeRef, {
     if (withStroke) entry.stroke = layerData(strokeCanvasRef.current);
     if (withPhoto) entry.photo = layerData(photoCanvasRef.current);
     historyRef.current.push(entry);
-    if (historyRef.current.length > HISTORY_MAX) historyRef.current.shift();
+    historyBytesRef.current += entryBytes(entry);
+    while (
+      historyRef.current.length > 1 &&
+      (historyRef.current.length > HISTORY_MAX ||
+        historyBytesRef.current > HISTORY_MAX_BYTES)
+    ) {
+      historyBytesRef.current -= entryBytes(historyRef.current.shift());
+    }
     redoRef.current = [];
     setHistTick((t) => t + 1);
   };
@@ -360,13 +399,16 @@ export function useImageCanvas(compositeRef, {
   const undo = () => {
     const entry = historyRef.current.pop();
     if (!entry) return;
+    historyBytesRef.current -= entryBytes(entry);
     redoRef.current.push(applyEntry(entry));
     setHistTick((t) => t + 1);
   };
   const redo = () => {
     const entry = redoRef.current.pop();
     if (!entry) return;
-    historyRef.current.push(applyEntry(entry));
+    const swapped = applyEntry(entry);
+    historyRef.current.push(swapped);
+    historyBytesRef.current += entryBytes(swapped);
     setHistTick((t) => t + 1);
   };
   const canUndo = historyRef.current.length > 0;
@@ -385,19 +427,15 @@ export function useImageCanvas(compositeRef, {
     pushHistory(tool !== "cut", tool === "cut" || tool === "erase");
     // capture keeps the stroke tracking outside the canvas; a pointer that
     // vanished between events must not kill the stroke, so failure is fine
-    try {
-      compositeRef.current.setPointerCapture(e.pointerId);
-    } catch {
-      /* stroke still draws */
-    }
+    capturePointer(e, compositeRef.current);
     drawingRef.current = true;
     lastPtRef.current = null;
     strokeTo(drawPos(e));
   };
-  const onDrawMove = (e) => {
+  const onDrawMove = (e, rect) => {
     if (!drawingRef.current) return;
     e.preventDefault();
-    strokeTo(drawPos(e));
+    strokeTo(drawPos(e, rect));
   };
   const onDrawUp = () => {
     drawingRef.current = false;
@@ -406,11 +444,11 @@ export function useImageCanvas(compositeRef, {
   // A ring cursor the size of the brush footprint on screen (brush is in backing
   // px; the canvas is displayed scaled, so multiply by the display/backing ratio).
   const brushCursorRef = useRef(null);
-  const moveBrushCursor = (e) => {
+  const moveBrushCursor = (e, measured) => {
     const el = brushCursorRef.current;
     const canvas = compositeRef.current;
     if (!el || !canvas) return;
-    const rect = canvas.getBoundingClientRect();
+    const rect = measured || canvas.getBoundingClientRect();
     const d = brush * (rect.width / (canvas.width || 1));
     el.style.width = `${d}px`;
     el.style.height = `${d}px`;
@@ -421,9 +459,14 @@ export function useImageCanvas(compositeRef, {
   const hideBrushCursor = () => {
     if (brushCursorRef.current) brushCursorRef.current.style.display = "none";
   };
+  // ONE rect read, shared by the ring and the stroke. These used to measure
+  // independently with five style writes between them, so every pointer
+  // sample forced layout twice — and coalesced moves reach 120Hz on a phone.
   const onCanvasMove = (e) => {
-    moveBrushCursor(e);
-    onDrawMove(e);
+    const canvas = compositeRef.current;
+    const rect = canvas ? canvas.getBoundingClientRect() : null;
+    moveBrushCursor(e, rect);
+    onDrawMove(e, rect);
   };
   const onCanvasLeave = (e) => {
     hideBrushCursor();
@@ -460,6 +503,7 @@ export function useImageCanvas(compositeRef, {
     brushShade,
     setBrushShade,
     brushCursorRef,
+    sourceVersionRef,
     loadImage,
     onDrawDown,
     onDrawUp,
