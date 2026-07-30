@@ -10,16 +10,29 @@ import {
 import gsap from "gsap";
 // Steps stay a static import (pure math, no three.js) so the preload URL list
 // builds immediately. The viewer and wall pull in all of three.js, so they load
-// as split chunks — kicked off eagerly here (not on first render) to download in
-// parallel with the multi-second texture preload instead of after it.
+// as split chunks — kicked off from the warmupOk effect below (not on first
+// render) to download in parallel with the multi-second texture preload instead
+// of after it. Memoized starters instead of module-scope import(): a bare
+// import() here fired ~140KB gz of hero-only chunks on EVERY route, so a
+// deep-linked /gallery or /create paid for three.js while its own assets
+// loaded — the exact contention warmupOk exists to prevent for textures.
 import { generateSteps, subsampleSteps } from "./eye-ballz-viewer/steps.js";
-const eyeBallzImport = import("./eye-ballz-viewer");
+let eyeBallzImportP = null;
+const startEyeBallzImport = () => {
+  if (!eyeBallzImportP) eyeBallzImportP = import("./eye-ballz-viewer");
+  return eyeBallzImportP;
+};
 const EyeBallzViewer = lazy(() =>
-  eyeBallzImport.then((m) => ({ default: m.EyeBallzViewer })),
+  startEyeBallzImport().then((m) => ({ default: m.EyeBallzViewer })),
 );
-const asciiGalleryImport = import("./components/AsciiGallery");
+let asciiGalleryImportP = null;
+const startAsciiGalleryImport = () => {
+  if (!asciiGalleryImportP)
+    asciiGalleryImportP = import("./components/AsciiGallery");
+  return asciiGalleryImportP;
+};
 const AsciiGallery = lazy(() =>
-  asciiGalleryImport.then((m) => ({ default: m.AsciiGallery })),
+  startAsciiGalleryImport().then((m) => ({ default: m.AsciiGallery })),
 );
 import { photos } from "./photos";
 import { Nav } from "./components/Nav";
@@ -28,9 +41,16 @@ import { UploadsToggle } from "./components/UploadsToggle";
 import { IntroOverlay } from "./components/IntroOverlay";
 import { AboutOverlay } from "./components/AboutOverlay";
 import FigureDialog from "./components/FigureDialog";
+import { IntroSkipPrompt } from "./components/IntroSkipPrompt";
 import { getRandomFigures } from "./lib/api";
 import { preloadImage, runPool } from "./lib/preload";
-import { isCoarsePointer, prefersReducedMotion } from "./lib/utils.js";
+import { getIntroSkipPref } from "./lib/introPref.js";
+import {
+  isCoarsePointer,
+  prefersReducedMotion,
+  queryNumber,
+  queryParam,
+} from "./lib/utils.js";
 
 // Map photos.js entries into the viewer's photo-config shape (same as the bundled
 // demo). No thumbnail: it only fed the debug panel's photo switcher, and the
@@ -84,8 +104,7 @@ const COMMUNITY_COUNT = 49;
 // 10×10 grid (coarser head tracking, ~¼ the frames), `?grid=5x3` for a rectangle.
 // Absent/invalid → null → the full source grid (production behavior, unchanged).
 const PREVIEW_GRID = (() => {
-  if (typeof window === "undefined") return null;
-  const raw = new URLSearchParams(window.location.search).get("grid");
+  const raw = queryParam("grid");
   if (!raw) return null;
   const [x, y = x] = raw.split("x").map((n) => parseInt(n, 10));
   return Number.isInteger(x) && x > 0 && Number.isInteger(y) && y > 0
@@ -93,10 +112,27 @@ const PREVIEW_GRID = (() => {
     : null;
 })();
 
+// Dev/preview knob: `?slowload=300` pads each preload task by ~300ms so the
+// corner progress readout is watchable on localhost (cached loads finish in
+// under a second otherwise — same spirit as `?grid=`). Absent/invalid → 0
+// (production behavior, unchanged).
+const SLOW_LOAD_MS = queryNumber("slowload", { min: 0, max: 2000, fallback: 0 });
+
 // Reduced motion: skip the cinematic intro entirely — a plain black cover fades
 // out once the scene is warm. Evaluated once; mid-session OS toggles are rare
 // and a reload picks the change up.
 const REDUCED_MOTION = prefersReducedMotion();
+
+// Corner-slot loading readout: `[####______]  42%` — ten slots. floor, not
+// round: the bar only fills at a true 100, which never renders (the corner
+// swaps to the skip pill at warm). padStart keeps the mono line width stable
+// (paired with white-space: pre on .intro-progress).
+const BAR_SLOTS = 10;
+const asciiBar = (pct) => {
+  const filled = Math.floor((pct / 100) * BAR_SLOTS);
+  const bar = "#".repeat(filled) + "_".repeat(BAR_SLOTS - filled);
+  return `[${bar}] ${String(pct).padStart(3, " ")}%`;
+};
 
 // Code-side toggle: play the face's scripted look-around gesture while the
 // containers fly through the intro tunnel. Off for now — the circular gaze was
@@ -135,9 +171,6 @@ export default function App({ suspended = false }) {
   const heroFrozen = suspended || (aboutOpen && aboutSettled);
   // Section the About overlay should scroll to once open (set by the header shortcuts).
   const [aboutTarget, setAboutTarget] = useState(null);
-  // Show the "scroll to open" hint only where wheel-to-open is active (fine pointer) and
-  // only until the overlay has been opened at least once.
-  const [showScrollHint, setShowScrollHint] = useState(false);
   // Reveal as soon as the hero avatar is warm — it's the focal point. The floating
   // ASCII wall is ambient background, so it no longer holds the overlay hostage to its
   // ~3.3MB of figure JSON; it fades itself in a beat later behind the hero.
@@ -147,19 +180,39 @@ export default function App({ suspended = false }) {
   // Cinematic intro state machine. Phases: swarm forms the headline ("forming",
   // doubling as the loading screen) -> face fades in behind it ("face") -> swarm
   // scatters ("disperse") -> gallery planes roam then settle ("roam") -> "done".
-  // Reduced motion starts at "done" (plain cover fade instead).
+  // Reduced motion starts at "done" (plain cover fade instead) — and so do
+  // returning visitors who opted out via the post-skip prompt. The pref is read
+  // once per mount (lazy initializer, not module scope, so dev HMR remounts
+  // pick up a cleared pref without a reload).
+  const [introPrefSkip] = useState(getIntroSkipPref);
+  const startedDone = REDUCED_MOTION || introPrefSkip;
   const [introPhase, setIntroPhase] = useState(
-    REDUCED_MOTION ? "done" : "forming",
+    startedDone ? "done" : "forming",
   );
   const [textFormed, setTextFormed] = useState(false);
-  // Reduced-motion cover: unmounted after its fade-out transition ends.
-  const [coverGone, setCoverGone] = useState(!REDUCED_MOTION);
+  // No-cinematic cover (reduced motion + persisted skip pref): unmounted after
+  // its fade-out transition ends.
+  const [coverGone, setCoverGone] = useState(!startedDone);
   const introDone = introPhase === "done";
-  const skipIntro = () => setIntroPhase("done");
+  // Corner progress readout: 0–90 = stage A (HTTP preload, counted per file);
+  // 90–99 = timed creep while the viewer re-decodes + GPU-uploads (stage B,
+  // deliberately uninstrumented). The corner swaps to the skip pill at `warm`.
+  const [loadPct, setLoadPct] = useState(0);
+  // Post-skip preference prompt. Opened ONLY by an explicit skip click — the
+  // suspend-forces-done effect below calls setIntroPhase directly so leaving
+  // mid-intro never asks.
+  const [skipPromptOpen, setSkipPromptOpen] = useState(false);
+  // Stable identity: the prompt keys its auto-dismiss countdown on this.
+  const closeSkipPrompt = useCallback(() => setSkipPromptOpen(false), []);
+  const skipIntro = () => {
+    setIntroPhase("done");
+    setSkipPromptOpen(true);
+  };
 
   // Leaving mid-intro = skipping. Once the intro has actually been on screen
   // (first unsuspended render), navigating away jumps it to "done" so a
-  // half-formed swarm is never resumed on return.
+  // half-formed swarm is never resumed on return. Direct setIntroPhase, NOT
+  // skipIntro — this path must never open the preference prompt.
   const introStartedRef = useRef(false);
   useEffect(() => {
     if (!suspended) {
@@ -204,11 +257,23 @@ export default function App({ suspended = false }) {
     };
   }, [suspended, warmupOk]);
 
+  // Hero chunk kickoff rides the same deferral as the texture preload: on "/"
+  // warmupOk is true from the first render, so the viewer + wall chunks start
+  // downloading immediately (parallel with the preload, as before); on a deep
+  // link they wait for the routed page to settle. The lazy() factories call
+  // the same starters, so a mount can never find an unstarted import.
+  useEffect(() => {
+    if (!warmupOk) return;
+    startEyeBallzImport();
+    startAsciiGalleryImport();
+  }, [warmupOk]);
+
   // A page covering the hero closes anything that could reopen in a stale state.
   useEffect(() => {
     if (!suspended) return;
     setAboutOpen(false);
     setDialogFigure(null);
+    setSkipPromptOpen(false);
   }, [suspended]);
 
   // forming -> face once the headline is assembled AND the avatar is warm; with the
@@ -304,17 +369,8 @@ export default function App({ suspended = false }) {
 
   // Scroll-to-open is owned by the dissolve effect (useDissolveReveal inside
   // AboutOverlay): a downward wheel on the closed hero scrubs the overlay open.
-
-  // Reveal the "^" open hint once the intro is over (both pointer types — it signals
-  // the scroll/swipe-up-to-open gesture); hide it for good once the overlay opens.
-  useEffect(() => {
-    if (!introDone) return;
-    setShowScrollHint(true);
-  }, [introDone]);
-
-  useEffect(() => {
-    if (aboutOpen) setShowScrollHint(false);
-  }, [aboutOpen]);
+  // The open hint itself is permanent — it rides .ui-chrome, which already mounts
+  // only once the intro is over, and stays put after the overlay has been opened.
 
   // Safety net: never let the overlay hang if a ready signal fails to fire (e.g. an
   // asset error). Once the scene is mounted, reveal after at most 12s regardless.
@@ -364,16 +420,50 @@ export default function App({ suspended = false }) {
   useEffect(() => {
     if (!warmupOk) return;
     let cancelled = false;
-    const tasks = preloadUrls.map((u) => () => preloadImage(u));
+    let done = 0;
+    // Only read inside onEach, which can't fire when the list is empty (the
+    // avatarHidden case — warm is true from boot there, so the corner readout
+    // never mounts either).
+    const total = preloadUrls.length;
+    const tasks = preloadUrls.map((u) => () => {
+      const p = preloadImage(u);
+      // ?slowload dev knob: stretch stage A so the readout is observable.
+      return SLOW_LOAD_MS
+        ? p.then(() => new Promise((r) => setTimeout(r, SLOW_LOAD_MS)))
+        : p;
+    });
     // 24-wide: Cloudflare serves HTTP/2+ over one multiplexed connection, so a
     // wider pool just keeps the pipe full across ~200 small files.
-    runPool(tasks, 24).then(() => {
+    runPool(tasks, 24, () => {
+      // StrictMode dev double-mount: the torn-down twin's pool keeps resolving
+      // (promises don't cancel) — the guard stops it bumping the live counter.
+      if (cancelled) return;
+      done += 1;
+      // Stage A owns 0–90. Math.max keeps the readout monotonic; rounding to
+      // whole percents collapses ~200 calls into ≤91 distinct values, and
+      // React bails on same-value setState — no throttle needed (the heavy
+      // scene subtree isn't even mounted until `preloaded`).
+      setLoadPct((p) => Math.max(p, Math.round((done / total) * 90)));
+    }).then(() => {
       if (!cancelled) setPreloaded(true);
     });
     return () => {
       cancelled = true;
     };
   }, [preloadUrls, warmupOk]);
+
+  // Stage B tail: between "assets in HTTP cache" (preloaded) and "avatar warm"
+  // the viewer re-reads the same URLs into three.js textures and uploads them —
+  // seconds on phones, deliberately uninstrumented. Creep the readout 90 -> 99
+  // so the bar keeps moving, park at 99 until `warm` swaps the corner over.
+  useEffect(() => {
+    if (!preloaded || warm) return;
+    const id = window.setInterval(
+      () => setLoadPct((p) => Math.min(99, Math.max(p, 90) + 1)),
+      350,
+    );
+    return () => window.clearInterval(id);
+  }, [preloaded, warm]);
 
   return (
     <>
@@ -393,7 +483,26 @@ export default function App({ suspended = false }) {
             }
           />
         )}
-      {!introDone && !suspended && (
+      {/* Corner slot, one occupant at a time: ascii progress while the hero
+          loads -> skip pill once warm (the swap IS the ready signal) -> the
+          skip-preference prompt after an explicit skip. The progress line also
+          serves the cover path (reduced motion / persisted pref): z-11 paints
+          above the z-10 cover, so those starts aren't a mute black screen. On
+          touch the prompt un-docks from the corner (see global.css) — the
+          bottom-right anchor belongs to the About hint there. */}
+      {!suspended && !warm && (
+        <div
+          className="intro-progress"
+          role="progressbar"
+          aria-label="loading"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={loadPct}
+        >
+          <span aria-hidden="true">{asciiBar(loadPct)}</span>
+        </div>
+      )}
+      {warm && !introDone && !suspended && (
         <button
           type="button"
           className="corner-pill intro-skip"
@@ -402,8 +511,15 @@ export default function App({ suspended = false }) {
           skip intro
         </button>
       )}
-      {/* Reduced motion: no swarm/roam — a plain cover that fades once warm. */}
-      {REDUCED_MOTION && !coverGone && (
+      {/* No introDone term here: the skip click that opens the prompt also
+          flips introDone — gating on it would unmount the prompt instantly. */}
+      {skipPromptOpen && !suspended && (
+        <IntroSkipPrompt onClose={closeSkipPrompt} />
+      )}
+      {/* No-cinematic starts (reduced motion OR persisted skip pref): a plain
+          cover that fades once warm. coverGone initializes true for everyone
+          else, so this never renders on cinematic boots. */}
+      {!coverGone && (
         <div
           className={`intro-cover${warm ? " is-hidden" : ""}`}
           onTransitionEnd={() => setCoverGone(true)}
@@ -481,11 +597,6 @@ export default function App({ suspended = false }) {
               }}
             />
             <div className="about-trigger-group">
-              {showScrollHint && (
-                <span className="about-trigger-caret" aria-hidden="true">
-                  ^
-                </span>
-              )}
               {/* Scroll hint doubling as the overlay's open button. */}
               <button
                 type="button"
@@ -494,6 +605,7 @@ export default function App({ suspended = false }) {
               >
                 {isCoarsePointer() ? "swipe" : "scroll"}
               </button>
+              <span className="about-trigger-line" aria-hidden="true" />
             </div>
             {/* Renders nothing unless the admin secret in localStorage checks
                 out against the API — visitors never see it. */}

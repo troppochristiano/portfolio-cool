@@ -2,14 +2,17 @@ import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import HeroLayout from "./components/HeroLayout.jsx";
-import Create from "./pages/Create";
 import "./styles/global.css";
 // Side effect: registers the block-reveal leave/enter tweens into the
 // pageTransitions seam that RouteTransition drives.
 import "./lib/blockRevealTransition.js";
 
-// Lazy chunks: neither route belongs in the hero bundle — the gallery is a
-// separate page and the admin queue is only ever visited by the site owner.
+// Lazy chunks: none of these routes belong in the hero bundle — the gallery is
+// a separate page, the admin queue is only ever visited by the site owner, and
+// the converter (Create + its whole create/ subtree) is a tool page most
+// visitors never open. AdminCreate imports Create too, so both routes share
+// the same split chunk.
+const Create = lazy(() => import("./pages/Create"));
 const Gallery = lazy(() => import("./pages/Gallery"));
 const Admin = lazy(() => import("./pages/Admin"));
 const AdminCreate = lazy(() => import("./pages/AdminCreate"));
@@ -24,7 +27,14 @@ createRoot(document.getElementById("root")).render(
         <Route element={<HeroLayout />}>
           <Route index element={null} />
           {/* The merged ASCII media converter. */}
-          <Route path="create" element={<Create />} />
+          <Route
+            path="create"
+            element={
+              <Suspense fallback={null}>
+                <Create />
+              </Suspense>
+            }
+          />
           {/* Community uploads (approved) — infinite scroll grid. */}
           <Route
             path="gallery"
