@@ -30,6 +30,26 @@ export function getGalleryPage(cursor, limit = 24) {
   return getJson(`/api/figures?${qs}`);
 }
 
+/** The public data route for one figure — the single spelling of this URL.
+ *  Hidden figures 404 here; admin views fetch with a bearer (adminFigureData). */
+export const figureDataUrl = (id) => `/api/figures/${id}/data`;
+
+/** 'clip' | 'photo' from a list item's metadata. */
+export const typeOf = (item) => ((item.framesCount ?? 1) > 1 ? 'clip' : 'photo');
+
+/** FigureDialog/FigureCard descriptor from a list item. Admin views pass
+ *  `fetchData` so the dialog fetches with the bearer header instead of the
+ *  public route. */
+export const descriptorFor = (item, { fetchData } = {}) => ({
+  key: item.id,
+  name: item.name,
+  author: item.author,
+  url: figureDataUrl(item.id),
+  createdAt: item.createdAt,
+  framesCount: item.framesCount,
+  ...(fetchData ? { fetchData } : {}),
+});
+
 const dataCache = new Map(); // url -> Promise<figure.json>
 
 /** Full figure.json by URL (static /data/*.json or /api/figures/:id/data). */
@@ -72,7 +92,7 @@ export function adminList(secret, status = 'approved') {
 
 export function adminFigureData(id, secret) {
   // Not memoized: pending data is only viewed once and freed on moderation.
-  return getJson(`/api/figures/${id}/data`, { headers: bearer(secret) });
+  return getJson(figureDataUrl(id), { headers: bearer(secret) });
 }
 
 /** Publish a pending figure; `hero: true` also puts it on the hero wall. */

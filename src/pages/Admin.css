@@ -41,7 +41,7 @@
 
 .admin-tab {
     background: none;
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    border: 1px solid var(--line-soft);
     color: #fff;
     font: inherit;
     text-transform: uppercase;
@@ -58,8 +58,8 @@
 }
 
 .admin-tab.is-active {
-    background: #0000ff;
-    border-color: #0000ff;
+    background: var(--blue);
+    border-color: var(--blue);
 }
 
 /* the mirrored gallery reuses .gallery-grid from Gallery.css */
@@ -80,34 +80,17 @@
 
 .admin-meter__bar {
     height: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    border: 1px solid var(--line-soft);
 }
 
 .admin-meter__bar span {
     display: block;
     height: 100%;
-    background: #0000ff;
+    background: var(--blue);
 }
 
-/* Same neon pill as Gallery's .home-pill — defined here too so /admin works
-   without the gallery chunk having loaded. */
-.admin-page .home-pill {
-    display: inline-block;
-    margin-bottom: 0;
-    text-decoration: none;
-    text-transform: uppercase;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    color: #fff;
-    background-color: #0000ff;
-    padding: 4px 8px;
-    transition: opacity 0.15s ease;
-}
-
-.admin-page .home-pill:hover {
-    opacity: 0.85;
-}
+/* .home-pill lives in global.css — always loaded, so /admin and /gallery no
+   longer need their own (previously duplicated) copies. */
 
 .admin-gate {
     max-width: 360px;
@@ -127,7 +110,7 @@
     font: inherit;
     color: #fff;
     background: #000;
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    border: 1px solid var(--line-soft);
     padding: 8px 10px;
 }
 
@@ -142,7 +125,7 @@
     grid-template-columns: 220px 1fr auto;
     gap: 14px;
     align-items: center;
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    border: 1px solid var(--faint);
     padding: 12px;
 }
 
@@ -153,7 +136,7 @@
 }
 
 .admin-card__screen {
-    background: #050505;
+    background: var(--screen-bg);
     aspect-ratio: 4 / 3;
     display: flex;
     align-items: center;
@@ -188,7 +171,7 @@ a.admin-btn {
 
 .admin-btn {
     background: transparent;
-    border: 1px solid #0000ff;
+    border: 1px solid var(--blue);
     color: #fff;
     font: inherit;
     text-transform: uppercase;
@@ -201,11 +184,11 @@ a.admin-btn {
 }
 
 .admin-btn.primary {
-    background: #0000ff;
+    background: var(--blue);
 }
 
 .admin-btn.danger {
-    border-color: #ff5b52;
+    border-color: var(--alert);
 }
 
 .admin-btn:hover:not(:disabled) {
@@ -222,11 +205,6 @@ a.admin-btn {
 }
 
 .admin-error {
-    color: #ff5b52;
+    color: var(--alert);
     font-size: 13px;
-}
-
-.admin-page :focus-visible {
-    outline: 2px solid #0000ff;
-    outline-offset: 2px;
 }

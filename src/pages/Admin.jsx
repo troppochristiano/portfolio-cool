@@ -10,7 +10,11 @@ import {
   adminApprove,
   adminReject,
 } from '../lib/api.js';
-import { SECRET_KEY } from '../lib/adminSecret.js';
+import { clearAdminSecret, getAdminSecret, setAdminSecret } from '../lib/adminSecret.js';
+import { formatBytes } from '../lib/utils.js';
+import { typeOf, descriptorFor } from '../lib/api.js';
+import { AdminGate } from '../components/AdminGate.jsx';
+import { useAdminAction } from '../hooks/useAdminAction.js';
 import './Admin.css';
 // The share modal's styles live in Create.css; every rule there is scoped
 // under .create-page, so importing it cannot restyle the admin page itself.
@@ -25,21 +29,12 @@ import './Create.css';
 // The admin secret is pasted once and kept in localStorage; the server does
 // the actual gatekeeping (a wrong secret just gets 401s).
 
-const typeOf = (item) => ((item.framesCount ?? 1) > 1 ? 'clip' : 'photo');
-
 // Free-tier budget for the library storage meter. Figure JSONs live in R2
 // (Cloudflare free tier: 10 GB stored); thumbs ride along in D1 rows and are
 // negligible next to the docs. FIGURE_CAP mirrors MAX_TOTAL in
 // functions/api/upload.js — the server refuses public uploads past it.
 const R2_FREE_BYTES = 10 * 1024 ** 3;
 const FIGURE_CAP = 1000;
-
-const fmtBytes = (n) =>
-  n >= 1024 ** 3
-    ? `${(n / 1024 ** 3).toFixed(2)} GB`
-    : n >= 1024 ** 2
-      ? `${(n / 1024 ** 2).toFixed(1)} MB`
-      : `${Math.ceil(n / 1024)} KB`;
 
 // "How much can this fill before I pay?" — sums size_bytes over the already-
 // loaded library list (every figure, hidden ones included), so it costs zero
@@ -55,8 +50,8 @@ function StorageMeter({ items }) {
         <span style={{ width: `${Math.max(pct, 0.5)}%` }} />
       </div>
       <div className="admin-muted">
-        {fmtBytes(used)} of 10 GB free-tier storage used ({pct.toFixed(2)}%) ·{' '}
-        {fmtBytes(R2_FREE_BYTES - used)} left before R2 costs money ·{' '}
+        {formatBytes(used)} of 10 GB free-tier storage used ({pct.toFixed(2)}%) ·{' '}
+        {formatBytes(R2_FREE_BYTES - used)} left before R2 costs money ·{' '}
         {items.length}/{FIGURE_CAP} figures (server cap)
       </div>
     </div>
@@ -92,31 +87,27 @@ function checkFigureJson(fig) {
 
 function PendingCard({ item, secret, onDone }) {
   const [data, setData] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const { busy, error: actionError, run } = useAdminAction();
+  const error = actionError || loadError;
 
   useEffect(() => {
     let alive = true;
     adminFigureData(item.id, secret)
       .then((d) => alive && setData(d))
-      .catch(() => alive && setError('preview failed to load'));
+      .catch(() => alive && setLoadError('preview failed to load'));
     return () => {
       alive = false;
     };
   }, [item.id, secret]);
 
-  const act = async (fn, verb) => {
+  const act = (fn, verb) => {
     if (verb === 'reject' && !window.confirm(`Reject and permanently delete "${item.name}"?`)) return;
-    setBusy(true);
-    setError('');
-    try {
-      await fn();
-      onDone(item.id);
-    } catch (e) {
-      setBusy(false);
-      setError(e.status === 401 ? 'unauthorized' : `${verb} failed — try again`);
-      if (e.status === 401) onDone(null); // signals a bad secret upstream
-    }
+    run(fn, {
+      onSuccess: () => onDone(item.id),
+      on401: () => onDone(null), // signals a bad secret upstream
+      failMessage: `${verb} failed — try again`,
+    });
   };
 
   return (
@@ -161,8 +152,7 @@ function PendingCard({ item, secret, onDone }) {
 }
 
 export default function Admin() {
-  const [secret, setSecret] = useState(() => localStorage.getItem(SECRET_KEY) || '');
-  const [input, setInput] = useState('');
+  const [secret, setSecret] = useState(() => getAdminSecret());
   const [tab, setTab] = useState('queue'); // 'queue' | 'library'
   const [pending, setPending] = useState(null); // null = loading
   const [library, setLibrary] = useState(null);
@@ -174,7 +164,7 @@ export default function Admin() {
   const [jsonError, setJsonError] = useState('');
 
   const forget = useCallback(() => {
-    localStorage.removeItem(SECRET_KEY);
+    clearAdminSecret();
     setSecret('');
     setPending(null);
     setLibrary(null);
@@ -182,12 +172,19 @@ export default function Admin() {
     setGateError('wrong or expired secret — paste it again.');
   }, []);
 
-  // Both lists load up front (cheap metadata) so tab switches are instant and
-  // queue actions can patch the library view too.
+  // One spelling of "reload both lists" (cheap metadata) — the mount effect
+  // and the post-upload refresh share it, with their own error handling.
+  const loadLists = useCallback(
+    () => Promise.all([adminList(secret, 'pending'), adminList(secret, 'all')]),
+    [secret],
+  );
+
+  // Both lists load up front so tab switches are instant and queue actions can
+  // patch the library view too.
   useEffect(() => {
     if (!secret) return;
     let alive = true;
-    Promise.all([adminList(secret, 'pending'), adminList(secret, 'all')])
+    loadLists()
       .then(([p, all]) => {
         if (!alive) return;
         setPending(p.items);
@@ -201,7 +198,7 @@ export default function Admin() {
     return () => {
       alive = false;
     };
-  }, [secret, forget]);
+  }, [secret, forget, loadLists]);
 
   // Queue card resolved (approved either way, or rejected): drop it from the
   // queue and refresh the library snapshot from the server (one cheap call —
@@ -217,13 +214,13 @@ export default function Admin() {
   // After a direct json upload lands (as pending), re-pull both lists so the
   // queue count updates without a reload.
   const refresh = useCallback(() => {
-    Promise.all([adminList(secret, 'pending'), adminList(secret, 'all')])
+    loadLists()
       .then(([p, all]) => {
         setPending(p.items);
         setLibrary(all.items);
       })
       .catch(() => {});
-  }, [secret]);
+  }, [loadLists]);
 
   const onJsonFile = async (e) => {
     const file = e.target.files?.[0];
@@ -259,34 +256,14 @@ export default function Admin() {
 
   if (!secret) {
     return (
-      <div className="admin-page">
-        <div className="admin-gate">
-          <h1>moderation</h1>
-          {gateError && <p className="admin-error">{gateError}</p>}
-          <input
-            type="password"
-            placeholder="admin secret"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && input.trim()) {
-                localStorage.setItem(SECRET_KEY, input.trim());
-                setSecret(input.trim());
-              }
-            }}
-          />
-          <button
-            className="admin-btn primary"
-            disabled={!input.trim()}
-            onClick={() => {
-              localStorage.setItem(SECRET_KEY, input.trim());
-              setSecret(input.trim());
-            }}
-          >
-            unlock
-          </button>
-        </div>
-      </div>
+      <AdminGate
+        title="moderation"
+        error={gateError}
+        onUnlock={(v) => {
+          setAdminSecret(v);
+          setSecret(v);
+        }}
+      />
     );
   }
 
@@ -369,16 +346,10 @@ export default function Admin() {
 
       {selected && (
         <FigureDialog
-          figure={{
-            key: selected.id,
-            name: selected.name,
-            author: selected.author,
-            url: `/api/figures/${selected.id}/data`,
-            createdAt: selected.createdAt,
-            framesCount: selected.framesCount,
-            // hidden figures 404 on the public data route — fetch with bearer
+          // hidden figures 404 on the public data route — fetch with bearer
+          figure={descriptorFor(selected, {
             fetchData: () => adminFigureData(selected.id, secret),
-          }}
+          })}
           admin={{ item: selected, secret, onChanged: libraryChanged }}
           onClose={() => setSelectedId(null)}
         />

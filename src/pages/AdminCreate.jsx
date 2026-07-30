@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import Create from './Create.jsx';
 import { getAdminSecret, setAdminSecret } from '../lib/adminSecret.js';
+import { AdminGate } from '../components/AdminGate.jsx';
 import './Admin.css';
 
 // /admin/create — the converter itself IS src/pages/Create.jsx, rendered with
@@ -11,34 +12,18 @@ import './Admin.css';
 // — see functions/api/upload.js).
 export default function AdminCreate() {
   const [secret, setSecret] = useState(() => getAdminSecret());
-  const [input, setInput] = useState('');
-
-  const unlock = () => {
-    if (!input.trim()) return;
-    setAdminSecret(input.trim());
-    setSecret(input.trim());
-  };
 
   if (!secret) {
     return (
-      <div className="admin-page">
-        <div className="admin-gate">
-          <h1>admin create</h1>
-          <input
-            type="password"
-            placeholder="admin secret"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') unlock();
-            }}
-          />
-          <button className="admin-btn primary" disabled={!input.trim()} onClick={unlock}>
-            unlock
-          </button>
-          <Link className="home-pill" to="/admin">← moderation</Link>
-        </div>
-      </div>
+      <AdminGate
+        title="admin create"
+        onUnlock={(v) => {
+          setAdminSecret(v);
+          setSecret(v);
+        }}
+      >
+        <Link className="home-pill" to="/admin">← moderation</Link>
+      </AdminGate>
     );
   }
 
