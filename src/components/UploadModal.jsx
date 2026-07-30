@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { uploadFigure } from '../lib/api.js';
 import UpModal from './UpModal.jsx';
 import AsciiThumb from './AsciiThumb.jsx';
+import { FramePicker } from './FramePicker.jsx';
 
 // Share-to-gallery dialog for the converter. Collects a figure name, the
 // author's name and (for animations) a thumbnail frame, runs Cloudflare
@@ -149,24 +150,27 @@ export default function UploadModal({ baked, adminSecret = null, onClose, onSucc
           </label>
 
           {isAnim && (
-            <div className="upmodal-field">
-              <span className="field-label">
-                thumbnail — frame {thumbFrame + 1}/{baked.frames.length}
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={baked.frames.length - 1}
-                value={thumbFrame}
-                onChange={(e) => setThumbFrame(Number(e.target.value))}
-              />
-            </div>
+            <FramePicker
+              baked={baked}
+              frame={thumbFrame}
+              onChange={setThumbFrame}
+              labelPrefix="thumbnail — frame"
+            />
           )}
           {/* the thumb scrubber shows exactly what the gallery will */}
           <AsciiThumb baked={baked} frameIndex={isAnim ? thumbFrame : 0} />
 
           {/* Turnstile mounts here (invisible/managed) — never for admin */}
-          {!adminSecret && <div ref={widgetRef} className="upmodal-turnstile" />}
+          {/* data-cursor="none": Turnstile renders into a cross-origin iframe,
+              which our `cursor: none` can't reach — the ascii reticle would
+              sit next to a system arrow. Hand the pointer back here. */}
+          {!adminSecret && (
+            <div
+              ref={widgetRef}
+              className="upmodal-turnstile"
+              data-cursor="none"
+            />
+          )}
 
           {error && <p className="upmodal-error">{error}</p>}
 

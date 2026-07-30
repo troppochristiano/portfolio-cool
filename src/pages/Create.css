@@ -5,23 +5,19 @@
    and the main face) doesn't fight it. */
 
 .create-page {
-    /* remapped palette: paper→black, ink→white, phosphor amber→neon blue */
+    /* remapped palette: paper→black, ink→white, phosphor amber→neon blue.
+       --muted / --faint / --alert / --screen-bg inherit straight from the
+       :root tokens in global.css; the names below only alias or extend them. */
     --paper: #000;
     --ink: #fff;
     --line: #fff;
-    --muted: rgba(255, 255, 255, 0.6);
-    --faint: rgba(255, 255, 255, 0.14);
-    --phosphor: #0000ff; /* signal / accent color */
+    --phosphor: var(--blue); /* signal / accent color */
     --phosphor-ink: #fff;
-    --alert: #ff5b52; /* error state — reads on black */
-    --screen-bg: #050505; /* the monitor interior (matches .ascii-plane) */
     --screen-ink: #fff; /* ascii on the monitor */
     --mono:
         "PP Neue Montreal Mono", ui-monospace, "SF Mono", Menlo, Consolas,
         "DejaVu Sans Mono", monospace;
-    --display:
-        "PP Neue Montreal Mono", ui-monospace, "SF Mono", Menlo, Consolas,
-        monospace;
+    --display: var(--font-main);
 
     /* Own the scroll: global.css locks body to overflow:hidden for the home hero,
      so this route becomes its own scroll container. Use dvh so the scroll area
@@ -84,26 +80,6 @@
 .create-page .masthead__title {
     font-size: clamp(18px, 2vw, 28px);
 }
-.create-page .tcursor {
-    color: var(--phosphor);
-    animation: create-blink 1.1s steps(1) infinite;
-    margin: 0 0.1em;
-}
-.create-page .tagline {
-    color: var(--muted);
-    margin-top: 0.3rem;
-}
-@keyframes create-blink {
-    50% {
-        opacity: 0;
-    }
-}
-@media (prefers-reduced-motion: reduce) {
-    .create-page .tcursor {
-        animation: none;
-    }
-}
-
 /* ── layout ── */
 .create-page .workbench {
     display: grid;
@@ -410,7 +386,13 @@
     );
     background-size: 18px 18px;
 }
-.create-page .source-vid {
+/* The freeze canvas shares the video's box rules exactly: while it stands in
+   during a reload the stage must not change size by so much as a pixel. Its
+   own width/height attributes give it the intrinsic size the stripped <video>
+   has lost, which is what keeps .stage-media (a bare shrink-wrapping
+   inline-block) from collapsing. */
+.create-page .source-vid,
+.create-page .stage-freeze {
     width: auto;
     max-width: 100%;
     max-height: var(--stage-h);
@@ -457,6 +439,26 @@
     max-width: calc(var(--stage-h) * 16 / 9);
     justify-content: center;
     padding: 1rem;
+}
+
+/* Transient status while a clip reloads after a decoder failure. Absolutely
+   positioned inside the stage on purpose: as a sibling below it, appearing
+   would add a line and shift every section down — reintroducing the very jump
+   the freeze canvas exists to remove. */
+.create-page .stage-note {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 4;
+    margin: 0;
+    padding: 0.35rem 0.5rem;
+    text-align: center;
+    font-size: 0.72rem;
+    line-height: 1.3;
+    color: var(--ink);
+    background: rgba(0, 0, 0, 0.65);
+    pointer-events: none;
 }
 
 /* crop marquee + committed crop region */
@@ -566,25 +568,14 @@
     min-width: 120px;
 }
 
-/* ── trim bar (in/out handles under the scrubber) ── */
-.create-page .trim-row {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    margin-top: 0.5rem;
-    flex-wrap: wrap;
-}
-.create-page .trim-row .field-label {
-    flex: none;
-}
-.create-page .trim-row .time-readout {
-    flex: none;
-}
-.create-page .trimbar {
+/* ── trim bar (its own toggled section, like background removal) ── */
+/* Full width of the .zone-body, and tall enough to grab. touch-action covers
+   BOTH axes here (unlike the sliders): the bar owns the whole gesture, and a
+   diagonal drag scrolling the panel away mid-cut is the worst case. */
+.create-page .trimzone .trimbar {
     position: relative;
-    flex: 1;
-    min-width: 140px;
-    height: 16px;
+    width: 100%;
+    height: 28px;
     background: var(--faint);
     cursor: pointer;
     touch-action: none;
@@ -608,36 +599,40 @@
     background: #fff;
     pointer-events: none;
 }
+/* The handle is a transparent grab BOX; the visible 9px bar is the ::after.
+   Separating the two is what lets the target grow for touch without the
+   marker turning into a slab you can't cut precisely with. */
 .create-page .trimbar__handle {
     position: absolute;
-    top: -3px;
-    bottom: -3px;
-    width: 9px;
-    background: var(--phosphor);
-    border: 1px solid #fff;
+    top: -4px;
+    bottom: -4px;
+    width: 24px;
+    padding: 0;
+    background: none;
+    border: 0;
     transform: translateX(-50%);
     cursor: ew-resize;
-    pointer-events: none;
+    touch-action: none;
 }
-/* Phones: the seek and trim bars get their own full-width rows instead of the
-   transport wrapping mid-row between buttons. order:10 sends each bar below
-   its row of buttons/readouts (both rows are flex-wrap already). */
+.create-page .trimbar__handle::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 9px;
+    transform: translateX(-50%);
+    background: var(--phosphor);
+    border: 1px solid #fff;
+}
+/* Phones: the seek bar gets its own full-width row instead of the transport
+   wrapping mid-row between buttons. order:10 sends it below the row of
+   buttons/readouts (the row is flex-wrap already). */
 @media (max-width: 640px) {
-    .create-page .scrub,
-    .create-page .trimbar {
+    .create-page .scrub {
         flex-basis: 100%;
         order: 10;
     }
-}
-.create-page .relink {
-    display: inline-block;
-    margin-top: 0.6rem;
-    font-size: 0.78rem;
-    color: var(--muted);
-    cursor: pointer;
-}
-.create-page .relink:hover {
-    color: var(--ink);
 }
 .create-page .source-error {
     display: flex;
@@ -649,7 +644,6 @@
     color: var(--alert);
 }
 
-/* ── source tabs (video / image) ── */
 /* ── image tools (photo + drawing share the canvas) ── */
 /* Keep the drawing toolbar reachable under tall sources: it pins to the bottom
    of the scrollport (monitor-wrap on desktop, the page on mobile) until its
@@ -708,7 +702,7 @@
     color: #fff;
 }
 .create-page .draw-tools__row--main .swatches {
-    animation: draw-flyout 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+    animation: draw-flyout 0.18s var(--ease-out);
 }
 @keyframes draw-flyout {
     from {
@@ -716,14 +710,27 @@
         transform: translateX(-8px);
     }
 }
+@media (prefers-reduced-motion: reduce) {
+    .create-page .draw-tools__row--main .swatches {
+        animation: none;
+    }
+}
 .create-page .draw-actions {
     display: flex;
     gap: 0.4rem;
     flex-wrap: wrap;
 }
-.create-page .file-btn {
+/* The shared source-intake button. `.btn.source-btn` (not a bare .source-btn)
+   so it outranks `.draw-tools__row .btn`, which supplies the image section's
+   padding and would otherwise win or lose on source order alone. */
+.create-page .btn.source-btn {
     display: inline-flex;
     align-items: center;
+    padding: 0.4rem 0.8rem;
+    margin-top: 0.6rem;
+}
+.create-page .draw-actions .btn.source-btn {
+    margin-top: 0;
 }
 
 /* brush shades — brightness is the whole point, so the swatch IS the value */
@@ -850,12 +857,23 @@
 .create-page .slider-val {
     color: var(--muted);
 }
+/* The painted track is the 2px CONTENT box; the padding around it is invisible
+   grab area. global.css's `* { box-sizing: border-box }` keeps
+   height − padding*2 = 2px, and background-clip confines the paint to the
+   content box, so the line looks identical while the hit target is 24px.
+   A wrapper can't do this — a native range only hit-tests its own border box.
+   touch-action is pan-y, not none: these bands sit inside .rail, which is
+   itself a scroller, so a horizontal drag must own the slider while a
+   vertical one still scrolls the rail. */
 .create-page input[type="range"] {
     -webkit-appearance: none;
     appearance: none;
     width: 100%;
-    height: 2px;
+    height: 24px;
+    padding: 11px 0;
     background: var(--ink);
+    background-clip: content-box;
+    touch-action: pan-y;
     outline-offset: 4px;
     cursor: pointer;
 }
@@ -881,6 +899,45 @@
 }
 .create-page input[type="range"]:active::-moz-range-thumb {
     background: var(--ink);
+}
+
+/* Touch: on a 2px line the thumb is the only thing you can realistically hit,
+   so widen both the grab band and the thumb. Keyed on pointer type, not
+   viewport width — a 1200px tablet is coarse, a 700px desktop window isn't.
+   MUST stay below the base rules: media queries add no specificity, so a
+   later base rule would win (and `padding` here would lose to the base
+   shorthand). */
+@media (pointer: coarse) {
+    .create-page input[type="range"] {
+        height: 44px;
+        padding: 21px 0;
+    }
+    .create-page input[type="range"]::-webkit-slider-thumb {
+        width: 22px;
+        height: 22px;
+    }
+    .create-page input[type="range"]::-moz-range-thumb {
+        width: 20px;
+        height: 20px;
+    }
+    /* claw back some of the +42px each, across 11 sliders in one scroller */
+    .create-page .slider {
+        margin-bottom: 0.3rem;
+    }
+    .create-page .slider-top {
+        margin-bottom: 0;
+    }
+    /* the fixed fullscreen draw bar can't spare 44px — it would eat the canvas */
+    .create-page .fs-drawbar input[type="range"] {
+        height: 34px;
+        padding: 16px 0;
+    }
+    .create-page .trimzone .trimbar {
+        height: 40px;
+    }
+    .create-page .trimbar__handle {
+        width: 44px;
+    }
 }
 
 /* ── ramps ── */
@@ -968,7 +1025,7 @@
     height: 7px;
     background: var(--phosphor);
     transform: scale(0);
-    transition: transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
+    transition: transform 0.14s var(--ease-out);
 }
 .create-page .toggle input[type="checkbox"]:checked::before {
     transform: scale(1);
@@ -1162,7 +1219,7 @@
     color: var(--screen-ink);
     margin: 0;
     transform-origin: center center;
-    transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+    transition: transform 0.18s var(--ease-out);
 }
 @media (prefers-reduced-motion: reduce) {
     .create-page .preview {
@@ -1183,7 +1240,7 @@
     pointer-events: none;
 }
 .create-page .noise {
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--muted);
     font-size: 0.9rem;
 }
 /* Faint scanline kept as a deliberate nod to the tool's origin — near-invisible
@@ -1205,8 +1262,9 @@
 }
 
 /* ── floating mini-monitor (mobile) ── */
-/* Hidden entirely above the mobile breakpoint; on mobile it fades in when the
-   IntersectionObserver reports the main monitor has scrolled out of view. */
+/* Shown on mobile once the main monitor has scrolled out of view. Whether that
+   is the case is decided entirely in useMiniMonitor and arrives here as
+   .is-visible — see the note on that rule below. */
 .create-page .mini-monitor {
     position: fixed;
     right: calc(0.7rem + env(safe-area-inset-right, 0px));
@@ -1276,16 +1334,15 @@
     background: var(--screen-ink);
     box-shadow: none;
 }
-@media (max-width: 860px) {
-    .create-page .mini-monitor.is-visible {
-        display: flex;
-    }
-}
-/* In fullscreen draw the mini shows on any viewport, above the overlay, and
-   defaults to the top-right so it clears the bottom tool bar. */
-.create-page .mini-monitor.is-fs.is-visible {
+/* No media query here: useMiniMonitor owns the breakpoint (MINI_MQ) because
+   the render loop needs the same answer in JS — it must not write into a mini
+   nobody can see. `is-visible` is that one decision, already accounting for
+   fullscreen draw (where the mini shows on any viewport). */
+.create-page .mini-monitor.is-visible {
     display: flex;
 }
+/* In fullscreen draw it sits above the overlay and defaults to the top-right
+   so it clears the bottom tool bar. */
 .create-page .mini-monitor.is-fs {
     z-index: 210;
     top: calc(0.7rem + env(safe-area-inset-top, 0px));
@@ -1408,14 +1465,11 @@
 }
 .create-page .progress span {
     display: block;
+    width: 100%;
     height: 100%;
     background: var(--phosphor);
-    transition: width 0.1s linear;
-}
-
-.create-page :focus-visible {
-    outline: 2px solid var(--phosphor);
-    outline-offset: 2px;
+    transform-origin: left center;
+    transition: transform 0.1s linear;
 }
 
 /* ── share-to-gallery modal ── */

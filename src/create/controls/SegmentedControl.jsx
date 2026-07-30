@@ -1,23 +1,10 @@
 /**
  * A row of mutually exclusive "keymode" buttons — the converter's standard
- * segmented control. options: [{ value, label, title? }]. Extra children
- * (e.g. the eyedropper button) render after the options inside the same row.
+ * segmented control. options: [{ value, label, title? }].
  */
-export default function SegmentedControl({
-  options,
-  value,
-  onChange,
-  className,
-  role,
-  ariaLabel,
-  children,
-}) {
+export default function SegmentedControl({ options, value, onChange }) {
   return (
-    <div
-      className={`keymodes${className ? ` ${className}` : ""}`}
-      role={role}
-      aria-label={ariaLabel}
-    >
+    <div className="keymodes">
       {options.map((o) => (
         <button
           key={o.value}
@@ -28,7 +15,6 @@ export default function SegmentedControl({
           {o.label}
         </button>
       ))}
-      {children}
     </div>
   );
 }

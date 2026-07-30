@@ -2,16 +2,7 @@ import { useCallback, useState } from "react";
 import { gzipSize } from "../asciify.js";
 import { buildStyle } from "../styleOptions.js";
 import { sampleFrame } from "../sampleFrame.js";
-
-const seekTo = (v, t) =>
-  new Promise((res) => {
-    const onSeeked = () => {
-      v.removeEventListener("seeked", onSeeked);
-      res();
-    };
-    v.addEventListener("seeked", onSeeked);
-    v.currentTime = Math.min(t, Math.max(0, v.duration - 1e-3));
-  });
+import { seekTo } from "../seekVideo.js";
 
 /**
  * Owns the baked output and the live/baked view mode. `bake(ctx)` receives the
@@ -58,6 +49,14 @@ export function useBake() {
       // edge glyphs on their own layer, one entry per base frame.
       ...(edgeFrames ? { edgeFrames } : {}),
     };
+    // The range this bake came from. Trim changes deliberately DON'T discard a
+    // bake ("what's baked remains as is, only the live changes until it's baked
+    // again") — so the statusline needs to know when the two have drifted.
+    // Non-enumerable so it can't leak into the exported/uploaded JSON.
+    Object.defineProperty(result, "bakedRange", {
+      value: ctx.isStill ? null : { start: ctx.trimStart, end: ctx.trimEnd },
+      enumerable: false,
+    });
     setBaked(result);
     setMode("baked");
     setBaking(false);

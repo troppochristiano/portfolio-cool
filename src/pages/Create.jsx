@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { SUPERSAMPLE, computeRows, formatBytes } from "../create/asciify.js";
+import { SUPERSAMPLE, computeRows } from "../create/asciify.js";
 import { FONT_STACKS, STYLE_DEFAULTS } from "../create/styleOptions.js";
 import {
   RAMP_PRESETS,
@@ -19,6 +19,7 @@ import { useMiniMonitor } from "../create/hooks/useMiniMonitor.js";
 import Slider from "../create/controls/Slider.jsx";
 import SegmentedControl from "../create/controls/SegmentedControl.jsx";
 import ToggleRow from "../create/controls/ToggleRow.jsx";
+import SourceButton from "../create/controls/SourceButton.jsx";
 import {
   PencilIcon,
   EraserIcon,
@@ -30,8 +31,53 @@ import {
 import { SettingsBlock } from "../create/controls/Sections.jsx";
 import UploadModal from "../components/UploadModal.jsx";
 import PngFrameModal from "../components/PngFrameModal.jsx";
-import { fmtTime, MONO_ADVANCE } from "../lib/utils.js";
+import {
+  capturePointer,
+  clamp,
+  fmtTime,
+  formatBytes,
+  MONO_ADVANCE,
+} from "../lib/utils.js";
+import { useLiveRef } from "../hooks/useLiveRef.js";
+import { videoExportLabel } from "../hooks/useVideoExport.js";
 import "./Create.css";
+
+// The two-layer ascii monitor (base <pre> + optional edge overlay), styled
+// identically wherever it appears — the main monitor and the floating mini
+// monitor share this one definition, so a styling tweak can't land in only
+// one of them.
+function PreviewStack({
+  baseRef,
+  edgeRef,
+  showEdge,
+  fontSize,
+  fontFamily,
+  color,
+  edgeColor,
+  scale,
+  mini = false,
+}) {
+  const layerStyle = (layerColor) => ({
+    fontSize,
+    fontFamily,
+    color: layerColor,
+    transform: scale !== 1 ? `scale(${scale})` : undefined,
+  });
+  const layerClass = `preview${mini ? " mini-preview" : ""}`;
+  return (
+    <div className="preview-stack">
+      <pre ref={baseRef} className={layerClass} style={layerStyle(color)} aria-hidden="true" />
+      {showEdge && (
+        <pre
+          ref={edgeRef}
+          className={`${layerClass} preview-edge`}
+          style={layerStyle(edgeColor)}
+          aria-hidden="true"
+        />
+      )}
+    </div>
+  );
+}
 
 // With an adminSecret (the /admin/create route), the tool is identical except
 // the share dialog: no Turnstile and the server waives the upload limits.
@@ -39,11 +85,13 @@ export default function Create({ adminSecret = null }) {
   const videoRef = useRef(null);
   const compositeRef = useRef(null); // displayed <canvas> = photo + strokes; also the sample source
   const canvasRef = useRef(null); // offscreen sampler
+  const freezeRef = useRef(null); // last good video frame, shown during a reload
   const monitorRef = useRef(null); // the main monitor (observed for the mini's visibility)
   const pageRef = useRef(null); // the .create-page scroll container
   const screenRef = useRef(null); // monitor interior the <pre> must fit inside
   const mediaBoxRef = useRef(null); // wrapper that shrink-wraps the visible media (crop/eyedropper coords)
   const settingsRef = useRef(null); // latest settings for the rAF loop
+  const settingsVersionRef = useRef(0); // bumped with settingsRef — the loop's dirty check
 
   // 'video' | 'image' — which input feeds the converter. The image source is
   // one canvas the user can both load a photo into and draw on.
@@ -148,11 +196,12 @@ export default function Create({ adminSecret = null }) {
     hasVideo,
     duration,
     playing,
+    recovering,
+    recoverySlow,
     currentTime,
     loop,
     setLoop,
     trim,
-    setTrim,
     trimStart,
     trimEnd,
     videoName,
@@ -160,13 +209,20 @@ export default function Create({ adminSecret = null }) {
     loadFile,
     togglePlay,
     onScrub,
-    stepFrame,
+    onScrubDown,
+    onScrubUp,
+    holdStep,
+    playFromTrimStart,
+    enableTrim,
     setTrimFromPlayhead,
     onTrimDown,
     onTrimMove,
     onTrimUp,
+    onHandleDown,
+    onHandleKey,
   } = useVideoSource(videoRef, {
     fps,
+    freezeRef,
     sourceTypeRef,
     setDims,
     setError,
@@ -194,6 +250,7 @@ export default function Create({ adminSecret = null }) {
     brushShade,
     setBrushShade,
     brushCursorRef,
+    sourceVersionRef,
     loadImage,
     onDrawDown,
     onDrawUp,
@@ -241,6 +298,18 @@ export default function Create({ adminSecret = null }) {
       ? Math.max(1, customRows)
       : computeRows(effW, effH, cols, cellAspect);
   const frameEstimate = Math.max(0, Math.round((trimEnd - trimStart) * fps));
+  // Trimming deliberately keeps an existing bake ("what's baked remains as is,
+  // only the live changes until it's baked again") — so the statusline says so
+  // when the live range has drifted from the one the bake was made at.
+  const bakeRangeStale =
+    !!baked?.bakedRange &&
+    (Math.abs(baked.bakedRange.start - trimStart) > 1e-3 ||
+      Math.abs(baked.bakedRange.end - trimEnd) > 1e-3);
+  // The two trim endpoints, so the handle markup is written once.
+  const TRIM_HANDLES = [
+    { which: "in", label: "trim in point", t: trimStart },
+    { which: "out", label: "trim out point", t: trimEnd },
+  ];
 
   // The image source is always renderable — a blank white canvas is a valid still.
   const hasSource = sourceType === "video" ? hasVideo : true;
@@ -276,6 +345,9 @@ export default function Create({ adminSecret = null }) {
       keyColor,
       crop,
     };
+    // Paired with the source counter in useImageCanvas: together they tell the
+    // live loop whether the next pass could possibly differ from the last.
+    settingsVersionRef.current += 1;
   }, [
     cols,
     rows,
@@ -295,6 +367,33 @@ export default function Create({ adminSecret = null }) {
     crop,
   ]);
 
+  // Ahead of the render loop on purpose: the loop needs to know which monitors
+  // are actually on screen before it decides whether to run at all.
+  const {
+    miniShown,
+    miniVisible,
+    miniDismissed,
+    setMiniDismissed,
+    miniElRef,
+    miniPosStyle,
+    onMiniDown,
+    onMiniMove,
+    onMiniUp,
+    onMiniClick,
+  } = useMiniMonitor({ monitorRef, hasSource, drawFullscreen });
+
+  // Both monitors are off screen — the main one has scrolled away and the mini
+  // isn't showing (dismissed, or simply a viewport that has no mini). Converting
+  // frames into two <pre>s nobody can see is the one cost with no upside.
+  const previewHidden = miniVisible && !miniShown;
+
+  // The loop's dirty check treats a video's currentTime as its frame identity,
+  // which two events can defeat by landing on the SAME time with different
+  // pixels behind it: loading a second clip (both start at 0) and a decoder
+  // recovery (it seeks back to exactly where it died). Both change this, and a
+  // change re-subscribes the loop, which forces one unconditional repaint.
+  const videoEpoch = `${videoName}|${duration}|${recovering}`;
+
   const { previewRef, previewEdgeRef, miniPreviewRef, miniPreviewEdgeRef } =
     useAsciiPreviewLoop({
       hasSource,
@@ -305,31 +404,25 @@ export default function Create({ adminSecret = null }) {
       canvasRef,
       activeSource,
       sourceReady,
+      sourceVersionRef,
+      settingsVersionRef,
+      previewHidden,
+      miniShown,
+      videoEpoch,
     });
 
   const {
-    canWebm,
-    webmProgress,
+    canVideo,
+    videoExt,
+    videoProgress,
     exportJson,
     exportPng,
-    exportWebm,
+    exportVideo,
     shareOpen,
     setShareOpen,
     pngOpen,
     setPngOpen,
   } = useExport({ baked, setError });
-
-  const {
-    miniVisible,
-    miniDismissed,
-    setMiniDismissed,
-    miniElRef,
-    miniPosStyle,
-    onMiniDown,
-    onMiniMove,
-    onMiniUp,
-    onMiniClick,
-  } = useMiniMonitor({ pageRef, monitorRef, hasSource });
 
   // ── fit the frame into the monitor ────────────────────────────
   // The <pre> renders at cols × pixel-size, which easily exceeds the
@@ -338,32 +431,48 @@ export default function Create({ adminSecret = null }) {
   // offsetWidth/Height ignore the applied transform, so measuring stays
   // stable and the ResizeObserver can't feed back into itself. The same
   // measurement is the "real pixels" readout in the resolution block.
+  const fit = () => {
+    const screen = screenRef.current;
+    const pre = previewRef.current;
+    if (!screen || !pre) return;
+    const pad = 16; // breathing room inside the screen bezel
+    const availW = screen.clientWidth - pad;
+    const availH = screen.clientHeight - pad;
+    const natW = pre.offsetWidth;
+    const natH = pre.offsetHeight;
+    if (natW <= 0 || natH <= 0 || availW <= 0 || availH <= 0) return;
+    const next = Math.min(1, availW / natW, availH / natH);
+    setPreviewScale((prev) => (Math.abs(prev - next) > 0.004 ? next : prev));
+    setOutputPx((prev) =>
+      prev && Math.abs(prev.w - natW) < 1 && Math.abs(prev.h - natH) < 1
+        ? prev
+        : { w: Math.round(natW), h: Math.round(natH) },
+    );
+  };
+  const fitRef = useLiveRef(fit);
+
+  // The observer is bound to the two ELEMENTS, which never change while the
+  // monitor is mounted — so it is built once, not per settings value. Keying
+  // it on cols/rows/cellPx meant a crop drag (rows is derived from the crop)
+  // disconnected and rebuilt it on every pointermove, each rebuild firing an
+  // immediate fit() that read four layout properties.
   useEffect(() => {
     const screen = screenRef.current;
     const pre = previewRef.current;
     if (!screen || !pre) return;
-    const fit = () => {
-      const pad = 16; // breathing room inside the screen bezel
-      const availW = screen.clientWidth - pad;
-      const availH = screen.clientHeight - pad;
-      const natW = pre.offsetWidth;
-      const natH = pre.offsetHeight;
-      if (natW <= 0 || natH <= 0 || availW <= 0 || availH <= 0) return;
-      const next = Math.min(1, availW / natW, availH / natH);
-      setPreviewScale((prev) => (Math.abs(prev - next) > 0.004 ? next : prev));
-      setOutputPx((prev) =>
-        prev && Math.abs(prev.w - natW) < 1 && Math.abs(prev.h - natH) < 1
-          ? prev
-          : { w: Math.round(natW), h: Math.round(natH) },
-      );
-    };
-    fit();
-    const ro = new ResizeObserver(fit);
+    const ro = new ResizeObserver(() => fitRef.current());
     ro.observe(screen);
     ro.observe(pre);
     return () => ro.disconnect();
+  }, [hasSource, fitRef]);
+
+  // A settings change resizes the <pre>, which the observer reports on its own
+  // — but a frame later. Measuring here too keeps the readout and the scale in
+  // step with the control you just moved.
+  useEffect(() => {
+    fitRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasSource, sourceType, mode, cols, rows, cellPx, baked]);
+  }, [hasSource, sourceType, mode, cols, rows, cellPx, baked, miniShown]);
 
   // ── switch source type ────────────────────────────────────────
   const switchSource = (type) => {
@@ -415,17 +524,13 @@ export default function Create({ adminSecret = null }) {
   const onStageResizeDown = (e) => {
     e.preventDefault();
     stageDragRef.current = { startY: e.clientY, startH: stageH };
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {
-      /* drag still tracks while the pointer stays on the grip */
-    }
+    capturePointer(e);
   };
   const onStageResizeMove = (e) => {
     const drag = stageDragRef.current;
     if (!drag) return;
     const next = Math.round(drag.startH + (e.clientY - drag.startY));
-    setStageH(Math.min(640, Math.max(200, next)));
+    setStageH(clamp(next, 200, 640));
   };
   const onStageResizeUp = () => {
     stageDragRef.current = null;
@@ -474,13 +579,25 @@ export default function Create({ adminSecret = null }) {
   const overlayActive = hasMedia && (cropMode || picking);
   const shownRect = cropDraft || crop;
 
-  // Mini-monitor scale: fit the same cols×rows frame into a small fixed box,
-  // reusing the already-measured render size (no extra observer).
+  // Mini-monitor: fit the same cols×rows frame into a small fixed box, reusing
+  // the already-measured render size (no extra observer).
+  //
+  // It renders at its OWN font size rather than sharing the main monitor's and
+  // shrinking it with transform. Sharing meant a 148px box laid out and
+  // rasterized a text layer up to MAX_PRE_PX (4000px) across and scaled it by
+  // ~0.12 — precisely the GPU-texture cost the clamp above exists to avoid,
+  // paid a second time, 30×/s, on the device least able to afford it. Render
+  // at MINI_SS× the display box instead (enough oversampling that the residual
+  // downscale still reads crisp) and scale that: same picture, ~20× less layer.
   const MINI_W = 140,
     MINI_H = 108;
-  const miniScale = outputPx
+  const MINI_SS = 3;
+  const miniFit = outputPx
     ? Math.min(1, MINI_W / outputPx.w, MINI_H / outputPx.h)
     : 0.12;
+  const miniFontRatio = Math.min(1, miniFit * MINI_SS);
+  const miniFontSize = `${cellPx * fitK * miniFontRatio}px`;
+  const miniScale = miniFit / miniFontRatio;
 
   // Everything bake() needs to sample the exact preview: the settingsRef the
   // live loop reads plus the source handles and figure metadata.
@@ -930,14 +1047,36 @@ export default function Create({ adminSecret = null }) {
                         className="source-vid"
                         muted
                         playsInline
-                        loop={loop}
+                        // No native `loop`: it wraps to 0, not to the in point,
+                        // so the trim effect owns looping in every case.
                         style={{
                           display:
-                            sourceType === "video" && hasVideo
+                            sourceType === "video" && hasVideo && !recovering
                               ? "block"
                               : "none",
                         }}
                       />
+                      {/* Stand-in for the video while it reloads after a
+                          decoder failure. It carries the frame's real pixel
+                          dimensions, so it holds the stage box open where the
+                          stripped <video> would collapse to 300×150 and drag
+                          every section below it up ~90px. */}
+                      <canvas
+                        ref={freezeRef}
+                        className="stage-freeze"
+                        aria-hidden="true"
+                        style={{
+                          display:
+                            sourceType === "video" && hasVideo && recovering
+                              ? "block"
+                              : "none",
+                        }}
+                      />
+                      {recoverySlow && (
+                        <p className="stage-note" role="status">
+                          ↻ reloading the clip…
+                        </p>
+                      )}
                       <canvas
                         ref={compositeRef}
                         className={`draw-pad ${!drawEnabled ? "is-locked" : ""} ${drawEnabled && tool !== "fill" ? "brush-active" : ""}`}
@@ -1065,8 +1204,9 @@ export default function Create({ adminSecret = null }) {
                       <div className="transport">
                         <button
                           className="tbtn"
-                          onClick={() => stepFrame(-1)}
+                          {...holdStep(-1)}
                           aria-label="back one frame"
+                          title="back one frame — hold to keep going"
                         >
                           ‹
                         </button>
@@ -1079,22 +1219,36 @@ export default function Create({ adminSecret = null }) {
                         </button>
                         <button
                           className="tbtn"
-                          onClick={() => stepFrame(1)}
+                          {...holdStep(1)}
                           aria-label="forward one frame"
+                          title="forward one frame — hold to keep going"
                         >
                           ›
                         </button>
-                        <span className="time-readout">
-                          {fmtTime(currentTime)} / {fmtTime(duration)}
+                        {/* range-relative: with trim on, the cut footage stops
+                            existing as far as the transport is concerned */}
+                        <span
+                          className="time-readout"
+                          title={`${fmtTime(currentTime, 2)} of ${fmtTime(duration, 2)} in the full clip`}
+                        >
+                          {fmtTime(Math.max(0, currentTime - trimStart), 2)} /{" "}
+                          {fmtTime(Math.max(0, trimEnd - trimStart), 2)}
                         </span>
                         <input
                           className="scrub"
                           type="range"
-                          min="0"
-                          max={duration || 0}
+                          min={trimStart}
+                          max={trimEnd || 0}
                           step="0.01"
-                          value={Math.min(currentTime, duration || 0)}
+                          value={Math.min(
+                            Math.max(currentTime, trimStart),
+                            trimEnd || 0,
+                          )}
                           onChange={onScrub}
+                          onPointerDown={onScrubDown}
+                          onPointerUp={onScrubUp}
+                          onPointerCancel={onScrubUp}
+                          onBlur={onScrubUp}
                           aria-label="seek video"
                         />
                         <button
@@ -1107,82 +1261,7 @@ export default function Create({ adminSecret = null }) {
                         </button>
                       </div>
 
-                      {/* trim: only [in, out] previews-in-loop and bakes */}
-                      <div className="trim-row">
-                        <span className="field-label">trim</span>
-                        <button
-                          className="tbtn"
-                          onClick={() => setTrimFromPlayhead("in")}
-                          title="set trim start to the playhead"
-                        >
-                          [ in
-                        </button>
-                        <button
-                          className="tbtn"
-                          onClick={() => setTrimFromPlayhead("out")}
-                          title="set trim end to the playhead"
-                        >
-                          out ]
-                        </button>
-                        <div
-                          className="trimbar"
-                          ref={trimBarRef}
-                          onPointerDown={onTrimDown}
-                          onPointerMove={onTrimMove}
-                          onPointerUp={onTrimUp}
-                          onPointerCancel={onTrimUp}
-                          role="slider"
-                          aria-label="trim range"
-                        >
-                          <div
-                            className="trimbar__range"
-                            style={{
-                              left: `${duration ? (trimStart / duration) * 100 : 0}%`,
-                              width: `${duration ? ((trimEnd - trimStart) / duration) * 100 : 100}%`,
-                            }}
-                          />
-                          <div
-                            className="trimbar__played"
-                            style={{
-                              left: `${duration ? (Math.min(currentTime, duration) / duration) * 100 : 0}%`,
-                            }}
-                          />
-                          <div
-                            className="trimbar__handle"
-                            style={{
-                              left: `${duration ? (trimStart / duration) * 100 : 0}%`,
-                            }}
-                          />
-                          <div
-                            className="trimbar__handle"
-                            style={{
-                              left: `${duration ? (trimEnd / duration) * 100 : 100}%`,
-                            }}
-                          />
-                        </div>
-                        <span className="time-readout">
-                          {fmtTime(trimStart)}–{fmtTime(trimEnd)} (
-                          {(trimEnd - trimStart).toFixed(1)}s)
-                        </span>
-                        {trim && (
-                          <button
-                            className="tbtn"
-                            onClick={() => setTrim(null)}
-                            title="use the whole clip"
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                      <label className="relink">
-                        <input
-                          type="file"
-                          accept="image/*,video/*"
-                          onChange={(e) => loadAny(e.target.files?.[0])}
-                          hidden
-                        />
-                        ↺ replace source
-                      </label>
+                      <SourceButton onFile={loadAny} />
                     </>
                   )}
 
@@ -1208,15 +1287,7 @@ export default function Create({ adminSecret = null }) {
                       {drawEnabled && toolSlider}
                       <div className="draw-tools__row">
                         <div className="draw-actions">
-                          <label className="btn file-btn">
-                            <input
-                              type="file"
-                              accept="image/*,video/*"
-                              onChange={(e) => loadAny(e.target.files?.[0])}
-                              hidden
-                            />
-                            {hasPhoto ? "↺ replace source" : "+ add source"}
-                          </label>
+                          <SourceButton onFile={loadAny} hasSource={hasPhoto} />
                         </div>
                       </div>
                       {hasPhoto && (
@@ -1231,6 +1302,87 @@ export default function Create({ adminSecret = null }) {
                     <p className="source-error" role="alert">
                       ⚠ {error}
                     </p>
+                  )}
+
+                  {/* trim — its own section, same anatomy as the two below it.
+                      Off = the whole clip; only [in, out] previews-in-loop and
+                      bakes. The toggle IS the reset, so there's no ✕. */}
+                  {sourceType === "video" && hasVideo && (
+                    <div className="keyzone trimzone">
+                      <div className="keyzone__row">
+                        <ToggleRow checked={trim !== null} onChange={enableTrim}>
+                          <span className="field-label">trim</span>
+                        </ToggleRow>
+                        {trim && (
+                          <>
+                            <button
+                              className="keymode"
+                              onClick={() => setTrimFromPlayhead("in")}
+                              title="set the in point to the playhead"
+                            >
+                              [ in
+                            </button>
+                            <button
+                              className="keymode"
+                              onClick={() => setTrimFromPlayhead("out")}
+                              title="set the out point to the playhead"
+                            >
+                              out ]
+                            </button>
+                            <span className="time-readout">
+                              {fmtTime(trimStart, 2)}–{fmtTime(trimEnd, 2)} ·{" "}
+                              {frameEstimate}f
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      {trim && (
+                        <div className="zone-body">
+                          <div
+                            className="trimbar"
+                            ref={trimBarRef}
+                            onPointerDown={onTrimDown}
+                            onPointerMove={onTrimMove}
+                            onPointerUp={onTrimUp}
+                            onPointerCancel={onTrimUp}
+                            role="group"
+                            aria-label="trim range"
+                          >
+                            <div
+                              className="trimbar__range"
+                              style={{
+                                left: `${duration ? (trimStart / duration) * 100 : 0}%`,
+                                width: `${duration ? ((trimEnd - trimStart) / duration) * 100 : 100}%`,
+                              }}
+                            />
+                            <div
+                              className="trimbar__played"
+                              style={{
+                                left: `${duration ? (Math.min(currentTime, duration) / duration) * 100 : 0}%`,
+                              }}
+                            />
+                            {TRIM_HANDLES.map(({ which, label, t }) => (
+                              <button
+                                key={which}
+                                type="button"
+                                className={`trimbar__handle trimbar__handle--${which}`}
+                                style={{
+                                  left: `${duration ? (t / duration) * 100 : which === "in" ? 0 : 100}%`,
+                                }}
+                                onPointerDown={onHandleDown(which)}
+                                onKeyDown={onHandleKey(which)}
+                                role="slider"
+                                aria-label={label}
+                                aria-valuemin={0}
+                                aria-valuemax={duration}
+                                aria-valuenow={t}
+                                aria-valuetext={fmtTime(t, 2)}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {/* background removal — one keyed color (RGB distance): the
@@ -1366,7 +1518,7 @@ export default function Create({ adminSecret = null }) {
                       ? mode === "baked"
                         ? isStill
                           ? `still · 1 frame · ${cols}×${rows}`
-                          : `baked · ${baked.frames.length} frames · ${cols}×${rows} @ ${baked.fps}fps`
+                          : `baked · ${baked.frames.length} frames · ${cols}×${rows} @ ${baked.fps}fps${bakeRangeStale ? " · trim changed" : ""}`
                         : isStill
                           ? `still · ${cols}×${rows}`
                           : `live · ${cols}×${rows} · ~${frameEstimate} frames @ ${fps}fps`
@@ -1375,7 +1527,13 @@ export default function Create({ adminSecret = null }) {
                       <span className="toggle-mode">
                         <button
                           className={mode === "live" ? "on" : ""}
-                          onClick={() => setMode("live")}
+                          onClick={() => {
+                            setMode("live");
+                            // The bake left the video paused on its last
+                            // sampled frame — rewind to the in point and run,
+                            // so live view shows motion rather than a still.
+                            if (!isStill && hasVideo) playFromTrimStart();
+                          }}
                         >
                           live
                         </button>
@@ -1398,38 +1556,16 @@ export default function Create({ adminSecret = null }) {
                     }
                   >
                     {hasSource ? (
-                      <div className="preview-stack">
-                        <pre
-                          ref={previewRef}
-                          className="preview"
-                          style={{
-                            fontSize: previewFontSize,
-                            fontFamily: FONT_STACKS[fontKey],
-                            color: fgColor,
-                            transform:
-                              previewScale !== 1
-                                ? `scale(${previewScale})`
-                                : undefined,
-                          }}
-                          aria-hidden="true"
-                        />
-                        {showEdgeLayer && (
-                          <pre
-                            ref={previewEdgeRef}
-                            className="preview preview-edge"
-                            style={{
-                              fontSize: previewFontSize,
-                              fontFamily: FONT_STACKS[fontKey],
-                              color: effectiveEdgeColor,
-                              transform:
-                                previewScale !== 1
-                                  ? `scale(${previewScale})`
-                                  : undefined,
-                            }}
-                            aria-hidden="true"
-                          />
-                        )}
-                      </div>
+                      <PreviewStack
+                        baseRef={previewRef}
+                        edgeRef={previewEdgeRef}
+                        showEdge={showEdgeLayer}
+                        fontSize={previewFontSize}
+                        fontFamily={FONT_STACKS[fontKey]}
+                        color={fgColor}
+                        edgeColor={effectiveEdgeColor}
+                        scale={previewScale}
+                      />
                     ) : (
                       <div className="noise">drop a clip to begin</div>
                     )}
@@ -1464,15 +1600,13 @@ export default function Create({ adminSecret = null }) {
                   >
                     ↓ png
                   </button>
-                  {canWebm && !isStill && (
+                  {canVideo && !isStill && (
                     <button
                       className="btn"
-                      onClick={exportWebm}
-                      disabled={!baked || baking || webmProgress !== null}
+                      onClick={exportVideo}
+                      disabled={!baked || baking || videoProgress !== null}
                     >
-                      {webmProgress !== null
-                        ? `recording… ${Math.round(webmProgress * 100)}%`
-                        : "↓ webm"}
+                      {videoExportLabel(videoProgress, videoExt)}
                     </button>
                   )}
                   <button
@@ -1494,7 +1628,14 @@ export default function Create({ adminSecret = null }) {
                   {/* always in flow — appearing/disappearing used to add a wrapped
                       row to the actions bar and jolt the layout on every bake */}
                   <div className={`progress ${baking ? "is-active" : ""}`}>
-                    <span style={{ width: baking ? `${bakeProgress}%` : 0 }} />
+                    {/* scaleX, not width: this bar advances while the bake is
+                        saturating the main thread, and a width tween relayouts
+                        on every step where a transform only composites */}
+                    <span
+                      style={{
+                        transform: `scaleX(${baking ? bakeProgress / 100 : 0})`,
+                      }}
+                    />
                   </div>
                 </div>
               </div>
@@ -1518,7 +1659,7 @@ export default function Create({ adminSecret = null }) {
             × to dismiss (it re-arms when you scroll back to the monitor). */}
         <div
           ref={miniElRef}
-          className={`mini-monitor ${(drawFullscreen || miniVisible) && hasSource && !miniDismissed ? "is-visible" : ""} ${mode === "baked" ? "is-baked" : ""} ${drawFullscreen ? "is-fs" : ""}`}
+          className={`mini-monitor ${miniShown ? "is-visible" : ""} ${mode === "baked" ? "is-baked" : ""} ${drawFullscreen ? "is-fs" : ""}`}
           style={miniPosStyle || undefined}
           onPointerDown={onMiniDown}
           onPointerMove={onMiniMove}
@@ -1529,32 +1670,22 @@ export default function Create({ adminSecret = null }) {
           tabIndex={0}
           aria-label="ASCII preview — tap to jump to the full monitor, drag to move"
         >
-          <div className="preview-stack">
-            <pre
-              ref={miniPreviewRef}
-              className="preview mini-preview"
-              style={{
-                fontSize: previewFontSize,
-                fontFamily: FONT_STACKS[fontKey],
-                color: fgColor,
-                transform: `scale(${miniScale})`,
-              }}
-              aria-hidden="true"
+          {/* Mounted only while it is actually on screen. Left mounted, its
+              <pre> collected a full-grid textContent write 30×/s on every
+              device — including desktop, where it is never visible. */}
+          {miniShown && (
+            <PreviewStack
+              mini
+              baseRef={miniPreviewRef}
+              edgeRef={miniPreviewEdgeRef}
+              showEdge={showEdgeLayer}
+              fontSize={miniFontSize}
+              fontFamily={FONT_STACKS[fontKey]}
+              color={fgColor}
+              edgeColor={effectiveEdgeColor}
+              scale={miniScale}
             />
-            {showEdgeLayer && (
-              <pre
-                ref={miniPreviewEdgeRef}
-                className="preview mini-preview preview-edge"
-                style={{
-                  fontSize: previewFontSize,
-                  fontFamily: FONT_STACKS[fontKey],
-                  color: effectiveEdgeColor,
-                  transform: `scale(${miniScale})`,
-                }}
-                aria-hidden="true"
-              />
-            )}
-          </div>
+          )}
           <span className="mini-dot" aria-hidden="true" />
           <button
             type="button"
