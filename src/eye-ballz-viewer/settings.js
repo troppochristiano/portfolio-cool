@@ -19,6 +19,12 @@ export const DEFAULT_SETTINGS = {
     // When non-empty, the lit silhouette is filled with this phrase (flowing through the
     // shape) instead of the brightness ramp. Empty => normal ramp rendering.
     phrase: "",
+    // { lo, hi } brightness window the ramp is stretched across, or null for the stock
+    // mapping. A subject that only occupies part of the 0..1 range (especially with a
+    // background key clipping one end) leaves the ramp's extremes unreachable and flattens
+    // the image into a few glyphs; renormalizing its real range restores the full ramp.
+    // Null here because the right window is per-subject — see EyeBallzViewer's ASCII_TONE.
+    tone: null,
     // Opacity (0..1) of the underlying solid model shown behind the ASCII glyphs. 0 keeps
     // the model fully see-through (canvas hidden); higher fills just the model silhouette
     // (the keyed background is transparent, so the window background is unaffected).

@@ -21,11 +21,12 @@ import {
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { PhraseAsciiEffect } from "./PhraseAsciiEffect.js";
-import { applyShader, createUniforms } from "./shader.js";
+import { applyShader, createUniforms, setFlatColor } from "./shader.js";
 import { generateSteps, subsampleSteps } from "./steps.js";
 import { listGestures, sampleGesture, startGesture } from "./gestures.js";
 import { mergeSettings } from "./settings.js";
-import { easeInOutCubic, isCoarsePointer } from "../lib/utils.js";
+import { clampedDpr, easeInOutCubic, queryNumber, queryParam } from "../lib/utils.js";
+import { useLiveRef } from "../hooks/useLiveRef.js";
 import {
   applyTexture,
   resolveBase,
@@ -46,19 +47,13 @@ import "./EyeBallzViewer.css";
 
 const FPS = 24;
 
-// Touch device — evaluated once. Phones get a flat 30fps cap on all active
-// renders (see the render gate): the render+asciify pass is the single
-// heaviest per-frame cost on mobile, and above ~30fps the ASCII grid
-// quantizes the difference away anyway.
-const COARSE_POINTER = isCoarsePointer();
-
 // Device pixel ratio to render at. Cap at 2 so high-DPI displays don't rasterize 4–9× the
 // pixels for no visible gain. When ASCII is on the WebGL canvas is invisible (opacity:0)
 // and only sampled by AsciiEffect at its low character resolution, so 1 is plenty.
 // DPR 1 when the canvas is invisible (ASCII on, no backplate). When a backplate fill is
 // shown behind the glyphs, render at the capped DPR so it isn't blocky.
 const pixelRatioFor = (asciiEnabled, backplate = 0) =>
-  asciiEnabled && !(backplate > 0) ? 1 : Math.min(window.devicePixelRatio, 2);
+  asciiEnabled && !(backplate > 0) ? 1 : clampedDpr(2);
 
 // The ASCII column count is containerWidth(css) × resolution, so a smaller container (mobile)
 // yields fewer columns and a coarser face at the same resolution. To keep detail roughly
@@ -68,21 +63,76 @@ const pixelRatioFor = (asciiEnabled, backplate = 0) =>
 // and reverted — the flat 30fps render cap is what fixes phone lag; the grid
 // density itself wasn't the bottleneck and the face is the site's centerpiece.)
 const ASCII_REF_WIDTH = 480;
-const ASCII_MAX_RESOLUTION = 0.5;
+// Floor on the glyph cell (CSS px). The boost above chases a constant column count, which
+// on a phone drives the cell down toward 4px. Small cells are the whole point — they're
+// what keeps the face detailed on a narrow screen — but they also leave less blank area
+// for the backplate to read through, so this is the lever to pull if the plate ever gets
+// swallowed by the glyphs. Detail is the priority, so it sits at the floor; raising it
+// trades columns for a more legible, airier grid (7 == the desktop cell).
+// Override for on-device A/B: ?cell=5
+const ASCII_MIN_CELL_PX = queryNumber("cell") || 4;
+// The other lever on backplate visibility, independent of density: how strongly the
+// silhouette reads. 0.2 of #7a7aff over black is only rgb(24,24,51) — nearly invisible on
+// an OLED phone, obvious on a desktop LCD. Override for on-device A/B: ?plate=0.35
+const PLATE_OVERRIDE = queryNumber("plate", { min: 0, max: 1 });
+// The two colors that decide how legible the face features are: the glyph color and the
+// plate behind it. Feature detail lives entirely in the glyphs (the plate is a flat fill),
+// so what matters is the LUMINANCE gap between them — and pure blue #0000ff is the dimmest
+// ink there is, which is the real ceiling. On-device A/B: ?fg=00c3ff&backdrop=8888fc
+const colorParam = (key) => {
+  const v = queryParam(key);
+  return v ? (v.startsWith("#") ? v : `#${v}`) : null;
+};
+const FG_OVERRIDE = colorParam("fg");
+const BACKDROP_OVERRIDE = colorParam("backdrop");
+// Also still the per-frame asciify cost guard the boost needed (cell >= 4px).
+const ASCII_MAX_RESOLUTION = Math.min(0.5, 2 / ASCII_MIN_CELL_PX);
+// Snap the resolution so the glyph cell is a WHOLE number of CSS pixels. PhraseAsciiEffect
+// derives both font-size and line-height as 2/resolution, and while Chrome honors a
+// fractional line-height (4.81px), iOS Safari floors it to 4px — the art then comes out
+// ~16% short and the size compensator stretches the glyphs to fill, which fattens them
+// until they merge and hide the backplate behind. An integer cell renders the same
+// everywhere, and makes rows x lineHeight land on the container height exactly, so the
+// compensator has almost nothing left to correct.
+//
+// Floor rather than round: a smaller cell is always the denser, more detailed grid, so
+// this only ever rounds detail UP. (Rounding to nearest quietly cost phones ~10% of their
+// columns versus desktop — desktop's 7.41px cell rounds down to 7 while a phone's 4.81px
+// rounded up to 5.)
+const quantizeAsciiResolution = (res) => 2 / Math.max(1, Math.floor(2 / res));
 const effectiveAsciiResolution = (baseRes, containerWidth) =>
-  containerWidth
-    ? Math.min(
-        ASCII_MAX_RESOLUTION,
-        Math.max(baseRes, (baseRes * ASCII_REF_WIDTH) / containerWidth),
-      )
-    : baseRes;
+  quantizeAsciiResolution(
+    containerWidth
+      ? Math.min(
+          ASCII_MAX_RESOLUTION,
+          Math.max(baseRes, (baseRes * ASCII_REF_WIDTH) / containerWidth),
+        )
+      : baseRes,
+  );
 
 // Displacement mesh density (segments per side). The depth maps are low-frequency:
 // A/B via screenshots showed even 128 is indistinguishable from 256 through the ASCII
 // output; 192 keeps headroom for the raw-canvas/backplate modes at ~44% less vertex
 // work than 256. Overridable for A/B testing via ?seg=128 (same pattern as App's ?grid).
-const PLANE_SEGMENTS =
-  Number(new URLSearchParams(window.location.search).get("seg")) || 192;
+const PLANE_SEGMENTS = queryNumber("seg") || 192;
+
+// Brightness window the ASCII ramp is stretched across (see PhraseAsciiEffect's `tone`).
+//
+// The avatar occupies a narrow slice of 0..1: the shader's white key (WHITE_KEY_THRESHOLD)
+// discards the bright end outright, and the invert then pushes everything that survives into
+// the top of the range. Measured off the live renderer, ink brightness runs [0.345, 0.859]
+// and is badly skewed — the middle 50% of it fits inside 0.079. The stock mapping therefore
+// reached only 4 of the 10 ramp glyphs: `=`, `%`, `@` and `#` were emitted literally zero
+// times and 98% of the face was drawn with `.` and `:`. Renormalizing the window the face
+// actually occupies puts the dense end of the ramp back in play, which is what lets the brow,
+// nose and mouth read as shading instead of a flat wash.
+//
+// Window chosen by sweeping candidates against mean |Δglyph| between adjacent cells. That
+// score keeps climbing as `lo` narrows, but past ~0.60 it is measuring posterization rather
+// than detail — the lit side of the face blocks up into a solid `#` mass. This is the last
+// window before that starts (12.7% of ink clips dark, ~0% light).
+// Re-measure if the camera framing, lighting, or WHITE_KEY_THRESHOLD ever change.
+const ASCII_TONE = { lo: 0.6, hi: 0.83 };
 
 // How long a look "sweep" takes when easing through the grid cells — used by the touch
 // sweep, the animation-mode recenter, and the one-shot eased return to mouse tracking.
@@ -160,10 +210,12 @@ function EyeBallzViewerInner(
         invert: true,
         color: false,
         resolution: 0.27,
+        tone: ASCII_TONE,
         fgColor: "#0000ff",
+        // fgColor: "#00c3ff",
         bgColor: "#000000",
         backplate: 0.2,
-        backdropColor: "#7a7aff",
+        backdropColor: "#8888fc",
       },
       distortion: {
         waveAmp: 0.003,
@@ -250,8 +302,7 @@ function EyeBallzViewerInner(
   const [settings, setSettings] = useState(() =>
     mergeSettings(initialSettings),
   );
-  const settingsRef = useRef(settings);
-  settingsRef.current = settings;
+  const settingsRef = useLiveRef(settings);
 
   const [activeKey, setActiveKey] = useState(photos[0]?.key);
   const [importText, setImportText] = useState("");
@@ -267,21 +318,18 @@ function EyeBallzViewerInner(
 
   // Mirrored so the mount effect's createAscii closure reads the live transparent flag
   // without becoming a dependency (which would re-create the whole Three.js scene).
-  const transparentRef = useRef(transparent);
-  transparentRef.current = transparent;
+  const transparentRef = useLiveRef(transparent);
 
   // Mirrored for the same reason: the animation loop and onMouseMove read the live
   // suspended flag without re-creating the scene. On unsuspend, one forced render
   // repaints whatever state changes (e.g. a texture swap) landed while paused.
-  const suspendedRef = useRef(suspended);
-  suspendedRef.current = suspended;
+  const suspendedRef = useLiveRef(suspended);
   useEffect(() => {
     if (!suspended && three.current) three.current.needsRender = true;
   }, [suspended]);
 
   // Latest onReady, mirrored so the load effect can fire it without re-subscribing.
-  const onReadyRef = useRef(onReady);
-  onReadyRef.current = onReady;
+  const onReadyRef = useLiveRef(onReady);
 
   // Base expression (parent-controlled via `status`) and whether the auto-blink loop
   // runs. Mirrored into local state so the debug panel can drive them too; props win
@@ -295,8 +343,7 @@ function EyeBallzViewerInner(
   // Mirrored so the mount effect can seed the freshly created handles with the live
   // mode. The drive-effect below is declared before the mount effect, so on first
   // render it runs against a null handle and can't apply an initially-true prop.
-  const animModeRef = useRef(animMode);
-  animModeRef.current = animMode;
+  const animModeRef = useLiveRef(animMode);
 
   // Drive animation mode onto the Three.js handle. Enabling eases the avatar into a
   // neutral, forward-facing pose (flat tilt + centered look); disabling arms the
@@ -377,8 +424,7 @@ function EyeBallzViewerInner(
   const [isDebug, setIsDebug] = useState(debug);
   useEffect(() => setIsDebug(debug), [debug]);
   // Read inside the (status-independent) texture-load effect without making it a dep.
-  const statusRef = useRef(status);
-  statusRef.current = status;
+  const statusRef = useLiveRef(status);
 
   // (Re)create the AsciiEffect from the current ascii settings. characters/resolution/
   // color are constructor-time params, so changing them requires a full rebuild.
@@ -391,16 +437,6 @@ function EyeBallzViewerInner(
     const canvas = document.createElement("canvas");
     canvas.className = "eye-ballz-canvas";
     container.appendChild(canvas);
-
-    // Backplate tint layer: a 2D canvas that mirrors the WebGL frame each rendered
-    // frame and recolors the silhouette to the exact backdropColor hex (source-in
-    // fill). Replaces the old CSS brightness(0)+filter-chain recolor, which iOS
-    // Safari rendered at the wrong hue and opacity (P3 filter math + accelerated-
-    // canvas compositing bugs). Not willReadFrequently: write-only, keep it GPU-backed.
-    const tintCanvas = document.createElement("canvas");
-    tintCanvas.className = "eye-ballz-backplate";
-    container.appendChild(tintCanvas);
-    const tintCtx = tintCanvas.getContext("2d");
 
     const scene = new Scene();
     const camera = new PerspectiveCamera(30, width / height, 0.01, 10);
@@ -456,8 +492,6 @@ function EyeBallzViewerInner(
       mesh,
       controls,
       canvas,
-      tintCanvas,
-      tintCtx,
       container,
       uniforms,
       // Normalized [-1,1] cursor position the mesh eases its tilt toward each frame.
@@ -541,6 +575,8 @@ function EyeBallzViewerInner(
         color: a.color,
         resolution,
         phrase: a.phrase,
+        // Only meaningful for the ramp; phrase mode paints one glyph regardless of tone.
+        tone: a.tone ?? null,
       });
       // Size from the live container, not the width/height props — keeps the ASCII
       // grid in sync after the window is resized.
@@ -656,20 +692,20 @@ function EyeBallzViewerInner(
         h.look.animating ||
         tiltActive ||
         h.needsRender;
-      // Phones: cap EVERY active render at 30fps — look-around easing, tilt,
-      // gestures, the intro choreography, and texture-swap dirty flags alike.
-      // A render here is not just WebGL: the asciify pass does a synchronous
-      // getImageData readback + glyph-string rebuild, and at the display's
-      // native 60–120Hz that alone janks the page. The ASCII glyph grid
-      // quantizes away anything above ~30fps, and pointer-driven grid swaps
-      // are already throttled to 24Hz, so nothing visible is lost — a capped
-      // frame keeps its needsRender flag and lands ≤33ms later. Desktop
-      // renders every frame exactly as before.
-      const phoneCapped = COARSE_POINTER
-        ? now - h.lastRenderTime >= 1000 / 30
-        : true;
+      // Cap EVERY active render at 30fps — look-around easing, tilt, gestures,
+      // the intro choreography, and texture-swap dirty flags alike, on every
+      // pointer type. A render here is not just WebGL: the asciify pass does a
+      // synchronous getImageData readback + glyph-string rebuild (and an
+      // innerHTML table rewrite whenever the grid changed), and at the
+      // display's native 60–120Hz that alone janks the page. The ASCII glyph
+      // grid quantizes away anything above ~30fps, and pointer-driven grid
+      // swaps are already throttled to 24Hz, so nothing visible is lost — a
+      // capped frame keeps its needsRender flag and lands ≤33ms later.
+      // (Desktop used to render uncapped while the pointer moved; that was the
+      // hero's single biggest interaction cost.)
+      const activeCapped = now - h.lastRenderTime >= 1000 / 30;
       const shouldRender = hardActive
-        ? phoneCapped
+        ? activeCapped
         : now - h.lastRenderTime >= (distorting ? 1000 / 30 : 500);
       if (shouldRender) {
         h.needsRender = false;
@@ -679,30 +715,19 @@ function EyeBallzViewerInner(
         } else {
           renderer.render(scene, camera);
         }
-        // Backplate: mirror the just-rendered WebGL frame into the tint canvas and
-        // recolor the silhouette (source-in keeps the frame's alpha, replaces its
-        // color — the keyed background stays transparent). Same-task drawImage from
-        // a WebGL canvas works without preserveDrawingBuffer for the same reason
-        // the asciify getImageData does: the drawing buffer isn't cleared until the
-        // frame is composited.
-        const plate = settingsRef.current.ascii;
-        if (h.asciiEnabled && (plate.backplate ?? 0) > 0 && h.tintCtx) {
-          if (
-            h.tintCanvas.width !== canvas.width ||
-            h.tintCanvas.height !== canvas.height
-          ) {
-            // Backing store tracks the WebGL canvas (DPR-scaled), CSS size is 100%,
-            // so the tint stays crisp at the DPR-2 render backplate mode forces.
-            h.tintCanvas.width = canvas.width;
-            h.tintCanvas.height = canvas.height;
-          }
-          const ctx = h.tintCtx;
-          ctx.clearRect(0, 0, h.tintCanvas.width, h.tintCanvas.height);
-          ctx.drawImage(canvas, 0, 0);
-          ctx.globalCompositeOperation = "source-in";
-          ctx.fillStyle = plate.backdropColor || "#0000ff";
-          ctx.fillRect(0, 0, h.tintCanvas.width, h.tintCanvas.height);
-          ctx.globalCompositeOperation = "source-over";
+        // Backplate: re-render the same frame with the shader's flat-color override,
+        // leaving a solid `backdropColor` silhouette on the canvas (CSS then shows it
+        // at `backplate` opacity behind the glyphs). Runs AFTER the asciify pass, so
+        // the glyph grid always samples the photographic render, never the flat one.
+        // The color comes from the shader rather than a CSS filter or a 2D-canvas
+        // composite because both of those are unreliable on iOS Safari (P3 filter
+        // math; accelerated-canvas source-in) — plain canvas opacity is not.
+        const plate =
+          PLATE_OVERRIDE ?? settingsRef.current.ascii.backplate ?? 0;
+        if (h.asciiEnabled && plate > 0) {
+          h.uniforms.uFlatMix.value = 1;
+          renderer.render(scene, camera);
+          h.uniforms.uFlatMix.value = 0;
         }
       }
       controls.update();
@@ -890,7 +915,6 @@ function EyeBallzViewerInner(
       handles.asciiEffect?.domElement.remove();
       renderer.dispose();
       canvas.remove();
-      tintCanvas.remove();
       three.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -904,6 +928,10 @@ function EyeBallzViewerInner(
     settings.ascii.resolution,
     settings.ascii.color,
     settings.ascii.phrase,
+    // Compared by value: `tone` is a fresh object on every settings merge, so depending on
+    // the reference itself would rebuild the effect on every render.
+    settings.ascii.tone?.lo,
+    settings.ascii.tone?.hi,
   ]);
 
   // ---- Push live settings into Three (no rebuild). -------------------------------
@@ -960,23 +988,19 @@ function EyeBallzViewerInner(
         el.style.webkitBackgroundClip = "";
         el.style.backgroundClip = "";
         el.style.webkitTextFillColor = "";
-        el.style.color = settings.ascii.fgColor;
+        el.style.color = FG_OVERRIDE ?? settings.ascii.fgColor;
       }
     }
     // Hide the canvas visually but keep it interactive (opacity, not display) so
-    // OrbitControls stays bound and AsciiEffect still reads its bitmap. The backplate
-    // reveal is the tint canvas's job now, so ASCII mode always fully hides this one.
-    h.canvas.style.opacity = settings.ascii.enabled ? "0" : "";
-    // Tint canvas: visible only in ASCII mode with a non-zero backplate. Its CSS
-    // opacity IS the backplate amount — the silhouette is painted at full alpha in
-    // the exact backdropColor hex, so the slider stays live without a redraw and the
-    // color is identical on every browser (no filter math involved). The repaint for
-    // a backdropColor change rides the needsRender below.
-    const plate = settings.ascii.enabled ? (settings.ascii.backplate ?? 0) : 0;
-    // Explicit "block" (not "") — clearing the inline style would fall back to the
-    // stylesheet's display:none default.
-    h.tintCanvas.style.display = plate > 0 ? "block" : "none";
-    h.tintCanvas.style.opacity = String(plate);
+    // OrbitControls stays bound and AsciiEffect still reads its bitmap. In ASCII mode
+    // a non-zero `backplate` reveals it at exactly that opacity — what's revealed is
+    // the flat-colored silhouette left by the loop's backplate pass (the keyed
+    // background stays transparent, so the page behind is unaffected).
+    h.canvas.style.opacity = settings.ascii.enabled
+      ? String(PLATE_OVERRIDE ?? settings.ascii.backplate ?? 0)
+      : "";
+    // Backplate color lives in the shader, so a picker change only needs a re-render.
+    setFlatColor(h.uniforms, BACKDROP_OVERRIDE ?? settings.ascii.backdropColor);
     h.needsRender = true; // demand rendering: repaint with the new settings
   }, [settings, transparent]);
 

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { easeInOutCubic } from "../lib/utils.js";
+import { capturePointer, easeInOutCubic } from "../lib/utils.js";
+import { useLiveRef } from "../hooks/useLiveRef.js";
 
 // Smallest the floating window can be resized to (px), in `windowed` mode.
 const MIN_WINDOW = 240;
@@ -17,8 +18,7 @@ export function useWindowChrome({ containerRef, windowed, width, height, anchore
   // with the page). Mirrored into a ref so the imperative pointer handlers read the live
   // mode without stale closures.
   const [isAnchored, setIsAnchored] = useState(anchored);
-  const anchoredRef = useRef(isAnchored);
-  anchoredRef.current = isAnchored;
+  const anchoredRef = useLiveRef(isAnchored);
 
   const winTween = useRef(0);
   const cancelWinTween = () => {
@@ -79,7 +79,7 @@ export function useWindowChrome({ containerRef, windowed, width, height, anchore
     const offY = e.clientY - rect.top;
     const w = rect.width;
     const bar = e.currentTarget;
-    bar.setPointerCapture(e.pointerId);
+    capturePointer(e, bar);
     const move = (ev) => {
       // Keep at least part of the title bar reachable on-screen.
       const left = Math.min(
@@ -111,7 +111,7 @@ export function useWindowChrome({ containerRef, windowed, width, height, anchore
     const sx = e.clientX;
     const sy = e.clientY;
     const handle = e.currentTarget;
-    handle.setPointerCapture(e.pointerId);
+    capturePointer(e, handle);
     const move = (ev) => {
       const dx = ev.clientX - sx;
       const dy = ev.clientY - sy;

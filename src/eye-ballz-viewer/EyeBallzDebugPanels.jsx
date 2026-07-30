@@ -1,6 +1,8 @@
 // Sub-panels for the viewer's debug overlay (drei-AsciiRenderer-style controls).
 // Pure presentational: settings slices in, onChange patches out.
 
+import { RAMP_PRESETS as CONVERTER_RAMPS } from "../create/createConstants.js";
+
 function Row({ label, children }) {
   return (
     <label className="eye-ballz-row">
@@ -116,14 +118,13 @@ export function ExpressionPanel({
 
 // Character ramps to stress-test the renderer (dark -> light). Fed into the `characters`
 // setting; click to swap. The free-text field below stays editable for custom ramps.
+// Values come from the converter's shared presets (createConstants.js) — this
+// panel used to carry hand-copied ramps that had silently drifted.
 const RAMP_PRESETS = [
-  ["min", " .:-=+*#%@"],
-  ["blocks", " ░▒▓█"],
-  ["dots", " .·•●"],
-  [
-    "dense",
-    " .'`^\",:;Il!i~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
-  ],
+  ["min", CONVERTER_RAMPS.classic],
+  ["blocks", CONVERTER_RAMPS.blocks],
+  ["dots", CONVERTER_RAMPS.dots],
+  ["dense", CONVERTER_RAMPS.detailed],
 ];
 
 export function AsciiPanel({ ascii, onChange }) {

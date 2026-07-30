@@ -24,6 +24,17 @@ class PhraseAsciiEffect {
 		// When non-empty, lit cells spell out this phrase (flowing through the silhouette)
 		// instead of using the brightness ramp. Background cells stay blank.
 		const strPhrase = options[ 'phrase' ] || '';
+		// Tone window: the [lo, hi] slice of brightness the glyph ramp is stretched across,
+		// or null for the stock behaviour (raw brightness spread over the whole ramp).
+		//
+		// Why this exists: a subject rarely spans the full 0..1 brightness range, and any
+		// upstream background key clips one end of it outright — so the ramp's extremes go
+		// unreachable and the whole image crowds into a handful of glyphs. Renormalizing the
+		// range the subject actually occupies puts every glyph back in play. See
+		// EyeBallzViewer's ASCII_TONE for the measured window this project ships.
+		const oTone = options[ 'tone' ] || null;
+		const fToneLo = oTone ? oTone.lo : 0;
+		const fToneSpan = oTone ? Math.max( 1e-4, oTone.hi - oTone.lo ) : 1;
 
 		let width, height;
 
@@ -208,6 +219,16 @@ class PhraseAsciiEffect {
 		let iLastMeasure = 0;
 		const MEASURE_INTERVAL_MS = 1000;
 
+		// The heartbeat's compensateScale is a style-write-then-measure — a forced
+		// reflow of the freshly rewritten glyph table, every second, forever. On the
+		// honest-metrics path (desktop computes ~identity) that spend buys nothing,
+		// so once identity has held for a few beats WITH fonts loaded the heartbeat
+		// stops; any rebuild (resize, grid change) re-arms it via bNeedsMeasure.
+		// iOS never reaches the streak (its transform is non-identity) and keeps
+		// the 1s correction loop exactly as before.
+		let iIdentityStreak = 0;
+		const IDENTITY_SETTLED_RUNS = 5;
+
 		// The glyph grid's physical size assumes the browser honors the fractional
 		// letter-spacing and tiny font-size computed above. iOS Safari rounds
 		// letter-spacing to whole px (at mobile resolutions the spacing is ~-0.4px, a
@@ -243,13 +264,13 @@ class PhraseAsciiEffect {
 			const ty = box.top - tab.top - sy * ( art.top - tab.top );
 			// Metrics are honest (desktop path) => leave the transform empty.
 			if ( Math.abs( sx - 1 ) < 0.005 && Math.abs( sy - 1 ) < 0.005
-				&& Math.abs( tx ) < 0.5 && Math.abs( ty ) < 0.5 ) return true;
+				&& Math.abs( tx ) < 0.5 && Math.abs( ty ) < 0.5 ) return 'identity';
 
 			// Transform the TABLE, not the wrapper div: the host's CRT power-on
 			// animation owns the wrapper's transform.
 			oAscii.style.transformOrigin = '0 0';
 			oAscii.style.transform = `translate(${tx}px, ${ty}px) scale(${sx}, ${sy})`;
-			return true;
+			return 'applied';
 
 		}
 
@@ -289,7 +310,31 @@ class PhraseAsciiEffect {
 
 					}
 
-					iCharIdx = Math.floor( ( 1 - fBrightness ) * ( aCharList.length - 1 ) );
+					if ( oTone ) {
+
+						if ( iAlpha == 0 ) {
+
+							// Background is keyed off alpha, not brightness, so the tone window is
+							// free to map even the lightest ink cell to a real glyph.
+							iCharIdx = 0;
+
+						} else {
+
+							let fTone = ( fBrightness - fToneLo ) / fToneSpan;
+							fTone = fTone < 0 ? 0 : fTone > 1 ? 1 : fTone;
+							// Ink occupies [1, length-1]; glyph 0 stays reserved for background.
+							iCharIdx = 1 + Math.min(
+								aCharList.length - 2,
+								Math.floor( ( 1 - fTone ) * ( aCharList.length - 1 ) )
+							);
+
+						}
+
+					} else {
+
+						iCharIdx = Math.floor( ( 1 - fBrightness ) * ( aCharList.length - 1 ) );
+
+					}
 
 					if ( bInvert ) {
 
@@ -353,14 +398,21 @@ class PhraseAsciiEffect {
 			// Runs even on content-identical frames so a pending measurement isn't
 			// starved by the strLastFrame skip. Re-measures on a slow heartbeat too:
 			// deterministic layouts re-produce the identical transform (no jitter),
-			// but late-settling metrics get corrected within a second.
+			// but late-settling metrics get corrected within a second — until the
+			// identity streak proves them settled (see iIdentityStreak above).
 			const iNow = Date.now();
-			if ( bNeedsMeasure || iNow - iLastMeasure > MEASURE_INTERVAL_MS ) {
+			const bSettled = iIdentityStreak >= IDENTITY_SETTLED_RUNS
+				&& document.fonts?.status === 'loaded';
+			if ( bNeedsMeasure || ( ! bSettled && iNow - iLastMeasure > MEASURE_INTERVAL_MS ) ) {
 
-				if ( compensateScale( oAscii ) ) {
+				if ( bNeedsMeasure ) iIdentityStreak = 0; // fresh geometry: prove identity again
+
+				const strFit = compensateScale( oAscii );
+				if ( strFit ) {
 
 					bNeedsMeasure = false;
 					iLastMeasure = iNow;
+					iIdentityStreak = strFit === 'identity' ? iIdentityStreak + 1 : 0;
 
 				}
 

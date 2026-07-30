@@ -1,3 +1,6 @@
+import { Vector3 } from "three";
+import { hexToRgb } from "../lib/utils.js";
+
 // Luminance above which the white cutout background is keyed out (made transparent).
 export const WHITE_KEY_THRESHOLD = 0.85;
 
@@ -6,6 +9,17 @@ export const WHITE_KEY_THRESHOLD = 0.85;
 // removes the inpainted gray smudges/halo that the luminance key misses (e.g. the
 // bottom-right corner of down-right gaze frames). Tunable: lower keeps more, higher cuts more.
 export const BACKGROUND_DEPTH_THRESHOLD = 0.12;
+
+// Point `uFlatColor` at a CSS hex (#rgb or #rrggbb). Deliberately NOT three's Color:
+// that parses into the renderer's linear working space, whereas this uniform is mixed
+// in after the output color-space conversion and must hold raw sRGB components so the
+// silhouette lands on screen as exactly the authored hex. Invalid input is ignored,
+// leaving the previous color.
+export function setFlatColor(uniforms, hex) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return;
+  uniforms.uFlatColor.value.set(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255);
+}
 
 // Create the `{ value }` uniform holders three.js uses for shader uniforms. We keep
 // references to these so the React layer can mutate `.value` live without recompiling.
@@ -25,6 +39,13 @@ export function createUniforms() {
     uDepthMap: { value: null },
     uHasDepth: { value: 0 },
     uDepthKey: { value: BACKGROUND_DEPTH_THRESHOLD },
+    // Backplate pass: when uFlatMix is 1 the surviving (non-keyed) fragments are
+    // painted a single flat color instead of the photographic render, so a second
+    // render produces the solid silhouette shown behind the ASCII glyphs. Values are
+    // raw sRGB 0..1 — the mix happens after the output color-space conversion, so
+    // what's written lands on screen as the exact authored hex on every browser.
+    uFlatColor: { value: new Vector3(0, 0, 1) },
+    uFlatMix: { value: 0 },
   };
 }
 
@@ -48,6 +69,8 @@ export function applyShader(material, uniforms) {
     shader.uniforms.uDepthMap = uniforms.uDepthMap;
     shader.uniforms.uHasDepth = uniforms.uHasDepth;
     shader.uniforms.uDepthKey = uniforms.uDepthKey;
+    shader.uniforms.uFlatColor = uniforms.uFlatColor;
+    shader.uniforms.uFlatMix = uniforms.uFlatMix;
 
     shader.fragmentShader =
       `uniform float uInvert;
@@ -61,8 +84,20 @@ export function applyShader(material, uniforms) {
        uniform sampler2D uDepthMap;
        uniform float uHasDepth;
        uniform float uDepthKey;
+       uniform vec3 uFlatColor;
+       uniform float uFlatMix;
       ` +
-      shader.fragmentShader.replace(
+      shader.fragmentShader
+        // Flat backplate override, injected AFTER the output color-space conversion
+        // so the color passes through untouched (no tone mapping, no linear->sRGB) and
+        // the silhouette is exactly uFlatColor. Alpha is left alone, so the keyed
+        // background stays transparent and only the head/shoulders are filled.
+        .replace(
+          "#include <colorspace_fragment>",
+          `#include <colorspace_fragment>
+           gl_FragColor.rgb = mix(gl_FragColor.rgb, uFlatColor, uFlatMix);`,
+        )
+        .replace(
         '#include <map_fragment>',
         `#ifdef USE_MAP
            vec2 duv = vMapUv;

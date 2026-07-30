@@ -126,20 +126,15 @@
   display: block;
   width: 100%;
   height: 100%;
-}
-
-/* Backplate tint layer: sits between the (hidden) WebGL canvas and the ASCII DOM
-   by DOM order alone. Each rendered frame it mirrors the WebGL bitmap and recolors
-   the model silhouette to the exact backdropColor hex (source-in fill) — replaces
-   the old brightness(0)+filter-chain recolor, which iOS Safari rendered at the
-   wrong hue and opacity. Its inline opacity IS settings.ascii.backplate. */
-.eye-ballz-backplate {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none; /* pointer look / OrbitControls target the canvas below */
-  display: none; /* settings effect reveals it when backplate > 0 */
+  /* Force the canvas onto its own composited layer. iOS Safari can fail to composite
+     a partially-transparent WebGL canvas (the backplate reveal) even though the
+     drawing buffer is correct — the silhouette renders but never reaches the screen.
+     The old CSS filter used to promote this layer as a side effect; when the filter
+     went away so did the backplate on iPhone. translate3d promotes it explicitly,
+     without a filter's color/opacity side effects. No-op on desktop. */
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
+  backface-visibility: hidden;
 }
 
 /* Calibration overlay for the forehead "rub to smile" trigger zone (debugForehead prop).
@@ -186,6 +181,11 @@
      blows the art out of its fixed-px cell and off the canvas behind it. */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  /* Render the glyphs with grayscale AA instead of WebKit's default subpixel AA, which
+     fattens text. At a 5px cell that extra weight is what closes the gaps between glyphs
+     and buries the backplate — this thins them back out without giving up any columns. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* CSS CRT effect, after njbair's "Pure CSS CRT Effect" (codepen ZVPomJ).
@@ -280,11 +280,8 @@
   }
 }
 
-/* ---- Content-layer treatment (canvas + backplate + ASCII), keyed on the root CRT
-   class. The backplate tint canvas gets the same treatment the WebGL canvas does —
-   the old backplate WAS the canvas, so without this it would poke outside the bezel. */
+/* ---- Content-layer treatment (canvas + ASCII), keyed on the root CRT class. ---- */
 .eye-ballz--crt-curved .eye-ballz-canvas,
-.eye-ballz--crt-curved .eye-ballz-backplate,
 .eye-ballz--crt-curved .eye-ballz-ascii {
   clip-path: url(#eye-ballz-crt-path);
 }
@@ -296,15 +293,24 @@
     0.08em 0 0.08em fuchsia;
 }
 .eye-ballz--crt.glow-on .eye-ballz-canvas,
-.eye-ballz--crt.glow-on .eye-ballz-backplate,
 .eye-ballz--crt.glow-on .eye-ballz-ascii {
   filter: contrast(1) brightness(1.2) saturate(1.3);
 }
 /* replays once whenever CRT is switched on (the property is freshly applied). */
 .eye-ballz--crt .eye-ballz-canvas,
-.eye-ballz--crt .eye-ballz-backplate,
 .eye-ballz--crt .eye-ballz-ascii {
   animation: eye-ballz-crt-power-on 1.6s ease-out;
+}
+
+/* Reduced motion: park the two infinite scan animations and skip the power-on
+   flash — the CRT still reads as a CRT from the static grille gradient. */
+@media (prefers-reduced-motion: reduce) {
+  .eye-ballz-crt::before,
+  .eye-ballz-crt::after,
+  .eye-ballz--crt .eye-ballz-canvas,
+  .eye-ballz--crt .eye-ballz-ascii {
+    animation: none;
+  }
 }
 
 .eye-ballz-depth {
