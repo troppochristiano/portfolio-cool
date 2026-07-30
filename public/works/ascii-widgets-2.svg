@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000" viewBox="0 0 800 1000">
+  <rect width="800" height="1000" fill="#000000"/>
+  <rect x="40" y="40" width="720" height="920" fill="none" stroke="#ffffff" stroke-opacity="0.14"/>
+  <text x="60" y="196" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="46" fill="#ffffff" font-weight="700" letter-spacing="2">ASCII WIDGETS</text>
+  <text x="60" y="234" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="21" fill="#8f8fff" fill-opacity="0.9" letter-spacing="2">10 drop-in components · copy the folder</text>
+  <line x1="60" y1="272" x2="740" y2="272" stroke="#ffffff" stroke-opacity="0.14"/>
+  <text x="60" y="318" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="20" fill="#ffffff" fill-opacity="0.4">01</text>
+  <text x="118" y="318" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#ffffff" fill-opacity="0.92" letter-spacing="1">ASCII-CURSOR</text>
+  <text x="740" y="318" text-anchor="end" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#4a4aff" xml:space="preserve">N:D:X&amp;B</text>
+  <text x="60" y="378" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="20" fill="#ffffff" fill-opacity="0.4">02</text>
+  <text x="118" y="378" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#ffffff" fill-opacity="0.92" letter-spacing="1">ASCII-DECODE</text>
+  <text x="740" y="378" text-anchor="end" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#4a4aff" xml:space="preserve">GR@#W5-</text>
+  <text x="60" y="438" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="20" fill="#ffffff" fill-opacity="0.4">03</text>
+  <text x="118" y="438" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#ffffff" fill-opacity="0.92" letter-spacing="1">ASCII-PET</text>
+  <text x="740" y="438" text-anchor="end" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#4a4aff" xml:space="preserve">GO-TZT:</text>
+  <text x="60" y="498" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="20" fill="#ffffff" fill-opacity="0.4">04</text>
+  <text x="118" y="498" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#ffffff" fill-opacity="0.92" letter-spacing="1">ASCII-PLAYER</text>
+  <text x="740" y="498" text-anchor="end" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#4a4aff" xml:space="preserve">M*&amp;MQ**</text>
+  <text x="60" y="558" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="20" fill="#ffffff" fill-opacity="0.4">05</text>
+  <text x="118" y="558" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#ffffff" fill-opacity="0.92" letter-spacing="1">ASCII-PORTRAIT</text>
+  <text x="740" y="558" text-anchor="end" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#4a4aff" xml:space="preserve">$-R@XJ-</text>
+  <text x="60" y="618" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="20" fill="#ffffff" fill-opacity="0.4">06</text>
+  <text x="118" y="618" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#ffffff" fill-opacity="0.92" letter-spacing="1">BLOCK-REVEAL</text>
+  <text x="740" y="618" text-anchor="end" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#4a4aff" xml:space="preserve">1B=GDQ#</text>
+  <text x="60" y="678" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="20" fill="#ffffff" fill-opacity="0.4">07</text>
+  <text x="118" y="678" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#ffffff" fill-opacity="0.92" letter-spacing="1">DISSOLVE-REVEAL</text>
+  <text x="740" y="678" text-anchor="end" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#4a4aff" xml:space="preserve">3EM*1A7</text>
+  <text x="60" y="738" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="20" fill="#ffffff" fill-opacity="0.4">08</text>
+  <text x="118" y="738" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#ffffff" fill-opacity="0.92" letter-spacing="1">NOISE-TEXT</text>
+  <text x="740" y="738" text-anchor="end" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#4a4aff" xml:space="preserve">4:NMZ#L</text>
+  <text x="60" y="798" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="20" fill="#ffffff" fill-opacity="0.4">09</text>
+  <text x="118" y="798" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#ffffff" fill-opacity="0.92" letter-spacing="1">PIXEL-DECODE</text>
+  <text x="740" y="798" text-anchor="end" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#4a4aff" xml:space="preserve">+1WQ+SU</text>
+  <text x="60" y="858" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="20" fill="#ffffff" fill-opacity="0.4">10</text>
+  <text x="118" y="858" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#ffffff" fill-opacity="0.92" letter-spacing="1">TEXT-SWARM</text>
+  <text x="740" y="858" text-anchor="end" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="27" fill="#4a4aff" xml:space="preserve">PPI0&amp;C0</text>
+  <line x1="60" y1="900" x2="740" y2="900" stroke="#ffffff" stroke-opacity="0.14"/>
+  <text x="60" y="946" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="18" fill="#ffffff" fill-opacity="0.45" letter-spacing="1">react 18 · no build step · MIT</text>
+</svg>

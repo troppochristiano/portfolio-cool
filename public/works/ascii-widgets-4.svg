@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000" viewBox="0 0 800 1000">
+  <rect width="800" height="1000" fill="#000000"/>
+  <text x="60" y="196" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="46" fill="#ffffff" font-weight="700" letter-spacing="2">NOISE TEXT</text>
+  <text x="60" y="234" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="21" fill="#8f8fff" fill-opacity="0.9" letter-spacing="2">a front sweeps left, the noise resolves behind it</text>
+  <text x="55" y="420.0" xml:space="preserve" textLength="690" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="88.46" fill="#2b2bd6">   2L $CEC&amp;-:</text>
+  <text x="55" y="420.0" xml:space="preserve" textLength="690" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="88.46" fill="#8f8fff">@0Z          </text>
+  <text x="55" y="552.0" xml:space="preserve" textLength="690" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="88.46" fill="#2b2bd6">        SPUZ#</text>
+  <text x="55" y="552.0" xml:space="preserve" textLength="690" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="88.46" fill="#8f8fff">      D%     </text>
+  <text x="55" y="552.0" xml:space="preserve" textLength="690" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="88.46" fill="#ffffff">ASCII        </text>
+  <text x="55" y="684.0" xml:space="preserve" textLength="690" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="88.46" fill="#2b2bd6">            G</text>
+  <text x="55" y="684.0" xml:space="preserve" textLength="690" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="88.46" fill="#8f8fff">         L:3 </text>
+  <text x="55" y="684.0" xml:space="preserve" textLength="690" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="88.46" fill="#ffffff">ASCII WID    </text>
+  <text x="55" y="816.0" xml:space="preserve" textLength="690" lengthAdjust="spacingAndGlyphs" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="88.46" fill="#ffffff">ASCII WIDGETS</text>
+  <line x1="60" y1="900" x2="740" y2="900" stroke="#ffffff" stroke-opacity="0.14"/>
+  <text x="60" y="946" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="17" fill="#ffffff" fill-opacity="0.45" xml:space="preserve" textLength="680" lengthAdjust="spacingAndGlyphs">ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:-=+*#%@$&amp;</text>
+</svg>

@@ -18,6 +18,10 @@
 # Local texture backups from compression passes — never commit
 /texture-backup-*/
 
+# Download cache for generate-works-cobrains.cjs (archived co-brains.com
+# assets). Regenerable, and the composed outputs in public/works are committed.
+/scripts/.cache-cobrains/
+
 # Unused legacy ascii animations assets
 /asciiLegacy
 
