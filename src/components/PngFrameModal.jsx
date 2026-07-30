@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { downloadPng } from '../create/exportMedia.js';
 import UpModal from './UpModal.jsx';
 import AsciiThumb from './AsciiThumb.jsx';
+import { FramePicker } from './FramePicker.jsx';
 
 // Frame picker for PNG export of an animation: scrub to the frame you want and
 // download it. Stills skip this and export their single frame directly.
@@ -24,18 +25,7 @@ export default function PngFrameModal({ baked, onClose, onError }) {
   return (
     <UpModal title="save png" onClose={onClose} locked={busy}>
       <div className="upmodal-body">
-        <div className="upmodal-field">
-          <span className="field-label">
-            frame {frame + 1}/{baked.frames.length}
-          </span>
-          <input
-            type="range"
-            min={0}
-            max={baked.frames.length - 1}
-            value={frame}
-            onChange={(e) => setFrame(Number(e.target.value))}
-          />
-        </div>
+        <FramePicker baked={baked} frame={frame} onChange={setFrame} />
 
         <AsciiThumb baked={baked} frameIndex={frame} />
 

@@ -6,6 +6,7 @@
 // shows. Everything runs in the browser — the backend never does media work.
 
 import { resolveStyle } from './styleOptions.js';
+import { clamp, isCoarsePointer } from '../lib/utils.js';
 
 // Keep canvases well under every browser's limits while staying crisp.
 const MAX_CANVAS_W = 3840;
@@ -14,18 +15,58 @@ const MAX_CANVAS_H = 3840;
 const safeName = (name) =>
   (String(name || 'figure').replace(/[^\w.-]+/g, '_').slice(0, 60)) || 'figure';
 
-function downloadBlob(blob, filename) {
+/**
+ * Hand a finished file to the user.
+ *
+ * On phones a plain <a download> drops the file into Downloads/Files, where a
+ * video is awkward to find and never reaches the photo library — so offer the
+ * native share sheet first ("Save to Photos", "Save to Files", or send it
+ * straight to an app). navigator.share needs transient user activation, which
+ * a long MediaRecorder run outlives; that rejection (and any other) falls
+ * through to the download path below.
+ */
+async function saveBlob(blob, filename) {
+  if (isCoarsePointer() && typeof navigator !== 'undefined' && navigator.canShare) {
+    const file = new File([blob], filename, { type: blob.type });
+    if (navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file] });
+        return;
+      } catch (err) {
+        // Sheet dismissed on purpose — don't then silently download it too.
+        if (err?.name === 'AbortError') return;
+      }
+    }
+  }
+  // The anchor must be in the document and the object URL must outlive the
+  // click for mobile Safari to actually save anything.
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 export function downloadJson(data, filename) {
   const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-  downloadBlob(blob, filename || `${safeName(data?.name)}.json`);
+  return saveBlob(blob, filename || `${safeName(data?.name)}.json`);
+}
+
+/**
+ * The raw ASCII as a .txt — frames are already `rows` lines of exactly `cols`
+ * characters, so one frame is paste-ready as-is. Animations export their first
+ * frame, same as the PNG button (a 900-frame clip as text is unusable).
+ * `edgeFrames` is a color overlay layer, not art, so it's left out.
+ */
+export function downloadTxt(data, { frameIndex = 0, filename } = {}) {
+  const frames = data?.frames || [];
+  const i = Math.min(Math.max(0, frameIndex), Math.max(0, frames.length - 1));
+  const blob = new Blob([`${frames[i] ?? ''}\n`], { type: 'text/plain;charset=utf-8' });
+  return saveBlob(blob, filename || `${safeName(data?.name)}.txt`);
 }
 
 // Size the font so the frame fills a decent export resolution regardless of
@@ -35,9 +76,10 @@ export function downloadJson(data, filename) {
 function makeCanvas(data, { background, foreground } = {}) {
   const { cols, rows } = data;
   const st = resolveStyle(data.style);
-  const px = Math.max(
+  const px = clamp(
+    Math.min(Math.floor(MAX_CANVAS_W / (cols * 0.62)), Math.floor(MAX_CANVAS_H / rows)),
     4,
-    Math.min(24, Math.floor(MAX_CANVAS_W / (cols * 0.62)), Math.floor(MAX_CANVAS_H / rows)),
+    24,
   );
   const rowStep = px * st.lineHeight;
   const spacingPx = st.letterSpacing * px;
@@ -93,17 +135,28 @@ export function downloadPng(data, { frameIndex = 0, background, foreground } = {
     drawFrame(data.frames[i], data.edgeFrames?.[i]);
     canvas.toBlob((blob) => {
       if (!blob) return reject(new Error('png_failed'));
-      downloadBlob(blob, `${safeName(data.name)}.png`);
-      resolve();
+      saveBlob(blob, `${safeName(data.name)}.png`).then(resolve, reject);
     }, 'image/png');
   });
 }
 
-/** Best supported WebM mime, or null when MediaRecorder can't do video. */
-export function webmMimeType() {
+// MP4 first, then WebM. Not just for iOS (whose MediaRecorder does mp4 and
+// nothing else, so webm-only probing left it with no video button at all) —
+// a desktop-recorded webm doesn't play once it's airdropped to a phone
+// either, and h264 mp4 plays everywhere.
+const VIDEO_CANDIDATES = [
+  ['video/mp4;codecs=avc1.42E01E', 'mp4'],
+  ['video/mp4', 'mp4'],
+  ['video/webm;codecs=vp9', 'webm'],
+  ['video/webm;codecs=vp8', 'webm'],
+  ['video/webm', 'webm'],
+];
+
+/** Best supported video `{ mime, ext }`, or null when MediaRecorder can't. */
+export function pickVideoMime() {
   if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return null;
-  for (const mime of ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']) {
-    if (MediaRecorder.isTypeSupported(mime)) return mime;
+  for (const [mime, ext] of VIDEO_CANDIDATES) {
+    if (MediaRecorder.isTypeSupported(mime)) return { mime, ext };
   }
   return null;
 }
@@ -113,11 +166,12 @@ export function webmMimeType() {
  * recording. Resolves when the file has been handed to the browser.
  * `onProgress(0..1)` drives an optional progress readout.
  */
-export function downloadWebm(data, { background, foreground, onProgress } = {}) {
+export function downloadVideo(data, { background, foreground, onProgress } = {}) {
   return new Promise((resolve, reject) => {
-    const mime = webmMimeType();
-    if (!mime) return reject(new Error('webm_unsupported'));
-    const fps = Math.min(30, Math.max(1, data.fps || 12));
+    const picked = pickVideoMime();
+    if (!picked) return reject(new Error('video_unsupported'));
+    const { mime, ext } = picked;
+    const fps = clamp(data.fps || 12, 1, 30);
     const { canvas, drawFrame } = makeCanvas(data, { background, foreground });
 
     drawFrame(data.frames[0], data.edgeFrames?.[0]);
@@ -130,11 +184,13 @@ export function downloadWebm(data, { background, foreground, onProgress } = {}) 
     recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     recorder.onerror = () => {
       clearInterval(timer);
-      reject(new Error('webm_failed'));
+      reject(new Error('video_failed'));
     };
     recorder.onstop = () => {
-      downloadBlob(new Blob(chunks, { type: 'video/webm' }), `${safeName(data.name)}.webm`);
-      resolve();
+      // Label the blob with what was actually negotiated — hardcoding webm
+      // here mislabels the file the moment mp4 wins the probe.
+      const type = mime.split(';')[0];
+      saveBlob(new Blob(chunks, { type }), `${safeName(data.name)}.${ext}`).then(resolve, reject);
     };
 
     let i = 0;

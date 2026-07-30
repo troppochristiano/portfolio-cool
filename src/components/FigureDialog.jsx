@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import AsciiPlayer from './AsciiPlayer.jsx';
 import { getFigureData, adminSetVisibility, adminReject } from '../lib/api.js';
-import { downloadJson, downloadPng } from '../create/exportMedia.js';
+import { downloadJson, downloadPng, downloadTxt } from '../create/exportMedia.js';
 import { useDismissOnEscape } from '../hooks/useDismissOnEscape.js';
-import { useWebmExport } from '../hooks/useWebmExport.js';
+import { useVideoExport, videoExportLabel } from '../hooks/useVideoExport.js';
+import { useAdminAction } from '../hooks/useAdminAction.js';
+import { formatBytes } from '../lib/utils.js';
 
 // Info dialog for one figure — opened from the hero wall, the gallery, and
 // the admin library. `figure` is a descriptor `{ key, name, author, url,
@@ -22,21 +24,17 @@ const fmtDate = (iso) => {
     : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 };
 
-// Byte size of the figure JSON — the exact bytes the "↓ json" button downloads
-// (downloadJson stringifies the same `data`).
-const fmtBytes = (n) => {
-  if (!Number.isFinite(n)) return null;
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-};
-
 export default function FigureDialog({ figure, onClose, admin }) {
   const [data, setData] = useState(null);
   const [failed, setFailed] = useState(false);
-  const { canWebm: webmSupported, webmProgress, exportWebm } = useWebmExport();
-  const [adminBusy, setAdminBusy] = useState(false);
-  const [adminError, setAdminError] = useState('');
+  const [exportError, setExportError] = useState('');
+  const {
+    canVideo: videoSupported,
+    videoExt,
+    videoProgress,
+    exportVideo,
+  } = useVideoExport({ onError: setExportError });
+  const { busy: adminBusy, error: adminError, run: runAdmin } = useAdminAction();
 
   useEffect(() => {
     let alive = true;
@@ -61,29 +59,23 @@ export default function FigureDialog({ figure, onClose, admin }) {
   const author = figure.author || data?.author || 'unknown';
   const created = fmtDate(figure.createdAt || data?.createdAt);
   const isAnim = (data?.frames?.length ?? figure.framesCount ?? 0) > 1;
-  const canWebm = isAnim && webmSupported;
-  // Byte size of the loaded figure (matches the JSON download exactly).
+  const canVideo = isAnim && videoSupported;
+  // Byte size of the loaded figure (matches the JSON download exactly —
+  // downloadJson stringifies the same `data`).
   const size = useMemo(
-    () => (data ? fmtBytes(new Blob([JSON.stringify(data)]).size) : null),
+    () => (data ? formatBytes(new Blob([JSON.stringify(data)]).size) : null),
     [data],
   );
 
-  // One guard for every moderation call: busy state + error surface + the
-  // grid patch via onChanged.
-  const moderate = async (action, patch) => {
-    if (adminBusy) return;
-    setAdminBusy(true);
-    setAdminError('');
-    try {
-      await action();
-      admin.onChanged({ id: admin.item.id, ...patch });
-      if (patch.deleted) onClose();
-    } catch (e) {
-      setAdminError(e.status === 401 ? 'unauthorized — re-enter the secret' : 'action failed, try again');
-    } finally {
-      setAdminBusy(false);
-    }
-  };
+  // One guard for every moderation call (useAdminAction) + the grid patch
+  // via onChanged.
+  const moderate = (action, patch) =>
+    runAdmin(action, {
+      onSuccess: () => {
+        admin.onChanged({ id: admin.item.id, ...patch });
+        if (patch.deleted) onClose();
+      },
+    });
 
   return (
     <div
@@ -211,26 +203,47 @@ export default function FigureDialog({ figure, onClose, admin }) {
             >
               ✕ delete
             </button>
-            {adminError && <span className="figdialog__admin-error">{adminError}</span>}
+            {adminError && <span className="figdialog__error">{adminError}</span>}
           </div>
         )}
 
         <div className="figdialog__actions">
+          <button
+            className="figdialog__btn"
+            disabled={!data}
+            onClick={() => {
+              setExportError('');
+              downloadTxt(data).catch(() => setExportError('txt export failed'));
+            }}
+          >
+            ↓ txt
+          </button>
           <button className="figdialog__btn" disabled={!data} onClick={() => downloadJson(data)}>
             ↓ json
           </button>
-          <button className="figdialog__btn" disabled={!data} onClick={() => downloadPng(data)}>
+          <button
+            className="figdialog__btn"
+            disabled={!data}
+            onClick={() => {
+              setExportError('');
+              downloadPng(data).catch(() => setExportError('png export failed'));
+            }}
+          >
             ↓ png
           </button>
-          {canWebm && (
+          {canVideo && (
             <button
               className="figdialog__btn"
-              disabled={!data || webmProgress !== null}
-              onClick={() => exportWebm(data)}
+              disabled={!data || videoProgress !== null}
+              onClick={() => {
+                setExportError('');
+                exportVideo(data);
+              }}
             >
-              {webmProgress !== null ? `recording… ${Math.round(webmProgress * 100)}%` : '↓ webm'}
+              {videoExportLabel(videoProgress, videoExt)}
             </button>
           )}
+          {exportError && <span className="figdialog__error">{exportError}</span>}
         </div>
       </div>
     </div>

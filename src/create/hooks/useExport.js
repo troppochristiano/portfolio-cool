@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { downloadJson, downloadPng } from "../exportMedia.js";
-import { useWebmExport } from "../../hooks/useWebmExport.js";
+import { useVideoExport } from "../../hooks/useVideoExport.js";
 
 /**
- * Export + share actions for a baked figure. PNG/WebM exports render the baked
+ * Export + share actions for a baked figure. PNG/video exports render the baked
  * frames to a canvas client-side.
  */
 export function useExport({ baked, setError }) {
-  const { canWebm, webmProgress, exportWebm } = useWebmExport({
+  const { canVideo, videoExt, videoProgress, exportVideo } = useVideoExport({
     onError: setError,
   });
   // share-to-gallery modal
@@ -30,11 +30,12 @@ export function useExport({ baked, setError }) {
   };
 
   return {
-    canWebm,
-    webmProgress,
+    canVideo,
+    videoExt,
+    videoProgress,
     exportJson,
     exportPng,
-    exportWebm: () => exportWebm(baked),
+    exportVideo: () => exportVideo(baked),
     shareOpen,
     setShareOpen,
     pngOpen,
