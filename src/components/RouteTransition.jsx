@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useLiveRef } from "../hooks/useLiveRef.js";
 import { useLocation, useOutlet } from "react-router-dom";
 import { getPageTransitions } from "../lib/pageTransitions.js";
 import { PageActiveProvider } from "../lib/pageActiveContext.js";
@@ -42,10 +43,8 @@ export function RouteTransition({ onCoverChange }) {
   // One DOM node per layer for the enter/leave contract.
   const layerEls = useRef(new Map());
   // Live outlet for the effect to pick up post-swap without re-triggering it.
-  const outletRef = useRef(outlet);
-  outletRef.current = outlet;
-  const onCoverChangeRef = useRef(onCoverChange);
-  onCoverChangeRef.current = onCoverChange;
+  const outletRef = useLiveRef(outlet);
+  const onCoverChangeRef = useLiveRef(onCoverChange);
   // Monotonic id: an in-flight transition abandons itself when a newer one starts.
   const runIdRef = useRef(0);
 

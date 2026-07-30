@@ -1,19 +1,22 @@
 import { useEffect, useRef } from "react";
-import { POOL } from "./ScrambleText.jsx";
-import { isCoarsePointer, prefersReducedMotion } from "../lib/utils.js";
+import { hoverEffectsDisabled } from "../lib/utils.js";
+import {
+  floodNoise,
+  lockCellWidths,
+  sweepResolve,
+} from "../lib/noiseText.js";
 
 // The ▙▟ appbar brand mark. Hovering (or keyboard-focusing) splits the mark —
 // the halves drift apart and the name expands out between them; that reveal is
 // pure CSS (.brand-logo in global.css). While the pill stays open, this
 // component cycles the revealed text through PHRASES: each swap floods the
 // label with pool noise that a left→right front resolves into the next phrase
-// — the same alphabet and swap cadence as the nav pills' hover scramble
-// (ScrambleText) and the About headline (DecryptText).
+// — the family alphabet, cadence, and width lock from lib/noiseText.js.
 //
 // The label is one span per glyph, driven imperatively (textContent) from a
 // rAF loop; React renders the resting phrase once and never re-renders during
-// the effect. The face may fall back to proportional, so during a morph every cell is locked
-// to the advance measured from the target phrase's real glyphs
+// the effect. The face may fall back to proportional, so during a morph every
+// cell is locked to the advance measured from the target phrase's real glyphs
 // (.brand-logo__cells--locked), and the name's grid track is pinned to
 // explicit px widths so the pill glides between phrase widths on the
 // stylesheet's own transition instead of trusting content-driven 1fr resizes
@@ -31,8 +34,6 @@ const PHRASES = [
 ];
 const HOLD_MS = 1800; // a phrase rests readable this long between morphs
 const SWEEP_MS = 450; // resolve front travel across the label, end to end
-const SWAP_MS = 34; // min hold per random glyph (same cadence as ScrambleText)
-const SWAP_JITTER_MS = 26; // …plus per-glyph jitter so cells don't flip in lockstep
 
 export function BrandLogo({ onClick }) {
   const btnRef = useRef(null);
@@ -43,12 +44,12 @@ export function BrandLogo({ onClick }) {
     // Hover-only effect: skip on touch devices and for reduced motion (same
     // evaluate-per-mount semantics as ScrambleText) — the pill then always
     // shows the resting phrase.
-    if (prefersReducedMotion() || isCoarsePointer()) return;
+    if (hoverEffectsDisabled()) return;
     const btn = btnRef.current;
     const nameEl = nameRef.current;
     const wrap = cellsRef.current;
 
-    let rafId = 0;
+    let cancelSweep = null;
     let holdT = 0;
     let index = 0; // which phrase the cells currently show
 
@@ -75,8 +76,8 @@ export function BrandLogo({ onClick }) {
     // back to the name is effectively unseen, and the next hover always opens
     // on it.
     const reset = () => {
-      cancelAnimationFrame(rafId);
-      rafId = 0;
+      cancelSweep?.();
+      cancelSweep = null;
       clearTimeout(holdT);
       holdT = 0;
       unlock();
@@ -92,55 +93,36 @@ export function BrandLogo({ onClick }) {
       nameEl.style.gridTemplateColumns = `${nameEl.getBoundingClientRect().width}px`;
       // Real target text in, then measure — locked widths must come from the
       // actual glyphs so the resolved phrase occupies exactly the same
-      // geometry as the noise (DecryptText's lock model).
+      // geometry as the noise (the family's lock model).
       const cells = build(glyphs);
-      const rects = cells.map((c) => c.getBoundingClientRect());
+      const rects = lockCellWidths(cells);
       // Not laid out (unpainted corner case) — locking to 0px would collapse
       // the label; snap the swap over and keep the loop going.
-      if (!rects.length || rects[0].width === 0) {
+      if (!rects) {
         nameEl.style.gridTemplateColumns = "";
         holdT = setTimeout(advance, HOLD_MS);
         return;
       }
       wrap.classList.add("brand-logo__cells--locked");
-      cells.forEach((c, i) => {
-        c.style.width = `${rects[i].width}px`;
-        if (glyphs[i] !== " ")
-          c.textContent = POOL[(Math.random() * POOL.length) | 0];
-      });
+      floodNoise(cells, glyphs);
       // The cells' summed advances are the phrase's natural width, so when the
       // morph ends and the track goes back on 1fr there is no jump.
       const targetW = rects.reduce((w, r) => w + r.width, 0);
       nameEl.style.gridTemplateColumns = `${targetW}px`;
 
-      const n = cells.length;
-      const t0 = performance.now();
-      const nextSwap = new Array(n).fill(0);
-      const tick = (now) => {
-        // Wall-clock front so a throttled tab still lands the swap in
-        // ~SWEEP_MS: resolved text behind it, flickering noise ahead of it.
-        const front = ((now - t0) / SWEEP_MS) * n;
-        for (let i = 0; i < n; i++) {
-          const c = cells[i];
-          if (i < front) {
-            if (c.textContent !== glyphs[i]) c.textContent = glyphs[i];
-          } else if (glyphs[i] !== " " && now >= nextSwap[i]) {
-            c.textContent = POOL[(Math.random() * POOL.length) | 0];
-            nextSwap[i] = now + SWAP_MS + Math.random() * SWAP_JITTER_MS;
-          }
-        }
-        if (front < n) {
-          rafId = requestAnimationFrame(tick);
-        } else {
+      cancelSweep = sweepResolve({
+        cells,
+        target: glyphs,
+        sweepMs: SWEEP_MS,
+        onDone: () => {
           // Fully resolved → back to plain inline text and the 1fr track,
           // ready to be measured fresh by the next morph.
-          rafId = 0;
+          cancelSweep = null;
           unlock();
           nameEl.style.gridTemplateColumns = "";
           holdT = setTimeout(advance, HOLD_MS);
-        }
-      };
-      rafId = requestAnimationFrame(tick);
+        },
+      });
     };
 
     const advance = () => {

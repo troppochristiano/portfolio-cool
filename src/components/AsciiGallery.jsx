@@ -9,7 +9,8 @@ import AsciiPlayer from "./AsciiPlayer.jsx";
 import { setRoaming } from "../lib/galleryBus.js";
 import { downsampleFigure } from "../lib/downsampleFigure.js";
 import { getFigureData } from "../lib/api.js";
-import { isCoarsePointer } from "../lib/utils.js";
+import { isCoarsePointer, shuffle } from "../lib/utils.js";
+import { useLiveRef } from "../hooks/useLiveRef.js";
 
 // A curved wall of floating ASCII players, ported from the Three.js video gallery
 // (REFERENCE CODE/cg-threejs-video-gallery) — same camera parallax, per-plane
@@ -98,19 +99,15 @@ export function AsciiGallery({
   // so it's driven via a DOM ref rather than React state to avoid per-frame re-renders.
   const labelRef = useRef(null);
   const planeRefs = useRef([]);
-  const onReadyRef = useRef(onReady);
-  onReadyRef.current = onReady;
-  const onSelectRef = useRef(onSelect);
-  onSelectRef.current = onSelect;
-  const onSettledRef = useRef(onSettled);
-  onSettledRef.current = onSettled;
+  const onReadyRef = useLiveRef(onReady);
+  const onSelectRef = useLiveRef(onSelect);
+  const onSettledRef = useLiveRef(onSettled);
   // The build effect reads the intro state it was mounted under; the prop-watcher
   // effect below drives start/skip through this ref-exposed API.
   const introStateRef = useRef(introState);
   // Mirrored so the rAF loop and cursor handler read the live value without
   // re-running the build effect (the wall must survive route changes untouched).
-  const suspendedRef = useRef(suspended);
-  suspendedRef.current = suspended;
+  const suspendedRef = useLiveRef(suspended);
   const roamApiRef = useRef(null);
 
   // Assign each of rows*columns planes a figure. Stable for the lifetime of the
@@ -129,13 +126,8 @@ export function AsciiGallery({
       (f) => !String(f?.key).startsWith("static:"),
     );
     if (community.length >= count) {
-      // Fisher–Yates shuffle, then take one figure per plane — all distinct.
-      const pool = community.slice();
-      for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [pool[i], pool[j]] = [pool[j], pool[i]];
-      }
-      return pool.slice(0, count);
+      // Shuffle, then take one figure per plane — all distinct.
+      return shuffle(community.slice()).slice(0, count);
     }
     return Array.from(
       { length: count },

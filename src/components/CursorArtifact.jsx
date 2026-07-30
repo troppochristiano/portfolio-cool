@@ -3,11 +3,10 @@ import { createPortal } from "react-dom";
 import {
   clamp,
   clamp01,
-  isCoarsePointer,
+  hoverEffectsDisabled,
   MONO_ADVANCE,
-  prefersReducedMotion,
 } from "../lib/utils.js";
-import { POOL } from "./ScrambleText.jsx";
+import { POOL } from "../lib/noiseText.js";
 
 // A little ascii artifact that tags along behind the cursor across the About
 // overlay's chapters — with a different glyph per section, swapped AT the
@@ -248,7 +247,7 @@ export function CursorArtifact({ active, boundsRef, scrollRef, faces }) {
     // Hidden while the overlay is closed or mid-scrub; hover-only effect, so
     // skip on touch and for reduced motion (evaluate-per-run, like the rest).
     if (!active) return;
-    if (prefersReducedMotion() || isCoarsePointer()) return;
+    if (hoverEffectsDisabled()) return;
     const root = rootRef.current;
     const zone = boundsRef.current;
     const scroller = scrollRef?.current ?? null;

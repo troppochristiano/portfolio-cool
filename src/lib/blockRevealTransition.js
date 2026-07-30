@@ -7,15 +7,9 @@
 // pageTransitions seam on import — main.jsx pulls it in for the side effect.
 import gsap from "gsap";
 import { setPageTransitions } from "./pageTransitions.js";
-import { prefersReducedMotion } from "./utils.js";
+import { clampedDpr, prefersReducedMotion } from "./utils.js";
+import { CELL_SIZE, paintGlyphCell, randChar, setGlyphFont } from "./dissolveTheme.js";
 
-// Visual constants mirrored from useDissolveReveal.js — kept in sync by hand,
-// the hook doesn't export them.
-const CELL_SIZE = 16;
-const CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#@$%&*+=?!<>{}[]";
-const FONT_SIZE = Math.round(CELL_SIZE * 0.7);
-const TILE_FILL = "#0000ff";
-const GLYPH_FILL = "#fff";
 const COVER_FILL = "#0f0f0f";
 // Fraction of normalized progress a cell spends as a glyph tile before
 // settling; the per-cell random thresholds supply the scatter.
@@ -66,7 +60,11 @@ function buildGrid() {
   // element are pinch-immune; rotation and address-bar changes still differ.
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
-  const dpr = window.devicePixelRatio || 1;
+  // Cap at 2: this full-viewport singleton's backing store lives for the whole
+  // session, and at raw DPR 3 a phone holds ~12MB of GPU memory (and paints
+  // 2.25× the pixels per transition frame) for chunky cells that can't show
+  // the extra resolution anyway.
+  const dpr = clampedDpr(2);
   // Same geometry as the current grid: keep it — a rebuild here would also
   // kill an in-flight tween via settle() for nothing.
   if (vw === builtW && vh === builtH && dpr === builtDpr) return;
@@ -85,7 +83,7 @@ function buildGrid() {
   black = new Uint8Array(count);
   for (let i = 0; i < count; i++) {
     thresholds[i] = Math.random();
-    chars[i] = CHARACTERS[Math.floor(Math.random() * CHARACTERS.length)];
+    chars[i] = randChar();
   }
 
   // Resize mid-tween: the grid the tween was painting is gone, so jump-cut to
@@ -120,20 +118,14 @@ function settle() {
 // what makes a leave that interrupts a half-finished reveal seamless.
 function draw(p, cover) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.font = `${FONT_SIZE}px "DM Mono", monospace`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
+  setGlyphFont(ctx);
   for (let i = 0; i < black.length; i++) {
     const t = thresholds[i];
     const x = (i % cols) * CELL_SIZE;
     const y = Math.floor(i / cols) * CELL_SIZE;
     if (p >= t + FLASH) black[i] = cover ? 1 : 0;
     if (p >= t && p < t + FLASH) {
-      ctx.fillStyle = TILE_FILL;
-      ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
-      ctx.fillStyle = GLYPH_FILL;
-      ctx.fillText(chars[i], x + CELL_SIZE / 2, y + CELL_SIZE / 2 + 0.5);
-      ctx.fillStyle = COVER_FILL;
+      paintGlyphCell(ctx, x, y, chars[i]);
     } else if (black[i]) {
       ctx.fillStyle = COVER_FILL;
       ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);

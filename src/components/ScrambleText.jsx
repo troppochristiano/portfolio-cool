@@ -1,5 +1,13 @@
-import { useEffect, useMemo, useRef } from "react";
-import { isCoarsePointer, prefersReducedMotion } from "../lib/utils.js";
+import { useEffect, useRef } from "react";
+import { hoverEffectsDisabled } from "../lib/utils.js";
+import {
+  SWAP_MS,
+  SWAP_JITTER_MS,
+  randGlyph,
+  lockCellWidths,
+  clearCellWidths,
+} from "../lib/noiseText.js";
+import { GlyphCells } from "./GlyphCells.jsx";
 
 // Cursor-localized scramble label (the aino.agency nav effect): while the
 // pointer is over the parent pill, only the glyphs near the cursor's x flicker
@@ -14,33 +22,21 @@ import { isCoarsePointer, prefersReducedMotion } from "../lib/utils.js";
 // It listens on the *parent* pill (closest button/a), not on itself, so the
 // pill's padding is part of the hover surface.
 //
-// The main face is mono now (PP Neue Montreal Mono), but the fallbacks are
-// not guaranteed to be, so swapped glyphs could nudge their neighbours.
-// While armed, every cell is locked to its measured natural width (see
-// .scramble--locked in global.css); idle, the spans are plain inline text with
-// zero layout impact. Locked widths are re-measured on every arm, so late font
-// loads or resizes can never bake in stale metrics.
+// Alphabet, cadence, and the width-lock protocol live in lib/noiseText.js —
+// shared with every other text-noise effect on the site. Locked widths are
+// re-measured on every arm, so late font loads or resizes can never bake in
+// stale metrics.
 
-// Caps + digits + the classic ASCII luminance ramp's glyphs (createConstants
-// RAMP_PRESETS.classic) — the same noise the site renders media with. The
-// pills are text-transform:uppercase, so lowercase would display as caps
-// anyway; the pool stays caps to keep measurements honest.
-// Exported: DecryptText (the About headline reveal) draws from the same pool
-// so every text-noise effect on the site speaks the same alphabet.
-export const POOL = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:-=+*#%@$&";
 const RADIUS = 22; // px each side of the cursor that scrambles (~2-3 glyphs)
 const SETTLE_MS = 300; // an excited glyph flickers this long, then settles
-const SWAP_MS = 34; // min hold per random glyph…
-const SWAP_JITTER_MS = 26; // …plus per-glyph jitter so cells don't flip in lockstep
 
 export function ScrambleText({ text }) {
   const rootRef = useRef(null);
-  const glyphs = useMemo(() => Array.from(text), [text]);
 
   useEffect(() => {
     // Hover-only effect: skip on touch devices and for reduced motion (same
     // evaluate-per-mount semantics as the rest of the chrome).
-    if (prefersReducedMotion() || isCoarsePointer()) return;
+    if (hoverEffectsDisabled()) return;
     const root = rootRef.current;
     const pill = root.closest("button, a") ?? root.parentElement;
     const cells = Array.from(root.querySelectorAll(".scramble__char"));
@@ -58,8 +54,8 @@ export function ScrambleText({ text }) {
       root.classList.remove("scramble--locked");
       cells.forEach((c, i) => {
         c.textContent = original[i];
-        c.style.width = "";
       });
+      clearCellWidths(cells);
     };
 
     const tick = (now) => {
@@ -74,7 +70,7 @@ export function ScrambleText({ text }) {
         if (now < hotUntil[i]) {
           anyHot = true;
           if (now >= nextSwap[i]) {
-            c.textContent = POOL[(Math.random() * POOL.length) | 0];
+            c.textContent = randGlyph();
             nextSwap[i] = now + SWAP_MS + Math.random() * SWAP_JITTER_MS;
           }
         } else if (c.textContent !== original[i]) {
@@ -97,17 +93,16 @@ export function ScrambleText({ text }) {
       // may show scrambled glyphs; re-measuring now would capture the wrong
       // metrics. The old geometry is still valid, so just keep the loop going.
       if (rafId) return;
-      // Read every rect before the first write so layout is computed once.
-      const rects = cells.map((c) => c.getBoundingClientRect());
-      // Not laid out (hidden/unsized frame) → locking to 0px would collapse
-      // the label. A real hover can't reach an unpainted pill; stay idle.
-      if (!rects.length || rects[0].width === 0) {
+      // lockCellWidths reads every rect before the first write, so layout is
+      // computed once; null = not laid out (a real hover can't reach an
+      // unpainted pill; stay idle).
+      const rects = lockCellWidths(cells);
+      if (!rects) {
         hovering = false;
         return;
       }
-      cells.forEach((c, i) => {
-        centers[i] = rects[i].left + rects[i].width / 2;
-        c.style.width = `${rects[i].width}px`;
+      rects.forEach((r, i) => {
+        centers[i] = r.left + r.width / 2;
       });
       root.classList.add("scramble--locked");
       rafId = requestAnimationFrame(tick);
@@ -135,15 +130,7 @@ export function ScrambleText({ text }) {
 
   return (
     <span className="scramble" ref={rootRef}>
-      {/* Stable accessible name; the flickering glyphs are presentation only. */}
-      <span className="scramble__sr">{text}</span>
-      <span className="scramble__chars" aria-hidden="true">
-        {glyphs.map((ch, i) => (
-          <span key={i} className="scramble__char">
-            {ch}
-          </span>
-        ))}
-      </span>
+      <GlyphCells text={text} prefix="scramble" />
     </span>
   );
 }

@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef } from "react";
 import gsap from "gsap";
-import { prefersReducedMotion } from "../lib/utils.js";
+import { clampedDpr, prefersReducedMotion } from "../lib/utils.js";
+import {
+  CELL_SIZE,
+  FONT_SIZE,
+  paintGlyphCell,
+  randChar,
+  setGlyphFont,
+} from "../lib/dissolveTheme.js";
 
 /**
  * useDissolveReveal — CodeGrid KVS "dissolve band" effect, driving a FULL-PAGE
@@ -47,16 +54,17 @@ export function useDissolveReveal({
   openTouchZone, // () => number|null : min touchstart clientY to allow a touch open-scrub
   //               (gesture must START on/below this Y). Overrides openOnTouch when provided.
   canOpen = true, // false => ignore open-scrub gestures (e.g. while the page behind is loading)
+  onScrub, // optional (dir:"open"|"close")=>void : a wheel/touch scrub took over the progress
 }) {
-  // --- tunables (verbatim from the original effect) ---
-  const CELL_SIZE = 16;
+  // --- tunables (verbatim from the original effect; cell size, alphabet, and
+  // the tile paint live in lib/dissolveTheme.js, shared with the route
+  // transition) ---
   const SPREAD_ABOVE = 0.25;
   const SPREAD_BELOW = 0.25;
   const SCATTER_INTENSITY = 0.15;
   const SOLID_CORE_RADIUS = 0.025;
   const MIN_SCATTER_AT_CENTER = 0.3;
   const VISIBILITY_THRESHOLD = 0.65;
-  const CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#@$%&*+=?!<>{}[]";
   const TRAVEL = 1 + SPREAD_ABOVE + SPREAD_BELOW; // 1.5 (-0.25 .. 1.25)
   const GESTURE_GAP = 200; // ms idle => a fresh wheel gesture
   const CLOSE_DEADZONE = 140; // px of pull absorbed when a gesture ARRIVES at the top mid-flight
@@ -107,7 +115,7 @@ export function useDissolveReveal({
 
     const w = overlay.clientWidth;
     const h = overlay.clientHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = clampedDpr(2);
 
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
@@ -120,7 +128,7 @@ export function useDissolveReveal({
     const cols = Math.ceil(w / CELL_SIZE);
     const rows = Math.ceil(h / CELL_SIZE);
     const count = cols * rows;
-    const fontSize = Math.round(CELL_SIZE * 0.7);
+    const fontSize = FONT_SIZE;
 
     const normalizedY = new Float32Array(count);
     const visRandom = new Float32Array(count);
@@ -134,7 +142,7 @@ export function useDissolveReveal({
         visRandom[i] = hashFromPosition(row, col, 127.1);
         scatterOffset[i] =
           (hashFromPosition(row, col, 269.3) - 0.5) * SCATTER_INTENSITY;
-        chars[i] = CHARACTERS[Math.floor(Math.random() * CHARACTERS.length)];
+        chars[i] = randChar();
       }
     }
 
@@ -173,9 +181,7 @@ export function useDissolveReveal({
       const ctx = canvas.getContext("2d");
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, cssW, cssH);
-      ctx.font = `${fontSize}px "DM Mono", monospace`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
+      setGlyphFont(ctx, fontSize);
 
       const fill = colorRef.current;
       const count = cols * rows;
@@ -204,13 +210,7 @@ export function useDissolveReveal({
 
         const col = i % cols;
         const row = (i - col) / cols;
-        const x = col * CELL_SIZE;
-        const y = row * CELL_SIZE;
-
-        ctx.fillStyle = fill;
-        ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
-        ctx.fillStyle = "#fff";
-        ctx.fillText(chars[i], x + CELL_SIZE / 2, y + CELL_SIZE / 2 + 0.5);
+        paintGlyphCell(ctx, col * CELL_SIZE, row * CELL_SIZE, chars[i], fill);
       }
     },
     [canvasRef]
@@ -369,8 +369,9 @@ export function useDissolveReveal({
         scroll.style.background = "transparent"; // let the dissolve reveal the hero
       }
       renderProgress(clamped, dir);
+      onScrub?.(dir);
     },
-    [renderProgress, showOverlay, scrollRef]
+    [renderProgress, showOverlay, scrollRef, onScrub]
   );
 
   // resolve on wheel-release: complete past threshold, else snap back

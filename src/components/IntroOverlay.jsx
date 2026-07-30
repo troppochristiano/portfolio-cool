@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
+import { clampedDpr, isCoarsePointer } from "../lib/utils.js";
+import { useLiveRef } from "../hooks/useLiveRef.js";
 
 // Cinematic intro, phase 1–3: a swarm of monospace ASCII characters flies in from
 // the viewport edges and assembles into the headline, holds while the hero avatar
@@ -85,10 +87,8 @@ export function IntroOverlay({ phase, onFormed, onDispersed }) {
   const canvasRef = useRef(null);
   // Swarm state shared between the two effects: particle objects + hold flag.
   const swarmRef = useRef(null);
-  const onFormedRef = useRef(onFormed);
-  onFormedRef.current = onFormed;
-  const onDispersedRef = useRef(onDispersed);
-  onDispersedRef.current = onDispersed;
+  const onFormedRef = useLiveRef(onFormed);
+  const onDispersedRef = useLiveRef(onDispersed);
   // Bumped when a zero-sized viewport gains real dimensions, re-running the
   // mount effect below.
   const [bootTick, setBootTick] = useState(0);
@@ -147,7 +147,7 @@ export function IntroOverlay({ phase, onFormed, onDispersed }) {
     swarmRef.current = swarm;
 
     const sizeCanvas = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = clampedDpr(2);
       canvas.width = window.innerWidth * dpr;
       canvas.height = window.innerHeight * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -171,7 +171,7 @@ export function IntroOverlay({ phase, onFormed, onDispersed }) {
     // at its own tick — only the canvas repaint (clear + ~425 fillText on a
     // DPR-2 full-screen canvas) is capped, halving its cost exactly while the
     // avatar is warming/rendering behind the swarm.
-    const coarse = window.matchMedia?.("(pointer: coarse)").matches;
+    const coarse = isCoarsePointer();
     let lastDraw = 0;
     const draw = () => {
       rafId = requestAnimationFrame(draw);

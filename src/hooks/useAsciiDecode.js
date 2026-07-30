@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { prefersReducedMotion } from '../lib/utils.js';
+import { prefersReducedMotion, shuffle } from '../lib/utils.js';
 
 // Scramble-decode reveal for gallery cards, after the CodeGrid ascii-reveal
 // effect (cells resolve in a random order; "dense" cells boil through random
@@ -62,19 +62,6 @@ function gridFromText(text, cols, rows) {
   return out;
 }
 
-// Fisher–Yates over a cell-index array — the random reveal order.
-function shuffledIndices(count) {
-  const order = new Uint32Array(count);
-  for (let i = 0; i < count; i++) order[i] = i;
-  for (let i = count - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const t = order[i];
-    order[i] = order[j];
-    order[j] = t;
-  }
-  return order;
-}
-
 /**
  * `active`  — the card is hovered (fine pointer) / in view (coarse pointer)
  * `item`    — gallery row (thumb, thumbCols/Rows, optional edgeThumb)
@@ -126,7 +113,8 @@ export function useAsciiDecode({ active, item, display }) {
     const pool = poolSet.size > 0 ? [...poolSet] : [...FALLBACK_POOL];
 
     const total = cols * rows;
-    const order = shuffledIndices(total);
+    // Shuffled cell indices — the random reveal order.
+    const order = shuffle(Uint32Array.from({ length: total }, (_, i) => i));
     // Per-cell boil deadline (ms since t0): -1 = not yet revealed, 0 =
     // settled, >0 = boiling until that time.
     const settleAt = new Float64Array(total).fill(-1);
