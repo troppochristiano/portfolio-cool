@@ -2,7 +2,6 @@
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    letter-spacing: -0.03;
 }
 
 :root {
@@ -10,6 +9,70 @@
     --font-main:
         "PP Neue Montreal Mono", ui-monospace, "SF Mono", Menlo, Consolas,
         monospace;
+
+    /* Design tokens — the single spelling of every value that used to be
+       copy-pasted across global.css and the page stylesheets. Create.css's
+       local palette (--phosphor etc.) aliases these. */
+    --blue: #0000ff; /* the site accent — pills, bars, links, canvas inks */
+    --alert: #ff5b52; /* error state — reads on black */
+    --screen-bg: #050505; /* "monitor interior" surfaces (.ascii-plane, cards) */
+    --hairline: #1a1a1a; /* subtle borders on black */
+    --line-soft: rgba(255, 255, 255, 0.3); /* hairlines on blue surfaces */
+    --muted: rgba(255, 255, 255, 0.6); /* secondary text */
+    --faint: rgba(255, 255, 255, 0.14); /* faint borders/fills */
+    --gutter: clamp(20px, 4.4vw, 64px); /* the overlay/page side gutter */
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-nav: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* Breakpoint tiers (custom properties can't be used in @media, so this is
+   documentation — keep new queries on one of these four):
+   · 1200px   — SPREAD tier: the About reading block's two-column silhouette
+                spread. Below it the block is a single-column magazine float
+                (the figure floats right and the copy fills the negative space
+                its contour leaves). The spread needs ~37ch per column to read;
+                it only clears that at 1200. See .chapter-reading__flow.
+   · 768–1199.98 — TABLET tier: the magazine float goes full-bleed (flow =
+                content width, measure capped on the copy, figure scaled by
+                --float-w) and the #about/#works/#contact viewport meters
+                relax so tall portrait tablets stop forcing 200–500px voids.
+                TWO blocks — one after the reading-block queries, one after
+                the section meters at the end of the file, since media
+                queries add no specificity and the meters are declared last.
+                Both bounded on BOTH sides so the phone branch is untouched.
+   · 860px    — CHROME tier: nav + brand-logo flip to the mobile menu
+                (matches Create.css's toolbar stack).
+   · 767.98px — CONTENT tier: works/contact switch to phone layouts. .98
+                because fractional-DPR viewports can fail a max-width:767px
+                match at innerWidth 767.
+   Between 768 and 860 a tablet deliberately gets mobile chrome with desktop
+   works/contact content. */
+
+/* Site-wide keyboard focus ring — every surface, not just the pages that
+   remembered to declare one. */
+:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+}
+
+/* "← home" pill on the sub-pages (/gallery, /admin, the admin gate). Lives
+   here because both routes need it regardless of which chunk loaded first —
+   it used to be defined verbatim in both Gallery.css and Admin.css. */
+.home-pill {
+    display: inline-block;
+    text-decoration: none;
+    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #fff;
+    background-color: var(--blue);
+    padding: 4px 8px;
+    transition: opacity 0.15s ease;
+}
+
+.home-pill:hover {
+    opacity: 0.85;
 }
 
 html,
@@ -35,10 +98,15 @@ body {
 }
 
 /* Doto (OFL, self-hosted) — variable dot-matrix face; stands in for AS
-   Therma's thermal-printer role in the frontierdialogues-style band. */
+   Therma's thermal-printer role in the frontierdialogues-style band.
+   woff2 first: the same variable font is 8.7KB there vs 457KB as raw TTF
+   (geometric dot glyphs compress absurdly well); the TTF stays as a
+   fallback for anything too old for woff2. */
 @font-face {
     font-family: "Doto";
-    src: url("/fonts/Doto-Variable.ttf") format("truetype-variations");
+    src:
+        url("/fonts/Doto-Variable.woff2") format("woff2-variations"),
+        url("/fonts/Doto-Variable.ttf") format("truetype-variations");
     font-weight: 100 900;
     font-display: swap;
 }
@@ -104,19 +172,17 @@ body {
     display: block;
 }
 
-/* The real headline for screen readers; the canvas is decorative. */
-.intro-swarm__sr {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-}
+/* .intro-swarm__sr (the real headline for screen readers — the canvas is
+   decorative) is styled with the noise-text family's shared sr rule below. */
 
-/* Skip pill — above the swarm, bottom-right where the corner pills will appear. */
-.intro-skip {
+/* Corner slot — bottom-right, above the swarm and the reduced-motion/pref
+   cover (both z-10). One occupant at a time: progress line while the hero
+   loads, skip pill once warm, the skip-preference prompt after a skip. Only
+   the prompt outlives the intro, so on touch it moves — see the coarse-pointer
+   block by .about-trigger-group, which owns this corner's neighbourhood there. */
+.intro-skip,
+.intro-progress,
+.intro-skip-prompt {
     position: fixed;
     right: 16px;
     bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
@@ -138,9 +204,90 @@ body {
     opacity: 0;
 }
 
+/* Loading readout in the corner slot. Status, not control: dim ghost mono,
+   nothing pill-like, pointer-events off so it can't eat the wall's corner.
+   white-space: pre keeps the padStart'ed percent from reflowing the bar. */
+.intro-progress {
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    white-space: pre;
+    pointer-events: none;
+    user-select: none;
+}
+
+/* The one transient that outlives the intro: the post-skip preference prompt,
+   a dim question over a yes/no row. Ghost text for the status voice, neon only
+   on the buttons — interaction gets color, status doesn't. pointer-events: none
+   on the box so a wide right-aligned status line can't eat drags on the gallery
+   underneath (or, on touch, the About swipe) — the buttons opt back in. It
+   enters on the same fade the nav, hint and logo use, so it arrives with the
+   chrome instead of cutting in over it. */
+.intro-skip-prompt {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    pointer-events: none;
+    font-size: 12px;
+    line-height: 1.35;
+    color: rgba(255, 255, 255, 0.65);
+    animation: ui-chrome-in 0.8s ease both;
+    /* Capped so the question breaks after "intro" rather than orphaning a word
+       off the viewport edge; balance evens the two lines once it does. */
+    max-width: min(240px, 70vw);
+    text-align: right;
+    text-wrap: balance;
+}
+
+.intro-skip-prompt__row {
+    display: flex;
+    gap: 6px;
+}
+
+/* Same neon pill language as .corner-pill, one size down. */
+.intro-skip-prompt__btn {
+    pointer-events: auto;
+    cursor: pointer;
+    border: none;
+    font: inherit;
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 4px 10px;
+    color: #fff;
+    background-color: var(--blue);
+    transition: opacity 0.15s ease;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.intro-skip-prompt__btn:hover {
+    opacity: 0.85;
+}
+
 /* Nav + corner pills + About trigger ease in together once the intro is over. */
 .ui-chrome {
     animation: ui-chrome-in 0.8s ease both;
+}
+
+/* The fill-mode animation above makes .ui-chrome a PERMANENT stacking context
+   (the same trap that keeps BrandLogo a sibling rather than a child — see
+   App.jsx), so every child's z-index is sealed inside the layer and the layer
+   itself paints as if z-index:0. That loses to .intro-skip-prompt, a SIBLING at
+   z-11: skipping the intro mounts the chrome and opens that prompt in the same
+   instant, so the question printed straight over an opened nav panel. Raising
+   the nav from inside cannot fix it — the whole layer has to clear the prompt.
+   Scoped to the open menu rather than applied flat, because a flat z-12 would
+   also cross .intro-cover (z-10) and let the nav and swipe hint show over the
+   black loading cover on pref-skip / reduced-motion starts. 12 stays under the
+   About overlay (20) and BrandLogo (25), so nothing above reorders. `position`
+   is only what makes z-index apply; it changes no layout, since this box holds
+   nothing but fixed children (whose containing block remains the viewport). */
+.ui-chrome:has(.nav--open) {
+    position: relative;
+    z-index: 12;
 }
 
 @keyframes ui-chrome-in {
@@ -188,6 +335,15 @@ body {
     left: 0;
 }
 
+/* Every plane's <pre> swaps its glyphs at ~15fps. contain keeps that swap's
+   style+layout pass inside the plane instead of dirtying the whole wall, and
+   optimizeSpeed skips shaping niceties a monospace ascii grid can't show —
+   together they cut the wall's worst rewrite frame from ~33ms to ~12ms. */
+.ascii-gallery pre {
+    contain: content;
+    text-rendering: optimizeSpeed;
+}
+
 /* React renders the players into this off-screen stage; CSS3DRenderer then adopts each
    .ascii-plane into its own tree, so the stage itself stays out of the way. */
 .ascii-stage {
@@ -203,11 +359,14 @@ body {
 .ascii-plane {
     color: #fff;
     pointer-events: auto;
-    cursor: grab;
+    /* Clickable: a tap opens the figure dialog, so signal it with a pointer.
+       The empty gallery background keeps `grab` (drag there pans the wall) and
+       an active drag still swaps to `grabbing` via .is-grabbing below. */
+    cursor: pointer;
     /* Match the gallery so a drag starting over a player pans rather than scrolling. */
     touch-action: none;
     will-change: transform;
-    background-color: #050505;
+    background-color: var(--screen-bg);
     backface-visibility: hidden;
     /* Isolate each plane: one player's per-frame innerHTML rewrite can't invalidate
        its siblings' layout or paint. Keeps the 49-player wall from thrashing. */
@@ -218,8 +377,8 @@ body {
    (the FRAMED toggle in AsciiGallery.jsx). Only the bottom edge is bordered */
 .ascii-plane.is-framed {
     position: relative;
-    border-bottom: 2px solid #0000ff;
-    background-color: #050505;
+    border-bottom: 2px solid var(--blue);
+    background-color: var(--screen-bg);
     padding: 8px 8px 0;
 }
 
@@ -228,7 +387,7 @@ body {
 .ascii-frame-label {
     margin: 8px -8px 0;
     padding: 2px 4px;
-    background-color: #0000ff;
+    background-color: var(--blue);
     color: #fff;
     text-align: center;
     text-transform: uppercase;
@@ -259,9 +418,11 @@ body {
 }
 
 /* Desktop: the menu wrappers vanish from layout (display:contents) and the four
-   pills become direct flex items of the bar. */
+   pills become direct flex items of the bar. Nested contents still flattens, so
+   the extra .nav__stack wrapper the mobile block needs costs desktop nothing. */
 .nav__menu,
-.nav__links {
+.nav__links,
+.nav__stack {
     display: contents;
 }
 
@@ -275,37 +436,173 @@ body {
     display: none;
 }
 
+/* Bar icon: three rules stacked in a 14×10 box that fold into an ✕ on open —
+   the outer two converge on the middle line and counter-rotate, the middle one
+   collapses along its own length. 2px rules to match the site's other hairline
+   (the hero scroll hint) against pure blue. */
+.nav__icon {
+    position: relative;
+    flex: none;
+    width: 14px;
+    height: 10px;
+}
+
+.nav__icon-bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background-color: currentColor;
+    /* Fold and unfold on the same curve as the stack below it. */
+    transition:
+        transform 0.42s var(--ease-nav),
+        opacity 0.2s ease;
+}
+
+.nav__icon-bar:nth-child(1) {
+    top: 0;
+}
+
+.nav__icon-bar:nth-child(2) {
+    top: 4px;
+}
+
+.nav__icon-bar:nth-child(3) {
+    top: 8px;
+}
+
+.nav--open .nav__icon-bar:nth-child(1) {
+    transform: translateY(4px) rotate(45deg);
+}
+
+.nav--open .nav__icon-bar:nth-child(2) {
+    opacity: 0;
+    transform: scaleX(0.15);
+}
+
+.nav--open .nav__icon-bar:nth-child(3) {
+    transform: translateY(-4px) rotate(-45deg);
+}
+
 /* Narrow viewports: the ▙▟ logo docks to the left corner and ALL FOUR links
-   collapse behind the menu pill on the right, dropping down as a column.
-   860px matches the mobile breakpoint used across Create.css. */
+   collapse into ONE blue block on the right — a header row (label + icon) with
+   the links stacked under it, sharing a single surface instead of reading as
+   five loose pills. 860px matches the mobile breakpoint used across Create.css. */
 @media (max-width: 860px) {
     .nav {
         padding: 16px;
         justify-content: flex-end;
     }
 
-    /* Re-materialize the right-side stack: the toggle with the links under it.
-       Column + flex-end so the open menu drops down right-aligned. */
+    /* THE block: the blue moves off the individual links onto this one box, so
+       opening grows a solid panel rather than sprouting pills. It opens in BOTH
+       axes — closed it hugs the toggle (label + icon + padding measures ~79px,
+       5.5rem leaves the wider "close" label room), open it widens to a panel.
+       The bar is right-anchored, so the width grows out of the corner.
+
+       Width LEADS the drop on open (no delay) and TRAILS the fold on close
+       (0.16s delay, by which time the rows have collapsed): the block unfolds
+       sideways then down, and folds up then in. */
     .nav__menu {
         display: flex;
         flex-direction: column;
-        align-items: flex-end;
-        gap: 6px;
+        align-items: stretch;
+        width: 5.5rem;
+        background-color: var(--blue);
+        pointer-events: auto;
+        overflow: hidden;
+        transition: width 0.38s var(--ease-nav) 0.16s;
+    }
+
+    .nav--open .nav__menu {
+        width: min(8.75rem, 46vw);
+        transition-delay: 0s;
+    }
+
+    /* Inside the block the links are rows, not pills: no background of their
+       own, full width, hairline-separated. nowrap so a row can never break
+       across two lines mid-widen — the block is narrowest exactly while the
+       rows are appearing. */
+    .nav__menu .nav__link {
+        width: 100%;
+        padding: 11px 12px;
+        background-color: transparent;
+        text-align: left;
+        white-space: nowrap;
     }
 
     .nav__toggle {
-        display: inline-block;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
     }
 
+    /* The stack's height is the other half of the animation: a 0fr→1fr grid
+       row, so it grows to whatever the links measure without hard-coding a
+       height. Delayed on open so the block has started widening first; prompt
+       on close so the rows are gone before the width comes back in. */
     .nav__links {
-        display: none;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 6px;
+        display: grid;
+        grid-template-rows: 0fr;
+        transition: grid-template-rows 0.3s var(--ease-nav);
     }
 
     .nav--open .nav__links {
+        grid-template-rows: 1fr;
+        transition-duration: 0.42s;
+        transition-delay: 0.12s;
+    }
+
+    /* min-height:0 lets the 0fr track actually clip the column. Collapsed, the
+       links also leave the tab order — visibility is delayed out so it only
+       flips once the panel has finished closing. */
+    .nav__stack {
         display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+        visibility: hidden;
+        transition: visibility 0s linear 0.3s;
+    }
+
+    .nav--open .nav__stack {
+        visibility: visible;
+        transition-delay: 0s;
+    }
+
+    /* Rows fade up into place under the header, one after the next; closing
+       drops the stagger so they leave together with the collapse. */
+    .nav__stack .nav__link {
+        border-top: 1px solid var(--line-soft);
+        opacity: 0;
+        transform: translateY(-8px);
+        transition:
+            opacity 0.2s ease,
+            transform 0.2s var(--ease-nav);
+    }
+
+    .nav--open .nav__stack .nav__link {
+        opacity: 1;
+        transform: none;
+        transition-duration: 0.34s;
+    }
+
+    /* Staggered in behind the widening block (which leads by 0.12s). */
+    .nav--open .nav__stack .nav__link:nth-child(1) {
+        transition-delay: 0.18s;
+    }
+
+    .nav--open .nav__stack .nav__link:nth-child(2) {
+        transition-delay: 0.23s;
+    }
+
+    .nav--open .nav__stack .nav__link:nth-child(3) {
+        transition-delay: 0.28s;
+    }
+
+    .nav--open .nav__stack .nav__link:nth-child(4) {
+        transition-delay: 0.33s;
     }
 
     .nav__push {
@@ -325,7 +622,7 @@ body {
     letter-spacing: 0.04em;
     padding: 4px 8px;
     color: #fff;
-    background-color: #0000ff;
+    background-color: var(--blue);
     text-decoration: none;
     transition: opacity 0.15s ease;
     -webkit-font-smoothing: antialiased;
@@ -366,8 +663,8 @@ body {
     letter-spacing: 0;
     padding: 4px 10px;
     color: #fff;
-    background-color: #0000ff;
-    transition: gap 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+    background-color: var(--blue);
+    transition: gap 0.4s var(--ease-out);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
@@ -379,7 +676,7 @@ body {
 .brand-logo__name {
     display: grid;
     grid-template-columns: 0fr;
-    transition: grid-template-columns 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+    transition: grid-template-columns 0.4s var(--ease-out);
 }
 
 .brand-logo__name > span {
@@ -411,22 +708,53 @@ body {
     transition: opacity 0.25s ease 0.1s;
 }
 
-/* Phrase-cycling glyph cells (BrandLogo.jsx). Idle: plain inline spans, zero
-   layout impact. During a morph every cell is locked to the advance measured
-   from the target phrase (same model as .scramble--locked): inline-block so
-   flickering pool glyphs can't nudge their neighbours, and letter-spacing
-   zeroed while locked since the measured widths already contain the 0.04em
-   tracking — browsers that add spacing after atomic inline-blocks (Chrome)
-   must not add it a second time. */
-.brand-logo__cells--locked {
+/* ── noise-text family: shared cell CSS ──────────────────────────────
+   One visually-hidden accessible-name rule and ONE width-lock model for every
+   glyph effect driven by lib/noiseText.js (BrandLogo phrase cycler, nav pill
+   scramble + works-title burst, menu ⇄ close swap, About headline type-on;
+   the intro swarm shares the sr rule). While an effect runs (--locked) each
+   cell becomes an inline-block frozen at its measured natural advance, so
+   flickering pool glyphs never nudge their neighbours or resize the label.
+   The measured widths already contain the label's tracking; letter-spacing is
+   zeroed while locked so browsers that add spacing after atomic inline-blocks
+   (Chrome) can't add it a second time. Idle, the cells are plain inline text
+   with zero layout impact. These four families used to carry four identical
+   copies of these rules. */
+.intro-swarm__sr,
+.scramble__sr,
+.decode-swap__sr,
+.decrypt__sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+.brand-logo__cells--locked,
+.scramble--locked .scramble__chars,
+.decode-swap--locked .decode-swap__chars,
+.decrypt--locked .decrypt__chars {
     letter-spacing: 0;
 }
 
-.brand-logo__cells--locked .brand-logo__cell {
+.brand-logo__cells--locked .brand-logo__cell,
+.scramble--locked .scramble__char,
+.decode-swap--locked .decode-swap__char,
+.decrypt--locked .decrypt__char {
     display: inline-block;
     text-align: center;
     /* Keep the space glyph from collapsing inside its inline-block cell. */
     white-space: pre;
+}
+
+/* DecryptText only: the headline wraps across lines — nowrap word spans keep
+   the locked inline-block cells from breaking mid-word (line breaks only ever
+   land on the space cells between words). */
+.decrypt__word {
+    white-space: nowrap;
 }
 
 /* Mobile: the mark docks to the left corner (the menu pill owns the right).
@@ -437,62 +765,6 @@ body {
         left: 16px;
         transform: none;
     }
-}
-
-/* Scramble hover labels (ScrambleText.jsx). Idle: plain inline spans, zero
-   layout impact. While the pointer is over the pill (.scramble--locked) every
-   glyph cell becomes an inline-block frozen at its measured natural width, so
-   flickering replacement glyphs never nudge their neighbours or resize the
-   pill. The measured widths already contain the pill's 0.04em tracking; it is
-   zeroed while locked so browsers that add letter-spacing after atomic
-   inline-blocks (Chrome) can't add it a second time. */
-.scramble__sr {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-}
-
-.scramble--locked .scramble__chars {
-    letter-spacing: 0;
-}
-
-.scramble--locked .scramble__char {
-    display: inline-block;
-    text-align: center;
-    /* Keep the space glyph from collapsing inside its inline-block cell. */
-    white-space: pre;
-}
-
-/* Scramble-in reveal (DecryptText.jsx) — the About headline's on-open cousin
-   of the scramble above: the line types on left→right behind a fading noise
-   fringe. Same locking model, plus word wrappers: the headline wraps across
-   lines, and nowrap word spans keep the locked inline-block cells from
-   breaking mid-word — line breaks only ever land on the space cells between
-   words. */
-.decrypt__sr {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-}
-
-.decrypt__word {
-    white-space: nowrap;
-}
-
-.decrypt--locked .decrypt__chars {
-    letter-spacing: 0;
-}
-
-.decrypt--locked .decrypt__char {
-    display: inline-block;
-    text-align: center;
-    white-space: pre;
 }
 
 /* The eye-ballz avatar replaces the reference title text as the centerpiece. */
@@ -538,7 +810,7 @@ body {
     letter-spacing: 0.02em;
     padding: 4px 8px;
     color: #fff;
-    background-color: #0000ff;
+    background-color: var(--blue);
     white-space: nowrap;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -546,81 +818,148 @@ body {
 
 /* ── ABOUT trigger + overlay ───────────────────────────────────────────────── */
 
-/* Button + "^" hint, grouped under the avatar (desktop) or anchored to the bottom (touch).
-   Fixed; the children stack vertically and centered. Sibling of .hero-avatar
-   (pointer-events:none), so the button re-enables pointer events for itself. */
+/* Label + travelling-line hint, grouped under the avatar (desktop) or anchored to
+   the bottom (touch). Fixed; the children stack vertically and centered. Sibling
+   of .hero-avatar (pointer-events:none), so the button re-enables pointer events
+   for itself. */
 .about-trigger-group {
     position: fixed;
     left: 50%;
     top: calc(50% + min(240px, 40vw, 35vh) + 80px);
     /* Crucial nav affordance — never let it slip below the fold. On short
        windows the ideal "80px under the avatar" spot can pass the viewport
-       bottom, so clamp to it (76px covers caret + gap + pill with breathing
-       room). The plain calc() above stays as the no-dvh fallback. */
+       bottom, so clamp to it: 100px of stack (label + gap + line) plus a 40px
+       bottom margin, so the line never crowds the viewport edge. Bump this
+       together with --hint-h. The plain calc() above is the no-dvh fallback. */
     top: min(
         calc(50% + min(240px, 40vw, 35vh) + 80px),
-        calc(100dvh - env(safe-area-inset-bottom, 0px) - 76px)
+        calc(100dvh - env(safe-area-inset-bottom, 0px) - 140px)
     );
     transform: translateX(-50%);
     z-index: 2;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
+    gap: 14px;
     pointer-events: none;
 }
 
-/* On touch devices the group anchors to the bottom: that bottom strip is the swipe-up
-   open-zone (gestures starting on/below it open About; higher swipes pan the gallery). */
-@media (pointer: coarse) {
-    .about-trigger-group {
-        top: auto;
-        bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
-    }
-}
-
-/* Animated up-caret hinting the scroll/swipe-up-to-open gesture. */
-.about-trigger-caret {
+/* Hint: a clipped track with a full-length segment translating through it. The
+   segment is exactly as tall as the track, so its leading edge runs down while
+   the trailing edge is still clipped at the top (and vice versa on the way out)
+   — one ease-in-out across the whole travel reads as accelerate-then-decelerate.
+   Transform-only, no JS. A glow is not an option here: overflow:hidden clips
+   box-shadow, hence the 2px width to carry #0000ff's low luminance on black. */
+.about-trigger-line {
+    --hint-w: 2px;
+    --hint-h: 56px;
     pointer-events: none;
-    font-size: 14px;
-    line-height: 1;
-    font-weight: 700;
-    color: #fff;
-    animation: about-caret-bob 1.6s ease-in-out infinite;
+    position: relative;
+    width: var(--hint-w);
+    height: var(--hint-h);
+    background-color: rgba(255, 255, 255, 0.12);
+    overflow: hidden;
 }
 
-@keyframes about-caret-bob {
-    0%,
-    100% {
-        opacity: 0.5;
-        transform: translateY(2px);
+.about-trigger-line::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-color: var(--blue);
+    animation: about-hint-run 1.6s ease-in-out infinite;
+}
+
+@keyframes about-hint-run {
+    from {
+        transform: translateY(-100%);
     }
-    50% {
-        opacity: 1;
-        transform: translateY(-3px);
+    to {
+        transform: translateY(100%);
     }
 }
 
-/* Neon pill. Static inside the group; re-enables pointer events for itself. */
+/* Muted label. Static inside the group; re-enables pointer events for itself.
+   The padding is invisible now that the neon fill is gone — it keeps the tap
+   target usable. */
 .about-trigger {
     pointer-events: auto;
     cursor: pointer;
     border: none;
+    background: none;
     font: inherit;
     text-transform: uppercase;
     font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.04em;
-    padding: 6px 12px;
-    color: #fff;
-    background-color: #0000ff;
-    transition: opacity 0.15s ease;
+    padding: 8px 12px;
+    color: #888;
+    transition: color 0.15s ease;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
 
-.about-trigger:hover {
-    opacity: 0.85;
+.about-trigger:hover,
+.about-trigger:focus-visible {
+    color: #fff;
+}
+
+/* On touch devices the group anchors to the bottom: that bottom strip is the swipe-up
+   open-zone (gestures starting on/below it open About; higher swipes pan the gallery).
+   MUST stay after the base rules above: these carry no extra specificity, so source
+   order is all that decides — and the base `animation` SHORTHAND resets
+   animation-direction, silently undoing the reverse if this block comes first. */
+@media (pointer: coarse) {
+    .about-trigger-group {
+        top: auto;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+        /* Line above the word, so the segment runs from the bottom of the screen
+           up toward the page — the shape of the swipe-up gesture that opens it. */
+        flex-direction: column-reverse;
+    }
+
+    /* Shorter track on touch: the group is bottom-anchored and its rect top IS
+       the swipe-open zone (openTouchZone), so every px of height here is a px
+       taken from the gallery-pan area above. */
+    .about-trigger-line {
+        --hint-h: 40px;
+    }
+
+    /* Travel bottom→top. The keyframe bezier is self-symmetric, so reversing it
+       mirrors the motion without changing the curve. */
+    .about-trigger-line::after {
+        animation-direction: reverse;
+    }
+
+    /* ...all of which puts the hint under the bottom-right corner slot, and puts
+       the corner slot inside the hint's swipe-open band — that gate reads only
+       the group's rect .top (openTouchZone), so it spans the full width. Lift
+       the prompt, which outlives the intro, clear of both: centred above the
+       head, 16px off the crown. min(240px, 40vw, 35vh) is the avatar's HALF
+       extent (.hero-avatar sizes to min(480px, 80vw, 70vh) and centres), the
+       same term .about-trigger-group uses to sit below the chin on desktop — so
+       both anchors track the face instead of guessing at it. The progress line
+       and skip pill keep the corner: they're gone before the hint ever mounts.
+
+       Anchored on BOTH edges, not left:50% + translateX: a fixed box pinned
+       only on the left is shrink-to-fit against the right viewport edge, so it
+       caps at half the screen and wraps the question to two lines. Gutters +
+       auto margins centre it with the full width available, so the question
+       stays on one line. */
+    .intro-skip-prompt {
+        left: 16px;
+        right: 16px;
+        margin-inline: auto;
+        width: fit-content;
+        bottom: calc(50% + min(240px, 40vw, 35vh) + 16px);
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+
+    /* Desktop's 22px pill is under the touch-target floor. */
+    .intro-skip-prompt__btn {
+        padding: 8px 14px;
+    }
 }
 
 /* Admin-only corner pill (hero): open/close public gallery uploads. Same neon
@@ -640,7 +979,7 @@ body {
     letter-spacing: 0.04em;
     padding: 6px 12px;
     color: #fff;
-    background-color: #0000ff;
+    background-color: var(--blue);
     transition: opacity 0.15s ease;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -735,7 +1074,9 @@ body {
        position:relative anchors the cursor artifact's column-local coords. */
     position: relative;
     width: 100%;
-    padding: 72px clamp(20px, 4.4vw, 64px) 88px;
+    /* Bottom padding 0: the contact footer supplies its own base padding —
+       anything here would float the footer's meta row off the viewport edge. */
+    padding: 72px var(--gutter) 0;
 }
 
 /* (Close × button removed — the ▙▟ brand logo above the overlay closes it.
@@ -752,8 +1093,8 @@ body {
    pointer across the chapter column — one face layer per section, each
    clip-path'd to its section's y-band so crossing a border wipes one
    creature out and the next in along the line itself (no fade between
-   sections). Portaled to <body> like .works-preview and stacked one above
-   it, so the pet flies OVER the image while orbiting (nothing inside the
+   sections). Portaled to <body> and stacked above the overlay, so the pet
+   flies OVER the image while orbiting (nothing inside the
    overlay's own stacking context could). Never intercepts the pointer it
    follows; its armed-gated opacity covers open/close instead of the
    dissolve clip. The rAF loop drives transform + clips + glyphs; only the
@@ -807,23 +1148,17 @@ body {
 
 /* Noise cells flashed over the pet while it's chasing hard. */
 .cursor-artifact__glitch {
-    color: #0000ff;
+    color: var(--blue);
 }
 
 .about-section + .about-section {
-    border-top: 1px solid #1a1a1a;
+    border-top: 1px solid var(--hairline);
 }
 
 /* Sub-chapter bands (Works, Contact): eyebrow row + squeezed title only —
    no wordmark or footer row, so the About band stays the overlay's anchor. */
 .chapter-band--sub {
     margin-bottom: 24px;
-}
-
-/* Page headers (Gallery, Create): same band anatomy at utility scale — the
-   giant display sizes belong to the overlay; pages keep the title compact. */
-.chapter-band--page .chapter-band__line {
-    font-size: clamp(26px, 3.6vw, 48px);
 }
 
 /* The About role line ("A Frontend Developer") is a subtitle to the wordmark,
@@ -868,7 +1203,7 @@ body {
        font than the old /9.76 which overflowed and wrapped). nowrap makes it
        physically unable to wrap regardless of font-load/rounding; retune the
        divisor if the greeting text length changes. */
-    font-size: max(30px, calc((100vw - 2 * clamp(20px, 4.4vw, 64px)) / 10.8));
+    font-size: max(30px, calc((100vw - 2 * var(--gutter)) / 10.8));
     white-space: nowrap;
     /* Air between the lockup and its subtitle. */
     margin-bottom: clamp(12px, 1.8vw, 28px);
@@ -899,7 +1234,7 @@ body {
 /* The name wears the site blue — same #0000ff as the nav pills and the
    dissolve band. Applies to its scramble fringe too (cells inherit). */
 .decrypt__word--accent {
-    color: #0000ff;
+    color: var(--blue);
 }
 
 /* Mobile band: the desktop wordmark:subtitle ratio (~5:1) collapses to
@@ -939,11 +1274,11 @@ body {
    track one width + hip-cut. */
 .chapter-reading__flow {
     --hip-cut: 0.46; /* share of the figure shown, cut just under the hands (matches masks) */
-    /* Figure width scales linearly so the two-column spread stays usable from
-       tablet portrait (≈768px → ~360px figure, ~170px text columns) up to
-       large desktop (1280 → ~768px, unchanged), capped at 900. A plain 60vw
-       left only ~110px columns at 768 once tablets joined the desktop layout;
-       this keeps the text readable at every width without a resize jump. */
+    /* Figure width scales linearly so the spread stays usable from its 1200px
+       floor (→ ~704px figure, ~547px columns) up to large desktop (1280 →
+       ~768px), capped at 900. Below 1200 this composition is off entirely —
+       the columns get ~half the measure a single-column float would give at
+       the same figure width, so the tier below runs the float instead. */
     --fig-w: clamp(340px, calc(80vw - 256px), 900px);
     /* visible height = width ÷ (40 / (67·hip-cut)) */
     --fig-h: calc(var(--fig-w) * (67 * var(--hip-cut)) / 40);
@@ -993,20 +1328,25 @@ body {
    AsciiPortraitHover's onContour) — the text hugs the real silhouette with
    no hand-tuning, and survives crop/size changes. The literals here are
    first-paint fallbacks only. Load with ?wrapdebug to see the shapes. */
+/* border-box: the generated polygons are authored against the float's BORDER
+   box (the box that visually tracks the drawn figure); shape-outside's default
+   reference is the MARGIN box, which the negative text-drop margin would warp. */
 .about-silh--l {
     float: right; /* right edge = centre seam; text wraps his left contour */
-    shape-outside: var(
-        --wrap-l,
-        polygon(88% 0, 100% 0, 100% 100%, 30% 100%, 40% 60%, 88% 28%)
-    );
+    /* First-paint fallback ONLY. The real contour is written into inline style
+       by AboutOverlay once the figure's cell grid exists — it cannot come
+       through var() here, because WebKit (every iOS browser) doesn't recompute
+       a float's shape when a custom property feeding shape-outside changes, so
+       the copy would wrap this crude literal forever. See MQ_PHONE there. */
+    shape-outside: polygon(88% 0, 100% 0, 100% 100%, 30% 100%, 40% 60%, 88% 28%)
+        border-box;
 }
 
 .about-silh--r {
     float: left; /* left edge = centre seam; text wraps his right contour */
-    shape-outside: var(
-        --wrap-r,
-        polygon(12% 0, 0% 0, 0% 100%, 70% 100%, 60% 60%, 12% 28%)
-    );
+    /* First-paint fallback only — see .about-silh--l. */
+    shape-outside: polygon(12% 0, 0% 0, 0% 100%, 70% 100%, 60% 60%, 12% 28%)
+        border-box;
 }
 
 /* ?wrapdebug overlays: the same polygons as clip-paths over translucent
@@ -1030,6 +1370,63 @@ body {
 .wrap-debug--r {
     left: 50%;
     clip-path: var(--wrap-r, none);
+}
+
+/* ?debug — the mask the copy is avoiding, painted over the figure it was
+   generated from. Sits INSIDE the crop box so inset:0 tracks it exactly; the
+   clip-path is the very same custom property shape-outside is reading, so what
+   you see is literally the shape, not a redrawing of it.
+
+   Filled = the region the copy is excluded from. Note shape-margin (14px) is
+   added OUTSIDE this fill by the browser, so the copy should sit a hair clear
+   of the fill's edge, not flush against it. */
+.wrap-mask {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 255, 0.3);
+    outline: 1px dashed rgba(140, 140, 255, 0.85);
+    outline-offset: -1px;
+    pointer-events: none;
+    z-index: 6;
+}
+
+/* ?debug readout. Fixed to the viewport so it survives the overlay's own
+   scroller, and screenshot-able on a phone — this exists because the bug it
+   diagnoses (WebKit ignoring a var()-fed shape-outside) cannot reproduce in a
+   desktop Chromium pane. "MISMATCH" means the used shape isn't the generated
+   one; "OK" means inline made it through. */
+.wrap-probe {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    z-index: 9999;
+    margin: 0;
+    padding: 6px 8px;
+    max-width: 100vw;
+    overflow-x: auto;
+    font-family: var(--font-main), ui-monospace, monospace;
+    font-size: 10px;
+    line-height: 1.35;
+    color: #9f9;
+    background: rgba(0, 0, 0, 0.86);
+    border-top: 1px solid #0f0;
+    pointer-events: none;
+    white-space: pre;
+}
+
+/* Desktop drives the wrap from the two silhouette halves, not from the figure
+   box — .wrap-debug--l/--r already draw those, so this would only mislead. */
+@media (min-width: 1200px) {
+    .wrap-mask {
+        display: none;
+    }
+}
+
+/* Tablet: one upright float carrying the full-body contour. */
+@media (min-width: 768px) and (max-width: 1199.98px) {
+    .wrap-mask {
+        clip-path: var(--wrap-full-l, none);
+    }
 }
 
 .wrap-debug--full {
@@ -1061,70 +1458,68 @@ body {
     display: block;
     width: 100%;
     height: auto;
+    /* Vertical pans keep scrolling the overlay, but horizontal drags stay
+       with the canvas so touch can paint ignite trails across the figure
+       (without this the browser claims the gesture and pointermove stops). */
+    touch-action: pan-y;
 }
 
-/* Fallback: no shape-outside → the round-3 side-column spread. */
-@supports not (shape-outside: url("x")) {
-    .chapter-reading__flow {
-        --text-drop: 0px; /* no float to compensate — keep columns square */
-        display: grid;
-        grid-template-columns: 1fr auto 1fr;
-        gap: clamp(28px, 4.5vw, 70px);
-        align-items: end;
-        min-height: 0;
-    }
-    .about-silh {
-        display: none;
-    }
-    .chapter-reading__col {
-        max-width: 30ch;
-        padding-bottom: clamp(48px, 7vw, 96px);
-    }
-    .chapter-reading__col--left {
-        grid-column: 1;
-        justify-self: end;
-    }
-    .about-portrait {
-        position: static;
-        transform: none;
-        left: auto;
-        grid-column: 2;
-        margin: 0;
-    }
-    .chapter-reading__col--right {
-        grid-column: 3;
-        justify-self: start;
-    }
-}
+/* (The no-shape-outside fallback lives after the min-width:1200px block — it
+   has to win the cascade against that block's grid-column assignments, and
+   @supports contributes no specificity of its own. See the note there.) */
 
-@media (max-width: 767.98px) {
-    /* Phones only — tablets (≥768px) keep the desktop two-column spread.
-       Magazine wrap: one block flow, the FULL-BODY figure floats top-right
-       carrying its auto-generated left-contour polygon (legs pocket
-       included), so the copy hugs head → arm → into the pocket beside the
-       legs, and the remainder flows full-width beneath. flow-root keeps both
-       <p>s in the float's BFC (flex items wouldn't wrap a sibling's float)
-       and contains the float. Trade-off: the torso sits inside the text, not
-       flush on the works divider — a single phone column can't have both. */
+@media (max-width: 1199.98px) {
+    /* Phones AND tablets — everything below the spread tier. Magazine wrap:
+       one block flow, the FULL-BODY figure floats top-right carrying its
+       auto-generated left-contour polygon (legs pocket included), so the copy
+       fills the negative space the silhouette leaves — beside the narrow head,
+       tightening past the outstretched arms, widening again into the pocket
+       beside the legs, then full measure beneath. flow-root keeps both <p>s in
+       the float's BFC (flex items wouldn't wrap a sibling's float) and
+       contains the float. Trade-off: the torso sits inside the text, not flush
+       on the works divider — a single column can't have both.
+
+       --float-w is the taste knob, and it trades figure size against measure:
+       the polygon tracks the INK, so a wider box means wider ink and the
+       leftover pocket shrinks proportionally. Widening does not push the copy
+       out of the way — it just narrows every line. Measured at 390px, lines
+       beside the figure (min/median ch):
+         88% → 1/11ch    78% → 3/13ch    62% → 9/17ch    50% → 15/20ch
+       50% is the first value where nothing falls under 14ch, i.e. where the
+       ladder disappears. The old min(56vw,300px) sat at ~62%. Go lower for a
+       fuller measure, higher for a bigger figure — but past ~62% the copy
+       beside the arms starts breaking into two-word lines again. */
     .chapter-reading__flow {
         --text-drop: 0px; /* wrap starts at the top — no vertical centring */
         --hip-cut: 1; /* legs visible: the box shows the whole 40×67 grid */
+        /* Not --fig-w: that feeds --fig-h's calc, which can't take a %. */
+        --float-w: min(50%, 420px);
         display: flow-root;
         margin-bottom: 0;
+        /* The flow runs the FULL content width at every tier below the
+           spread: the measure is capped on the copy itself
+           (.chapter-reading__col, see the tablet block below), not here, so
+           the figure floats against the real right edge instead of a 620px
+           island's. Capping the flow instead centred a 620px block under the
+           full-bleed wordmark and stranded 150–225px of black on each side —
+           and, because --float-w is a percentage OF the flow, it pinned the
+           figure to 310px at every tablet width. */
     }
     .about-silh {
         display: none;
     }
     .about-portrait {
         float: right;
-        position: static;
+        /* relative, not static: in flow like static, but still a containing
+           block so ?debug's .wrap-mask can inset:0 onto the crop box. The
+           canvas is static in this tier, so nothing else is affected. */
+        position: relative;
         transform: none;
         left: auto;
-        width: min(56vw, 300px);
-        margin: 4px 0 10px 14px;
-        shape-outside: var(
-            --wrap-full-l,
-            polygon(
+        width: var(--float-w);
+        margin: 2px 0 14px 0;
+        /* First-paint fallback only — see .about-silh--l. */
+        shape-outside: polygon(
                 44% 0,
                 100% 0,
                 100% 100%,
@@ -1134,13 +1529,21 @@ body {
                 20% 26%,
                 44% 12%
             )
-        );
-        shape-margin: 10px;
+            border-box; /* as on the desktop halves — not the margin box */
+        shape-margin: 14px;
     }
     .chapter-reading__col {
-        font-size: 15px;
+        font-size: clamp(15px, calc(12px + 0.42vw), 17px);
         line-height: 1.55;
         max-width: none;
+        /* Words stay whole. No hyphens, no break-word: a token that doesn't
+           fit the pocket beside a crop drops to the next line that has room
+           for it, which is only ever a raggeder edge — shape-outside already
+           reserves the float's space, so nothing can spill onto the glyphs.
+           (The desktop spread still needs break-word; its two columns pinch
+           below one word beside the arms. That rule is scoped to ≥1200.) */
+        hyphens: manual;
+        overflow-wrap: normal;
     }
     .wrap-debug--l,
     .wrap-debug--r {
@@ -1151,31 +1554,275 @@ body {
         display: block;
         left: auto;
         right: 0;
-        top: 4px;
-        width: min(56vw, 300px);
+        top: 2px;
+        width: var(--float-w);
         height: auto;
         aspect-ratio: calc(40 / 67);
         clip-path: var(--wrap-full-l, none);
     }
 }
 
+/* ── phones: the figure is cut in two ──────────────────────────────────
+   One standing full-body figure and a readable column can't share a 350px
+   screen: whatever width he takes, the copy beside him takes the rest, and it
+   ladders for his whole height. So he's cut into two crops that read as
+   separate beats down the page, each one big:
+
+     ┌──────────────────┐
+     │ TEXT TEXT TEXT   │  copy runs full width…
+     │ TEXT TEXT   ,--. │
+     │ TEXT TEXT  ( oo )│  …then down the LEFT of the head crop,
+     │ TEXT TEXT  /|  | │     which floats right and bleeds off the gutter
+     │ TEXT TEXT TEXT   │
+     │ |  |  TEXT TEXT  │  …then down the RIGHT of the legs crop,
+     │ |  |  TEXT TEXT  │     which floats left and bleeds the other way
+     │ TEXT TEXT TEXT   │  …then full width again
+     └──────────────────┘
+
+   Both crops are the same source canvas; the BOX crops it, exactly as
+   --hip-cut crops the head on desktop — see the crop windows below. Each also
+   carries its own fine-detail patch (face on the head crop, shoes on the legs
+   crop), requested per figure via AsciiPortraitHover's `detail` prop.
+
+   Each half wraps the edge that faces the copy — --wrap-head-l (left contour)
+   and --wrap-legs-r (right contour), both generated in AboutOverlay.jsx and
+   rescaled to their own crop. The literals here are first-paint fallbacks. */
+@media (max-width: 767.98px) {
+    .chapter-reading__flow {
+        /* Crop windows as fractions of the full 40×67 grid. These MUST track
+           PHONE_HEAD / PHONE_LEGS in AboutOverlay.jsx, which rescale the wrap
+           contours onto the same windows. Spans are pre-divided because CSS
+           can't nest the subtraction inside the ratios cleanly. */
+        --head-x0: 0.28;
+        --head-y0: 0;
+        --head-xspan: 0.44;
+        --head-yspan: 0.26;
+        /* Wide enough for the splayed feet: the shoe line reaches 0.295→0.74,
+           and the old 0.30→0.70 window sliced the outer edge off both shoes. */
+        --legs-x0: 0.27;
+        /* Trimmed at the HIPS so the shoes survive — cutting the feet read as
+           an accident. 0.66→1.0 keeps them and still halves the crop. */
+        --legs-y0: 0.66;
+        --legs-xspan: 0.49;
+        --legs-yspan: 0.34;
+    }
+
+    /* relative, not static: each crop box is the containing block for its own
+       absolutely-positioned canvas. Static sends the canvas's 100% and its
+       left/top 50% up to .chapter-reading__flow instead, which silently blows
+       the crop up to the full column width. The base rule's overflow:hidden
+       does the actual cropping. */
+    .about-portrait {
+        position: relative;
+        transform: none;
+        left: auto;
+    }
+
+    /* Box aspect = the visible slice of the grid: (xspan·40) / (yspan·67).
+       Bleeding each crop off its own gutter buys size for free — the part that
+       runs off-screen costs the copy nothing. */
+    .about-portrait--head {
+        float: right;
+        /* Sized against the copy beside it. Measured at 390px, box size vs the
+           lines running down its side (min/median ch):
+             64% → 224×222 box, 8/14ch    58% → 203×201, 11/17ch
+             50% → 175×173 box, 17/20ch
+           58 leans big while keeping the median a real measure; drop toward 50
+           for a fuller column, push past 64 and the copy starts breaking up. */
+        width: 58%;
+        /* Turned, so the box is as wide as the crop is TALL: the visible slice
+           is (yspan·67) across by (xspan·40) down. */
+        aspect-ratio: calc(
+            (var(--head-yspan) * 67) / (var(--head-xspan) * 40)
+        );
+        /* Top margin sets how much copy runs full width before the head
+           arrives — the figure is first in DOM, so nothing else can put text
+           above it. */
+        margin: clamp(20px, 6vw, 48px) calc(-1 * var(--gutter)) 1.2em 1.2em;
+        /* First-paint fallback only — see .about-silh--l. */
+        shape-outside: polygon(23% 0, 100% 0, 100% 100%, 8% 100%, 14% 60%, 23% 22%)
+            /* border-box, not the default margin-box: the polygon is authored
+               against the drawn box, and the margins here would otherwise
+               stretch the reference box and drag the shape off the glyphs. */
+            border-box;
+        /* 7px measured as "touching" on a real screen — the contour traces
+           cell boundaries, so anything under ~12 reads as the copy sitting on
+           the glyphs. The slack that used to make this look loose was the
+           contour's vertical smear, fixed at TURN_STEPS, not here. */
+        shape-margin: 14px;
+    }
+
+    .about-portrait--legs {
+        float: left;
+        /* Narrower than the head crop: it's twice as tall, so the copy runs
+           down it for ~16 lines and needs the measure more. */
+        width: 50%;
+        aspect-ratio: calc(
+            (var(--legs-yspan) * 67) / (var(--legs-xspan) * 40)
+        );
+        margin: 0.4em 1.2em 1.2em calc(-1 * var(--gutter));
+        /* First-paint fallback only — see .about-silh--l. */
+        shape-outside: polygon(77% 0, 0 0, 0 100%, 92% 100%, 86% 60%, 77% 22%)
+            border-box;
+        /* 7px measured as "touching" on a real screen — the contour traces
+           cell boundaries, so anything under ~12 reads as the copy sitting on
+           the glyphs. The slack that used to make this look loose was the
+           contour's vertical smear, fixed at TURN_STEPS, not here. */
+        shape-margin: 14px;
+    }
+
+    /* Turn each crop a quarter turn so it lies across the column and runs off
+       its own edge. The canvas is scaled so the crop window measures the box's
+       HEIGHT across and its WIDTH down — i.e. the turned window fills the box
+       exactly — then translated to bring the window's centre onto the box
+       centre (transform-origin sits there, at left/top 50%) and spun about it.
+       Translate percentages resolve against the canvas's own box, so they are
+       just the window centre in canvas fractions.
+
+       The WRAP can't ride along — shape-outside ignores transforms — so
+       contourToPolygons bakes the turn into the polygon. CSS spins only the
+       pixels; see turnedPolygon there. */
+    .about-portrait--head canvas,
+    .about-portrait--legs canvas {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        height: auto;
+        transform-origin: 0 0;
+    }
+
+    .about-portrait--head canvas {
+        width: calc(100% * 40 / (var(--head-yspan) * 67));
+        /* anticlockwise: crown to the left, body off the right edge */
+        transform: rotate(-90deg)
+            translate(
+                calc((var(--head-x0) + var(--head-xspan) / 2) * -100%),
+                calc((var(--head-y0) + var(--head-yspan) / 2) * -100%)
+            );
+    }
+
+    .about-portrait--legs canvas {
+        width: calc(100% * 40 / (var(--legs-yspan) * 67));
+        /* anticlockwise: hips to the left, feet pointing right into the page */
+        transform: rotate(-90deg)
+            translate(
+                calc((var(--legs-x0) + var(--legs-xspan) / 2) * -100%),
+                calc((var(--legs-y0) + var(--legs-yspan) / 2) * -100%)
+            );
+    }
+
+    /* The desktop overlays mirror a single centred figure; neither shape
+       applies here. ?debug uses .wrap-mask inside each crop instead. */
+    .wrap-debug {
+        display: none;
+    }
+
+    .about-portrait--head .wrap-mask {
+        clip-path: var(--wrap-head-l, none);
+    }
+
+    .about-portrait--legs .wrap-mask {
+        clip-path: var(--wrap-legs-r, none);
+    }
+}
+
+/* The legs crop is a phones-only beat — from the tablet float up, the one
+   figure carries the whole composition. */
+@media (min-width: 768px) {
+    .about-portrait--legs {
+        display: none;
+    }
+}
+
+/* ── tablets: the magazine float goes full-bleed ───────────────────────────
+   768–1199.98. Same composition as the ≤1199.98 block above (one flow, the
+   full-body figure floated right, copy filling the negative space its contour
+   leaves) — the difference is that the flow is now the whole content width, so
+   the block sits under the full-bleed wordmark instead of stranding a 620px
+   island in the middle of it.
+
+   Two knobs, and they FIGHT: the copy is a fixed ~1518-character budget, so a
+   wider measure means a SHORTER column, and a column shorter than the figure
+   leaves the legs standing in empty space. That's why --float-w has a ceiling
+   instead of tracking vw linearly — past ~400px the figure outgrows the copy
+   and you trade two side voids for one corner void. Exchange rate at ≥1100px:
+   +20px of figure width ≈ +33px of figure standing below where the copy ends.
+
+   --float-w is a percentage OF the flow, which is now ~1.5× wider than the old
+   island, so 38% here is a BIGGER figure than the old 50% was:
+     768 → 320px   900 → 320px   1024 → 351px   1180 → 400px
+   (310px at all four before). The floor keeps 768 from regressing. */
+@media (min-width: 768px) and (max-width: 1199.98px) {
+    .chapter-reading__flow {
+        --float-w: clamp(320px, 38%, 400px);
+    }
+
+    /* The measure cap, moved off the flow and onto the copy. It binds only
+       BELOW the float, where no float shortens the line box; beside the figure
+       the shape-outside boundary is already narrower, so the cap is a no-op
+       there and the wrap is untouched (the arms band — the narrowest point —
+       runs 44ch at 768 to 71ch at 1200, always inside this).
+
+       72ch, not the old 620px: 620px is 61ch at 17px but 68ch at 15px, i.e.
+       the old cap drifted with the fluid font instead of holding a measure.
+
+       Cost, and it's bounded: above ~1030px the cap is narrower than the
+       pocket beside the narrow head (733px vs 828px at 1180), so the top ~3
+       lines stop up to 9ch short of the contour instead of running into the
+       wedge. If that reads as a squared-off corner rather than as typesetting,
+       swap in max(72ch, calc(100% - 0.56 * var(--float-w) - 14px)) — 0.56 is
+       the head's ink offset in --wrap-full-l, so the cap can then never pull
+       the copy off the silhouette. It costs 83ch below the float at 1200. */
+    .chapter-reading__col {
+        max-width: 72ch;
+    }
+}
+
 /* Works accordion (henriheymans.com Recognitions & Awards style). */
+.works-list-wrap {
+    position: relative;
+}
+
+/* One label for the whole list, in the chapter bands' mono voice. GSAP owns
+   y + autoAlpha (fades in centered on the hovered row, fades out in place —
+   no travel back to the top). The right rail it sits in is carved from the
+   toggles' own padding so the row borders still run the full width. */
+.works-indicator {
+    position: absolute;
+    top: 0;
+    right: 0;
+    font-family: var(--font-main);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: #fff;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    will-change: transform;
+}
+
 .works-list {
     list-style: none;
-    border-top: 1px solid #1a1a1a;
+    border-top: 1px solid var(--hairline);
 }
 
 .works-row {
-    border-bottom: 1px solid #1a1a1a;
+    border-bottom: 1px solid var(--hairline);
 }
 
 .works-row__toggle {
     width: 100%;
     display: grid;
-    grid-template-columns: 1fr auto auto;
-    align-items: baseline;
+    grid-template-columns: 1fr auto;
+    /* center, not baseline: the sliding thumb is taller than the title */
+    align-items: center;
     gap: 16px;
-    padding: 22px 0;
+    /* Right padding = the shared indicator's rail (keeps the year clear of
+       it) while the row's border-bottom spans the full width. */
+    padding: 22px clamp(84px, 10vw, 128px) 22px 0;
     background: none;
     border: none;
     cursor: pointer;
@@ -1185,8 +1832,75 @@ body {
     transition: color 0.15s ease;
 }
 
-.works-row__toggle:hover {
-    color: #0000ff;
+/* Lead cell: inline thumb + title (negative-films service-item layout —
+   the title shifting right as the thumb slides out IS the effect). */
+.works-row__lead {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.works-row__thumb {
+    width: 0;
+    height: 56px;
+    overflow: hidden;
+    flex: none;
+    transition: width 0.3s ease;
+}
+
+.works-row__thumb img {
+    display: block;
+    width: 10rem;
+    height: 100%;
+    object-fit: cover;
+    object-position: left center;
+    transform: scale(1.5);
+    transform-origin: left;
+    transition: transform 0.3s ease;
+}
+
+/* .is-hovered mirrors :hover throughout: AboutOverlay sets it from its own
+   hit test (a row scrolled under a resting cursor, or the touch spotlight),
+   and it is the ONLY driver on touch.
+   :hover MUST stay behind `(hover: hover)`: phones emulate hover on tap, so a
+   :hover rule that changes the row's look makes the first tap paint the hover
+   state and the second tap open the panel — the double-tap bug. Gating it
+   keeps the first tap a real click, while .is-hovered still runs the effect. */
+.works-row__toggle.is-hovered .works-row__thumb {
+    width: 10.5rem;
+}
+
+.works-row__toggle.is-hovered .works-row__thumb img {
+    transform: scale(1);
+}
+
+@media (hover: hover) {
+    .works-row__toggle:hover .works-row__thumb {
+        width: 10.5rem;
+    }
+
+    .works-row__toggle:hover .works-row__thumb img {
+        transform: scale(1);
+    }
+}
+
+/* Open row already shows its image in the panel — keep the thumb shut. */
+.works-row.is-open .works-row__toggle.is-hovered .works-row__thumb {
+    width: 0;
+}
+
+.works-row.is-open .works-row__toggle.is-hovered .works-row__thumb img {
+    transform: scale(1.5);
+}
+
+@media (hover: hover) {
+    .works-row.is-open .works-row__toggle:hover .works-row__thumb {
+        width: 0;
+    }
+
+    .works-row.is-open .works-row__toggle:hover .works-row__thumb img {
+        transform: scale(1.5);
+    }
 }
 
 .works-row__title {
@@ -1196,8 +1910,25 @@ body {
     letter-spacing: -0.01em;
 }
 
+/* The title's explicit #fff wins over the toggle's hover color, so the blue
+   is stated on the title itself; focus-visible mirrors it now that the +/−
+   glyph affordance is gone. (:hover gated — see the thumb rules above.) */
+.works-row__toggle.is-hovered .works-row__title,
+.works-row__toggle:focus-visible .works-row__title {
+    color: var(--blue);
+}
+
+@media (hover: hover) {
+    .works-row__toggle:hover .works-row__title {
+        color: var(--blue);
+    }
+}
+
 /* Year meta speaks the chapter bands' mono voice so the system reads whole. */
 .works-row__meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
     font-family: var(--font-main);
     text-transform: uppercase;
     font-size: 11px;
@@ -1206,27 +1937,60 @@ body {
     color: #888;
 }
 
-.works-row__indicator {
-    font-size: 22px;
-    line-height: 1;
-    width: 1ch;
-    text-align: center;
+/* Not-yet-live marker ("coming soon"), same anatomy as the panel stack chips
+   and the admin card badges — a bordered chip is the site's one status voice,
+   so it reads as a fact about the project, not a button. Blue is stated on
+   hover only: at 10px, #0000ff text on black is too dim to carry the label
+   (the border takes the accent, the text stays white). */
+.works-row__status {
+    padding: 2px 6px;
+    border: 1px solid var(--line-soft);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    transition:
+        border-color 0.15s ease,
+        color 0.15s ease;
+}
+
+.works-row__toggle.is-hovered .works-row__status,
+.works-row__toggle:focus-visible .works-row__status {
+    border-color: var(--blue);
     color: #fff;
 }
 
-/* Height/opacity transition keeps it dependency-free. Closed = collapsed. */
+@media (hover: hover) {
+    .works-row__toggle:hover .works-row__status {
+        border-color: var(--blue);
+        color: #fff;
+    }
+}
+
+/* Height/opacity transition keeps it dependency-free. Closed = collapsed.
+   visibility drops the collapsed panel (now holding a focusable image button)
+   out of the tab order / a11y tree; the 0.3s delay lets the close animation
+   finish before it vanishes, while opening flips it visible instantly. */
 .works-row__panel {
     display: grid;
     grid-template-rows: 0fr;
     opacity: 0;
+    visibility: hidden;
     transition:
         grid-template-rows 0.3s ease,
-        opacity 0.3s ease;
+        opacity 0.3s ease,
+        visibility 0s 0.3s;
 }
 
 .works-row.is-open .works-row__panel {
     grid-template-rows: 1fr;
     opacity: 1;
+    visibility: visible;
+    transition:
+        grid-template-rows 0.3s ease,
+        opacity 0.3s ease,
+        visibility 0s 0s;
 }
 
 .works-row__panel-inner {
@@ -1244,52 +2008,251 @@ body {
     line-height: 1.5;
 }
 
-/* Cursor-trailing pixel-decode preview for the hovered Works row. Portaled to
-   <body>, so it floats over the overlay; JS writes translate3d every frame and
-   the margin nudges it up/right off the cursor. */
-.works-preview {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 220px;
-    height: 280px;
-    /* Vertically center on the cursor, sit to its right. */
-    margin: -140px 0 0 28px;
-    pointer-events: none;
-    z-index: 90;
+/* Open-panel spread: text left, cycling image right, stack chips (and the
+   cobrains client marquee) spanning underneath. Media column floor matches
+   the 220px hover preview; the canvas box keeps the assets' 4:5 ratio. */
+.works-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(220px, 30vw, 340px);
+    gap: 20px 32px;
+    align-items: start;
+}
+
+.works-panel__text {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+/* The global reset zeroes paragraph margins, so multi-paragraph copy needs its
+   own rhythm. Adjacent-sibling only: a one-paragraph entry stays flush. */
+.works-panel__text p + p {
+    margin-top: 1em;
+}
+
+.works-panel__media {
+    grid-column: 2;
+    grid-row: 1;
+    display: block;
+    width: 100%;
+    aspect-ratio: 4 / 5;
+    position: relative;
     overflow: hidden;
-    border: 1px solid #1a1a1a;
+    padding: 0;
+    border: 1px solid var(--hairline);
     background: #000;
-    opacity: 0;
-    transform: translate3d(-9999px, -9999px, 0);
-    transition: opacity 0.22s ease;
-    will-change: transform, opacity;
+    appearance: none;
+    font: inherit;
+    cursor: default;
 }
 
-.works-preview.is-visible {
-    opacity: 1;
+.works-panel__media.is-cycling {
+    cursor: pointer;
 }
 
-.works-preview__canvas {
+.works-panel__canvas {
     display: block;
     width: 100%;
     height: 100%;
 }
 
-@media (prefers-reduced-motion: reduce) {
-    .works-preview {
-        transition: none;
+/* Frame counter, doubling as the "there are more images" click affordance. */
+.works-panel__count {
+    position: absolute;
+    right: 10px;
+    bottom: 8px;
+    font-family: var(--font-main);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: rgba(255, 255, 255, 0.75);
+    pointer-events: none;
+}
+
+/* Stack row speaks the same mono voice as the year meta; chips follow the
+   gallery-card badge precedent. */
+.works-panel__stack {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.works-panel__stack-label {
+    font-family: var(--font-main);
+    text-transform: uppercase;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    color: #888;
+    margin-right: 8px;
+}
+
+.works-panel__chip {
+    font-family: var(--font-main);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 3px 8px;
+    border: 1px solid var(--line-soft);
+    color: rgba(255, 255, 255, 0.75);
+}
+
+/* Client marquee (cobrains): hairline ticker band. The track holds the list
+   twice and slides -50%, so spacing must be item margin — a flex gap would
+   make the seam gap ≠ the item gap and the loop would jump. */
+.works-marquee {
+    grid-column: 1 / -1;
+    /* Load-bearing: the track is width:max-content and slides -50%, so without
+       this it would overflow the panel and add a horizontal scrollbar. The
+       lead line below is normal-width text, so clipping never touches it. */
+    overflow: hidden;
+    border-top: 1px solid var(--hairline);
+    padding: 12px 0;
+}
+
+/* The line that introduces the client strip. A panel-level grid item spanning
+   both columns, so it sits ABOVE the marquee's top rule — a label over the
+   section rather than the first line inside it. Spanning also keeps it out of
+   the left text column, which is usually shorter than the 4:5 image beside it
+   and would otherwise strand the line well above the logos it points at. */
+.works-panel__clients-lead {
+    grid-column: 1 / -1;
+    /* No margin of its own: the panel's row gap already sits on both sides,
+       and an extra bottom margin pushed the label further from the section it
+       introduces than from the copy above it. */
+    color: var(--muted);
+}
+
+.works-marquee__track {
+    display: flex;
+    width: max-content;
+    animation: works-marquee 30s linear infinite;
+    will-change: transform;
+    /* Parked until the cobrains panel is open: an always-running animation —
+       even visibility:hidden inside the closed overlay — keeps the renderer
+       producing frames for the whole hero session. Longhand AFTER the
+       animation shorthand (the shorthand resets play-state). */
+    animation-play-state: paused;
+}
+
+.works-row.is-open .works-marquee__track {
+    animation-play-state: running;
+}
+
+/* No hover-pause: the strip runs continuously while the row is open. The
+   reduced-motion block below still parks it as a static row, which is the
+   accommodation that actually matters. */
+
+.works-marquee__item {
+    display: flex;
+    align-items: center;
+    height: 28px;
+    margin-right: 48px;
+    font-family: var(--font-main);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: #c9c9c9;
+    opacity: 0.6;
+}
+
+/* Real client logos: height-locked to the item, natural width — no max-width,
+   because capping the width makes a wide wordmark (MOOG, DKC) scale DOWN in
+   height to fit and read smaller than a compact mark, and in a horizontal
+   scroller extra width costs nothing but track. The source files are dark
+   marks on transparency, so they're flattened to white here and then ride the
+   item's own 0.6 opacity — a dozen brand palettes read as one strip instead of
+   fighting the dark panel, and nothing is invisible on black. */
+.works-marquee__item img {
+    height: 100%;
+    width: auto;
+    display: block;
+    filter: brightness(0) invert(1);
+}
+
+@keyframes works-marquee {
+    to {
+        transform: translateX(-50%);
     }
 }
 
-/* Contact links. */
-.contact-list {
-    list-style: none;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+/* Touch/small screens: no pointer, no indicator — kill it and drop its rail.
+   The thumb stays: on coarse pointers AboutOverlay's scroll spotlight drives
+   .is-hovered (one row at a time as it crosses the focus line), so the reveal
+   runs on scroll instead of hover. */
+@media (hover: none), (max-width: 767.98px) {
+    .works-row__toggle {
+        padding-right: 0;
+    }
+
+    .works-indicator {
+        display: none;
+    }
 }
 
+/* Phones: single column, source order (image → text → marquee → stack). */
+@media (max-width: 767.98px) {
+    /* Bigger rows: the title leads, the year drops beneath it — the longest
+       title ("arewefucked?.com") plus the sliding thumb needs the full column
+       or it wraps mid-spotlight. */
+    .works-row__toggle {
+        grid-template-columns: 1fr;
+        gap: 8px;
+        padding-top: 26px;
+        padding-bottom: 26px;
+    }
+
+    .works-row__title {
+        font-size: clamp(22px, 6.4vw, 26px);
+    }
+
+    .works-row__thumb {
+        height: 60px;
+    }
+
+    .works-row__thumb img {
+        width: 5rem;
+    }
+
+    /* Narrower reveal to fit the phone column. Touch never matches :hover
+       here (see the base rules) — .is-hovered is the spotlight's channel. */
+    .works-row__toggle.is-hovered .works-row__thumb {
+        width: 5.5rem;
+    }
+
+    .works-panel {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 16px;
+    }
+
+    .works-panel__text,
+    .works-panel__media {
+        grid-column: auto;
+        grid-row: auto;
+    }
+
+    /* Cap the 4:5 box so it doesn't dwarf the phone column. */
+    .works-panel__media {
+        width: min(100%, 320px);
+    }
+
+    .works-marquee__item {
+        height: 24px;
+        margin-right: 36px;
+    }
+}
+
+/* A narrow window with a real pointer (not a phone) still hovers — match the
+   phone-width reveal so it never tweens toward the desktop 10.5rem first. */
+@media (hover: hover) and (max-width: 767.98px) {
+    .works-row__toggle:hover .works-row__thumb {
+        width: 5.5rem;
+    }
+}
+
+/* Contact links (shared by the contact-footer meta columns). */
 .contact-link {
     color: #fff;
     text-decoration: none;
@@ -1300,13 +2263,25 @@ body {
 }
 
 .contact-link:hover {
-    color: #0000ff;
+    color: var(--blue);
 }
 
 @media (prefers-reduced-motion: reduce) {
     .about-overlay,
     .works-row__panel {
         transition: none;
+    }
+
+    /* Hover thumb snaps open/shut instead of sliding (scramble + indicator
+       tweens are already gated in JS). */
+    .works-row__thumb,
+    .works-row__thumb img {
+        transition: none;
+    }
+
+    /* Client strip parks as a static clipped row. */
+    .works-marquee__track {
+        animation: none;
     }
 
     /* Brand-mark split reveal snaps open/shut instead of animating. */
@@ -1316,9 +2291,20 @@ body {
         transition: none;
     }
 
-    .about-trigger-caret {
+    /* Hint parks as a static blue line filling its track — still an affordance. */
+    .about-trigger-line::after {
         animation: none;
-        opacity: 0.7;
+        transform: none;
+    }
+
+    /* Mobile menu snaps open/shut: block, rows and icon all cut between states
+       (the label's decode is already gated in JS). */
+    .nav__menu,
+    .nav__links,
+    .nav__stack,
+    .nav__stack .nav__link,
+    .nav__icon-bar {
+        transition: none;
     }
 }
 
@@ -1340,7 +2326,7 @@ body {
     position: absolute;
     right: 6px;
     bottom: 4px;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--muted);
     font-size: 12px;
 }
 
@@ -1357,7 +2343,7 @@ body {
     letter-spacing: 0.04em;
     padding: 6px 12px;
     color: #fff;
-    background-color: #0000ff;
+    background-color: var(--blue);
     transition: opacity 0.15s ease;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -1392,7 +2378,7 @@ body {
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    background-color: #0000ff;
+    background-color: var(--blue);
     color: #fff;
     padding: 4px 4px 4px 10px;
     text-transform: uppercase;
@@ -1419,7 +2405,7 @@ body {
 }
 
 .figdialog__stage {
-    background: #050505;
+    background: var(--screen-bg);
     min-height: 160px;
     /* Bounded box: the player contain-fits inside it, so tall figures letterbox
        instead of blowing the dialog past the viewport (they used to clip). */
@@ -1433,7 +2419,7 @@ body {
 }
 
 .figdialog__note {
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--muted);
     font-size: 14px;
 }
 
@@ -1443,7 +2429,7 @@ body {
     gap: 8px 24px;
     margin: 0;
     padding: 12px 14px;
-    border-top: 1px solid rgba(255, 255, 255, 0.14);
+    border-top: 1px solid var(--faint);
 }
 
 .figdialog__meta dt {
@@ -1462,13 +2448,14 @@ body {
 .figdialog__actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
     padding: 0 14px 14px;
 }
 
 .figdialog__btn {
     background: transparent;
-    border: 1px solid #0000ff;
+    border: 1px solid var(--blue);
     color: #fff;
     font: inherit;
     text-transform: uppercase;
@@ -1500,11 +2487,12 @@ body {
 }
 
 .figdialog__btn--danger {
-    border-color: #ff5b52;
+    border-color: var(--alert);
 }
 
-.figdialog__admin-error {
-    color: #ff5b52;
+/* Failed moderation call, or a failed export from the actions row below. */
+.figdialog__error {
+    color: var(--alert);
     font-size: 13px;
 }
 
@@ -1521,23 +2509,517 @@ body {
     text-transform: uppercase;
     letter-spacing: 0.06em;
     padding: 2px 6px;
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    border: 1px solid var(--line-soft);
     color: rgba(255, 255, 255, 0.75);
 }
 
 .gallery-card__badge.is-hero {
-    border-color: #0000ff;
-    background: #0000ff;
+    border-color: var(--blue);
+    background: var(--blue);
     color: #fff;
 }
 
 .gallery-card__badge.is-hidden {
-    border-color: #ff5b52;
-    color: #ff5b52;
+    border-color: var(--alert);
+    color: var(--alert);
 }
 
 @media (prefers-reduced-motion: reduce) {
     .plane-body {
         transition: none;
     }
+}
+
+/* ── culture-page rhythm: full-viewport section beats (About overlay) ──
+   Appended block (2026-07-22): sections meter by viewport heights like the
+   negative-films /culture page. ID-scoped so it wins over .about-section's
+   base padding without touching the rules above. */
+
+/* About = the overlay's "Inside The Studio" beat. 72px = the inner's top
+   padding. Original static composition (no sticky — see the block below). */
+#about.about-section {
+    min-height: calc(100vh - 72px);
+    min-height: calc(100svh - 72px);
+}
+
+/* Desktop reading spread. 1200px, not 768: two columns flanking the figure
+   each get half the measure a single-column float gives at the same figure
+   width (spread text = W/2 − fig/2 = half of W − fig), so tablets were reading
+   at ~13ch beside the arms. Below this the block is the magazine float above.
+   NO STICKY: the portrait sits in the static composition from the base rules —
+   absolutely centred, top-anchored, the copy positioned around it by
+   --text-drop. The previous round parked the figure with position:sticky while
+   the copy scrolled past and re-wrapped; that whole apparatus is gone (the
+   grid-overlay portrait, the cleared ::after runway it travelled through, and
+   the sticky .about-silh floats that tracked it). What stays here is the parts
+   that were never about sticking: the column geometry and the border-box
+   shape-outside reference. */
+@media (min-width: 1200px) {
+    .about-portrait {
+        /* Positioned, so it paints and hit-tests above the columns — the
+           hover canvas needs to receive the pointer. */
+        z-index: 1;
+    }
+
+    .chapter-reading__col {
+        /* Beside the figure's widest bands a line box can shrink below one
+           word — without this the word overflows INTO the drawn glyphs
+           instead of breaking. Still load-bearing at exactly 1200: the arm
+           band is 162px there and the longest token in the copy
+           ("configurators,", 15ch) is 153px — nine pixels of slack.
+           Emergency-only: normal lines are untouched. */
+        overflow-wrap: break-word;
+    }
+
+    .chapter-reading__col--left {
+        grid-column: 1;
+    }
+
+    /* Right column anchors to its OUTER edge; the ragged edges face the
+       figure symmetrically and follow its carved silhouette. */
+    .chapter-reading__col--right {
+        grid-column: 2;
+        text-align: right;
+    }
+
+    /* (shape-outside border-box lives on the base .about-silh--l/--r rules —
+       this block used to re-declare both just to add the reference box.) */
+}
+
+/* Fallback: no shape-outside → the round-3 side-column spread. Only the spread
+   tier needs it (below 1200 the float degrades to a plain right-floated image
+   with square text beside it, which is fine unstyled).
+
+   MUST stay after the min-width block above: @supports adds no specificity, so
+   when this sat earlier in the file that block's `grid-column: 2` beat this
+   one's `grid-column: 3` and the right column rendered on top of the portrait
+   in every browser without shape-outside. */
+@media (min-width: 1200px) {
+    @supports not (shape-outside: url("x")) {
+        .chapter-reading__flow {
+            --text-drop: 0px; /* no float to compensate — keep columns square */
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            gap: clamp(28px, 4.5vw, 70px);
+            align-items: end;
+            min-height: 0;
+        }
+        .about-silh {
+            display: none;
+        }
+        .chapter-reading__col {
+            max-width: 30ch;
+            padding-bottom: clamp(48px, 7vw, 96px);
+        }
+        .chapter-reading__col--left {
+            grid-column: 1;
+            justify-self: end;
+        }
+        .about-portrait {
+            position: static;
+            transform: none;
+            left: auto;
+            grid-column: 2;
+            margin: 0;
+        }
+        .chapter-reading__col--right {
+            grid-column: 3;
+            justify-self: start;
+            text-align: left;
+        }
+    }
+}
+
+/* Works: OUTER meter only — internals styled by their own rules. */
+#works.about-section {
+    min-height: 100vh;
+    min-height: 100svh;
+    padding-top: clamp(48px, 10vh, 120px);
+    padding-bottom: clamp(64px, 12vh, 140px);
+}
+
+/* Contact: negative-films footer anatomy — full-height column justified to
+   the bottom; heading block + copy up top, border-top meta row at the base. */
+#contact.about-section {
+    position: relative;
+    min-height: 100vh;
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding-bottom: 0;
+}
+
+/* ── tablets: the viewport meters relax ────────────────────────────────────
+   768–1199.98. The three meters above work when the content roughly fills a
+   16:10 desktop screen. On a tall portrait tablet they just force black: at
+   1024×1112 they were producing 345px under the last works row and 507px
+   above the contact footer. Content-sized here; the vh-based paddings still
+   carry the beat.
+
+   MUST stay after the meters it overrides — media queries contribute no
+   specificity, so a block up with the reading-block tier would lose to the
+   unmediated min-height declarations above on source order alone. */
+@media (min-width: 768px) and (max-width: 1199.98px) {
+    /* The reading block is top-anchored and its height is set by the copy
+       budget, not the viewport — and widening the flow (see the tablet block
+       in the reading section) makes the copy SHORTER, so this meter would
+       newly bite here too: 438px of black under the figure at 1024×1366. */
+    #about.about-section {
+        min-height: auto;
+    }
+
+    /* The rows are content-sized (4 × 101px; the 56px thumb sets the row
+       height, so the toggle's padding is the only knob) and can't be stretched
+       by a viewport meter without leaving dead space below the last one. Meter
+       off, vh padding kept, rows given the extra tap area a tablet wants:
+       101px → 117px. */
+    #works.about-section {
+        min-height: auto;
+        padding-top: clamp(48px, 7vh, 96px);
+        padding-bottom: clamp(56px, 8vh, 112px);
+    }
+
+    .works-row__toggle {
+        padding-top: 30px;
+        padding-bottom: 30px;
+    }
+
+    /* The gap above the footer is the liquid sim's field, not blank — so don't
+       delete it, budget it. min-height:auto leaves flex-end with no free space
+       to distribute, so the water band has to be restated as explicit padding;
+       that also makes it scale with the viewport instead of being whatever
+       100svh minus the content happened to leave:
+         1180×820 → 164px   1024×1112 → 222px   1024×1366 → 240px
+       justify-content:flex-end goes inert here and is left in place for the
+       tiers that still have free space to justify. */
+    #contact.about-section {
+        min-height: auto;
+        padding-top: clamp(120px, 20vh, 240px);
+    }
+}
+
+/* Ascii liquid canvas: fills the section behind the footer content and
+   bleeds across the overlay's side gutters so the water runs edge-to-edge
+   even though the content column doesn't. pointer-events:none keeps links
+   live — the overlay inner feeds the sim its pointer events. */
+.contact-liquid {
+    position: absolute;
+    top: 0;
+    left: calc(-1 * var(--gutter));
+    /* Canvas is a replaced element: left+right never stretch it, so the
+       bleed width must be explicit. */
+    width: calc(100% + 2 * var(--gutter));
+    height: 100%;
+    pointer-events: none;
+}
+
+/* Footer content paints above the ripples. */
+.contact-footer__main,
+.contact-footer__meta {
+    position: relative;
+    z-index: 1;
+}
+
+.contact-footer__main {
+    display: flex;
+    flex-direction: column;
+    gap: clamp(16px, 3vh, 32px);
+    margin-bottom: clamp(56px, 12vh, 140px);
+}
+
+.contact-footer__copy {
+    color: #c9c9c9;
+    font-size: 17px;
+    line-height: 1.6;
+    max-width: 52ch;
+}
+
+.contact-footer__meta {
+    border-top: 1px solid var(--hairline);
+    padding: 24px 0 32px;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(40px, 8vh, 96px);
+}
+
+.contact-footer__meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 32px;
+}
+
+.contact-footer__col {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.contact-footer__label {
+    font-family: var(--font-main);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #888;
+}
+
+/* Meta-row links read as columns of metadata, not display type. */
+.contact-footer__meta .contact-link {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.contact-footer__meta-row--base {
+    align-items: baseline;
+    font-family: var(--font-main);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #888;
+}
+
+/* Close-the-overlay + the intro-skip toggle. Two items where there was one, so
+   they group and wrap together rather than letting space-between strand the
+   copyright line on a narrow screen. */
+.contact-footer__actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px 20px;
+}
+
+/* Text-weight controls: the row's own type, hot on hover. Nothing pill-like —
+   these sit in a metadata line, not in the neon action language. */
+.contact-footer__action {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    color: #888;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s ease;
+}
+
+.contact-footer__action:hover {
+    color: var(--blue);
+}
+
+/* Phones (project convention .98): the meter relaxes and the meta row stacks
+   like negative-films' mobile footer (base row stays a horizontal line). */
+@media (max-width: 767.98px) {
+    .contact-footer__meta-row {
+        flex-direction: column;
+        gap: 28px;
+    }
+
+    .contact-footer__meta-row--base {
+        flex-direction: row;
+        justify-content: space-between;
+    }
+
+    /* Same meter problem as the tablet tier, and worse the taller the phone
+       gets: the works rows are content-sized (545px for four) so 100svh was
+       forcing 85px of black under the last row at 844 tall and 159px at 932.
+       #about needs no equivalent — its two-crop reading block is 1211–1297px
+       tall, so that meter has always been inert on phones. */
+    #works.about-section {
+        min-height: auto;
+        padding-top: 40px;
+    }
+
+    /* The footer's own content is a near-constant ~592px here, so every pixel
+       of 100svh above it was liquid field: 250px at 844 tall, 342px at 932.
+       Budget it instead, and smaller than the tablet tier's 20vh — a phone has
+       less room to spend on texture, and the water is already dimmed below:
+         640 → 90px   844 → 118px   932 → 130px */
+    #contact.about-section {
+        min-height: auto;
+        padding-top: clamp(80px, 14vh, 140px);
+    }
+
+    /* Phones: the ripples share a small screen with the footer copy —
+       dim the whole water layer so it reads as texture, not noise. */
+    .contact-liquid {
+        opacity: 0.6;
+    }
+}
+
+/* ── ascii cursor (AsciiCursor.jsx) ────────────────────────────── */
+/* Full replacement for the native pointer on the hero, the About overlay and
+   /gallery: a monospace reticle that changes shape to say what is under it.
+   The native cursor is hidden by the rule below — and only while the
+   component has both mounted AND seen a real fine-pointer move, so a crashed
+   effect, a touch session, or a route we don't cover can never leave a
+   visitor with no cursor at all.
+
+   The !important is load-bearing, twice over, and removing it silently
+   half-breaks the feature:
+   (1) the UA stylesheet DECLARES cursor on a[href] (pointer), button
+       (default) and text inputs (text). A declared value beats an inherited
+       one whatever its origin, so a plain `cursor: none` on <html> leaves the
+       system arrow visible over every link and button — i.e. over exactly the
+       elements the reticle exists to describe.
+   (2) this file's own cursor rules reach up to three classes
+       (.ascii-gallery.is-grabbing .ascii-plane, line ~236), so no
+       non-important author selector short of enumerating them all can win.
+   The cost: getComputedStyle().cursor reads "none" everywhere while armed,
+   which is precisely why AsciiCursor resolves state from its own selector
+   table and closest() rather than from the computed cursor. */
+html.has-ascii-cursor,
+html.has-ascii-cursor *,
+html.has-ascii-cursor *::before,
+html.has-ascii-cursor *::after {
+    cursor: none !important;
+}
+
+/* Form controls hide their working parts in UA shadow DOM, and `*` above does
+   NOT match a shadow pseudo-element — so a `cursor` declared on one of them
+   was never being overridden. That is why the system arrow came back while
+   dragging a slider on /create: Create.css sets `cursor: pointer` on the
+   range thumb, and nothing here could reach it.
+
+   These MUST stay one rule per vendor prefix. A selector list is thrown out
+   whole if any selector in it is unrecognised, so pairing -webkit- with
+   -moz- would silently kill the rule in BOTH engines — the exact failure it
+   looks like it is preventing. */
+html.has-ascii-cursor input[type="range"]::-webkit-slider-thumb,
+html.has-ascii-cursor input[type="range"]::-webkit-slider-runnable-track {
+    cursor: none !important;
+}
+
+html.has-ascii-cursor input[type="range"]::-moz-range-thumb,
+html.has-ascii-cursor input[type="range"]::-moz-range-track {
+    cursor: none !important;
+}
+
+html.has-ascii-cursor input[type="color"]::-webkit-color-swatch,
+html.has-ascii-cursor input[type="color"]::-webkit-color-swatch-wrapper {
+    cursor: none !important;
+}
+
+html.has-ascii-cursor input[type="color"]::-moz-color-swatch {
+    cursor: none !important;
+}
+
+/* The escape hatch: data-cursor="none" hands the subtree back to the system
+   cursor (iframes and anything else outside this stylesheet's reach). One
+   class deeper than the hide rule, so it wins. */
+html.has-ascii-cursor [data-cursor="none"],
+html.has-ascii-cursor [data-cursor="none"] * {
+    cursor: auto !important;
+}
+
+/* z-92: one above .cursor-artifact (91) and every other body-level portal.
+   Nothing may paint over the pointer — including .page-layer (40) and the
+   route-transition grid (50), where a cursor blinking out would read as a
+   dropped frame. pointer-events:none is mandatory rather than hygiene:
+   without it elementFromPoint() returns the reticle and the state machine
+   sees nothing but itself. The transform is written straight from the
+   pointermove handler, so no transition may ever touch it. */
+.ascii-cursor {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 92;
+    font-family: var(--font-main);
+    font-size: 17px;
+    line-height: 1;
+    font-weight: 500;
+    opacity: 0;
+    pointer-events: none;
+    user-select: none;
+    will-change: transform;
+
+    /* Colour lives in these two properties and nowhere else — swapping the
+       scheme is a one-line edit here, not a hunt through the rules below.
+       White rather than the site accent: the accent is the background of ~9
+       pills the reticle would vanish into, and the drop shadow then carries
+       it over the bright end of the ascii wall and the portrait too, which
+       no background-colour rule could (those are canvas pixels). */
+    --reticle: #fff;
+    --reticle-halo: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 7px rgba(0, 0, 0, 0.6);
+
+    color: var(--reticle);
+    text-shadow: var(--reticle-halo);
+}
+
+.ascii-cursor.is-armed {
+    opacity: 1;
+}
+
+/* Two ways to step aside, and the difference matters:
+   "none"   — data-cursor="none", the reticle goes AND the rule above hands
+              the system cursor back (Turnstile's iframe, which we can't reach).
+   "hidden" — the reticle goes but `cursor: none` stands, because something
+              else is already drawing the pointer there (the draw pad's
+              .brush-cursor ring, which shows brush size). Restoring the
+              system arrow here would put two cursors on screen at once. */
+.ascii-cursor[data-state="none"],
+.ascii-cursor[data-state="hidden"] {
+    opacity: 0;
+}
+
+/* Dead controls read as dead: same x, half the presence. */
+.ascii-cursor[data-state="disabled"] {
+    opacity: 0.5;
+}
+
+/* --core-nudge is measured from the real font metrics at runtime (a mono
+   glyph's ink is not centred in its box); 0 is a fine-looking fallback. */
+.ascii-cursor__core,
+.ascii-cursor__arm {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform: translate(-50%, calc(-50% + var(--core-nudge, 0px)));
+}
+
+/* The click letters are set smaller than the reticle's nominal size, and that
+   is not an inconsistency — it is what makes them MATCH. "+" is a small mark
+   hovering around the math axis and uses maybe half the em box; a capital C
+   or K fills the full cap height. At one shared font-size the letters carry
+   far more ink and read as a jump in scale, so they get optically corrected
+   down instead. em, so it tracks whatever the reticle's size becomes.
+   Measured at 17px: "+" inks 7x8px, and a cap at this size inks ~8.5x6 — a
+   near match in mass. At a shared 17px the cap would ink ~14px tall, twice
+   the "+", which is what reads as the word suddenly being bigger. */
+.ascii-cursor[data-state="press"] .ascii-cursor__core {
+    font-size: 0.62em;
+}
+
+/* The arms are the only part that springs. Each carries its own unit
+   direction (--ax/--ay, set once per state by the component) and they all
+   share one radius, --spread, which the rAF loop drives per frame while it
+   is travelling and then leaves alone. One shared radius is what keeps a
+   four-way form symmetrical for free, and it is why the resize forms can
+   point diagonally without any extra machinery. Slots with no arm in the
+   current form simply lose [data-on] and fade out. */
+.ascii-cursor__arm {
+    opacity: 0;
+    transition: opacity 0.12s linear;
+    transform: translate(
+        calc(-50% + var(--ax, 0) * var(--spread, 0px)),
+        calc(-50% + var(--ay, 0) * var(--spread, 0px) + var(--core-nudge, 0px))
+    );
+}
+
+.ascii-cursor__arm[data-on] {
+    opacity: 0.8;
+}
+
+/* Contact section: ContactLiquid's ripples are drawn from a ramp that
+   literally contains '+' and '=', so the reticle needs more separation here
+   than anywhere else — a solid halo rather than a soft one, so it stays a
+   mark instead of joining the wake at some amplitudes. The component also
+   snaps the arms here instead of springing them: the wake is meant to be the
+   only moving thing in that section, and it already answers a click with its
+   own splash. */
+.ascii-cursor.is-quiet {
+    --reticle-halo: 0 0 3px #000, 0 0 6px #000, 0 0 10px rgba(0, 0, 0, 0.8);
 }
