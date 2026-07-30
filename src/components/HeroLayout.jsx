@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation } from "react-router-dom";
 import App from "../App";
 import { RouteTransition } from "./RouteTransition.jsx";
+import { AsciiCursor } from "./AsciiCursor.jsx";
 
 // Layout route that keeps the hero (App: face avatar + ASCII wall + intro)
 // permanently mounted as the bottom layer while /create and /gallery render
@@ -28,6 +29,14 @@ export default function HeroLayout() {
         <App suspended={covered} />
       </div>
       <RouteTransition onCoverChange={setCovered} />
+      {/* Sibling of the hero layer, never inside it: .hero-layer.is-covered
+          hides by visibility, which would blank the cursor on /gallery.
+          Covers /create too — AsciiCursor's selector table carries that
+          page's whole tool vocabulary (crosshair, pick, move, the four
+          resize axes) and steps aside for the two pointers it cannot
+          replace: the draw pad's brush ring and Turnstile's iframe. /admin
+          never mounts this at all: it routes outside this layout. */}
+      <AsciiCursor />
     </>
   );
 }
