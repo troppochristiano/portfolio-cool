@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import gsap from "gsap";
 import { useDissolveReveal } from "../hooks/useDissolveReveal";
 import { useLenisScroll } from "../hooks/useLenisScroll";
@@ -25,10 +26,35 @@ import { WorksTitleScramble } from "./WorksTitleScramble.jsx";
 // chapter band: name → wordmark, role → squeezed line, the rest → the mono
 // footer row. The wordmark types on through DecryptText (empty while closed,
 // scramble fringe once the overlay settles); the body stays plain text.
+// Kept close in length to Body2 on purpose: the two columns of the reading
+// spread flank the figure, so a paragraph that outruns the other leaves the
+// composition lopsided. Every claim the longer draft made is still here, just
+// stated once instead of twice.
 const BODY_1 =
-  "The work I've done professionally has mostly been practical: configurators, real-time dashboards, backoffice tools people sat in front of all day. Unglamorous software, but the kind where a bad decision shows up immediately in someone's afternoon. For a few years I was the only frontend at the company, so the architecture and the small details were both my problem, and I got used to holding the whole thing in my head at once. I also spent a lot of that time helping the junior devs, which turned out to be the fastest way to find out whether I actually understood something. The part I like is when something is broken and then it isn't. I'll pick up whatever the problem asks for";
-const BODY_2 =
-  "This site is the other half — no client, no spec, no requirements to satisfy. Everything here exists because I wanted to make something cool and nobody was going to ask me for it. I come from a village where it was hard to find anyone with the same interests. The internet showed me I wasn't the only one, and that's the part of it I still value most — the community side, people finding each other over the same strange thing. So the gallery is open. Anyone can put something in it, and I'd rather it filled up with things I wouldn't have made myself";
+  "The work I've done professionally has mostly been practical: configurators, real-time dashboards, backoffice tools people sat in front of all day. Unglamorous software, but the kind where a bad decision shows up immediately in someone's afternoon. For a few years I was the only frontend at the company, so the architecture and the small details were both my problem. I also spent a lot of that time helping the junior devs, the fastest way to find out whether I actually understood something. The part I like is when something is broken and then it isn't. I'll pick up whatever the problem asks for";
+// A fragment rather than a plain string like BODY_1: the two places this
+// paragraph names a part of the site — the gallery, and the converter that
+// feeds it — link straight there, so the invitation is clickable where it's
+// made instead of sending people back to the nav.
+const Body2 = () => (
+  <>
+    {"This site is the other half — no client, no spec, no requirements to " +
+      "satisfy. Everything here exists because I wanted to make something " +
+      "cool and nobody was going to ask me for it. I come from a small town " +
+      "where it was hard to find anyone with the same interests. The internet " +
+      "showed me I wasn't the only one, and that's the part of it I still " +
+      "value most — the community side, people finding each other over the " +
+      "same strange thing. So the "}
+    <Link className="about-link" to="/gallery">
+      gallery
+    </Link>
+    {" is open. Anyone can "}
+    <Link className="about-link" to="/create">
+      put something in it
+    </Link>
+    {", and I'd rather it filled up with things I wouldn't have made myself"}
+  </>
+);
 
 // Full-body cutout (transparent bg), rendered by AsciiPortraitHover as the
 // blue canvas-ascii figure in the middle of the reading spread.
@@ -1005,7 +1031,7 @@ export function AboutOverlay({
                       className="about-silh about-silh--r"
                       aria-hidden="true"
                     />
-                    {BODY_2}
+                    <Body2 />
                   </p>
                   {WRAP_DEBUG && (
                     <>

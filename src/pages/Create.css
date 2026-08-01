@@ -68,17 +68,28 @@
     opacity: 0.85;
 }
 .create-page .masthead {
+    --title-fs: clamp(18px, 2vw, 28px);
     flex: none;
     display: flex;
-    align-items: baseline;
+    /* Top-aligned, not baseline: the pill's top edge should meet the top of
+       the title's letters. */
+    align-items: flex-start;
     gap: 14px;
     border-bottom: 2px solid var(--line);
     padding-bottom: 0.5rem;
     margin-bottom: 0.75rem;
 }
+/* flex-start aligns the pill to the title's LINE BOX top, which sits above the
+   letters: .chapter-band__line runs line-height .95 on a face whose caps start
+   0.0986em down (half-leading + cap height, measured off the font's metrics).
+   Push the pill by that much so the two tops actually agree at every clamp
+   step. Re-measure if .chapter-band__line's line-height changes. */
+.create-page .masthead .home-link {
+    margin-top: calc(var(--title-fs) * 0.0986);
+}
 /* Band voice at toolbar scale (overrides the shared __line size). */
 .create-page .masthead__title {
-    font-size: clamp(18px, 2vw, 28px);
+    font-size: var(--title-fs);
 }
 /* ── layout ── */
 .create-page .workbench {

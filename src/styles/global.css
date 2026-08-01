@@ -1306,6 +1306,27 @@ body {
     padding-top: var(--text-drop);
 }
 
+/* In-copy links (the gallery / converter mentions in the right column). The
+   copy sits at #c9c9c9, so the link goes full white and carries the accent in
+   the underline — visible as a link without punching a hole in the paragraph's
+   texture. The underline flips to white on hover rather than the text moving,
+   so the line box never reflows against the silhouette wrap. */
+.about-link {
+    color: #fff;
+    text-decoration: underline;
+    text-decoration-color: var(--blue);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 0.18em;
+    transition:
+        color 0.15s ease,
+        text-decoration-color 0.15s ease;
+}
+
+.about-link:hover,
+.about-link:focus-visible {
+    text-decoration-color: #fff;
+}
+
 /* Invisible wrap guide — a figure-half box at the column's inner edge (the
    centre seam); its mask silhouette overlays the drawn figure so text wraps
    the contour. Never painted. */

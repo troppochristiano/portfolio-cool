@@ -20,20 +20,31 @@
     padding-bottom: 0.5rem;
 }
 
-/* Pill + squeezed title on one slim baseline row (mirrors .create-page
-   .masthead). */
+/* Pill + squeezed title on one slim row (mirrors .create-page .masthead).
+   Top-aligned rather than baseline-aligned: the pill's top edge should meet
+   the top of the title's letters. */
 .gallery-head__bar {
+    --title-fs: clamp(18px, 2vw, 28px);
     display: flex;
-    align-items: baseline;
+    align-items: flex-start;
     gap: 14px;
 }
 
 /* .home-pill lives in global.css — always loaded, shared with /admin. */
 
+/* flex-start aligns the pill to the title's LINE BOX top, which sits above the
+   letters: .chapter-band__line runs line-height .95 on a face whose caps start
+   0.0986em down (half-leading + cap height, measured off the font's metrics).
+   Push the pill by that much so the two tops actually agree at every clamp
+   step. Re-measure if .chapter-band__line's line-height changes. */
+.gallery-head__bar .home-pill {
+    margin-top: calc(var(--title-fs) * 0.0986);
+}
+
 /* Band voice (main face, uppercase from .chapter-band__line) at
    toolbar scale — the 2-class selector beats the shared __line size. */
 .gallery-head .gallery-title {
-    font-size: clamp(18px, 2vw, 28px);
+    font-size: var(--title-fs);
 }
 
 .gallery-tagline {
