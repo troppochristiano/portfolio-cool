@@ -2,6 +2,7 @@ import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import HeroLayout from "./components/HeroLayout.jsx";
+import RouteTitle from "./components/RouteTitle.jsx";
 import "./styles/global.css";
 // Side effect: registers the block-reveal leave/enter tweens into the
 // pageTransitions seam that RouteTransition drives.
@@ -20,6 +21,8 @@ const AdminCreate = lazy(() => import("./pages/AdminCreate"));
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <BrowserRouter>
+      {/* Outside <Routes> so one mount covers every route. */}
+      <RouteTitle />
       <Routes>
         {/* Hero layout: App (face + wall + intro) stays mounted underneath
             /create and /gallery so returning home is instant with no intro
