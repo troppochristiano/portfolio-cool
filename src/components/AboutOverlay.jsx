@@ -31,7 +31,7 @@ import { WorksTitleScramble } from "./WorksTitleScramble.jsx";
 // composition lopsided. Every claim the longer draft made is still here, just
 // stated once instead of twice.
 const BODY_1 =
-  "The work I've done professionally has mostly been practical: configurators, real-time dashboards, backoffice tools people sat in front of all day. Unglamorous software, but the kind where a bad decision shows up immediately in someone's afternoon. For a few years I was the only frontend at the company, so the architecture and the small details were both my problem. I also spent a lot of that time helping the junior devs, the fastest way to find out whether I actually understood something. The part I like is when something is broken and then it isn't. I'll pick up whatever the problem asks for";
+  "The work I've done professionally has mostly been practical: configurators, dashboards, backoffice tools people sat in front of all day. Unglamorous software, but the kind where a bad decision shows up immediately in someone's afternoon. For a few years I was the only frontend at the company, so the architecture and the small details were both my problem. I also spent a lot of that time helping the junior devs, which turned out to be the fastest way to find out whether I actually understood something. The part I like is when something is broken and then it isn't. I'll pick up whatever the problem asks for";
 // A fragment rather than a plain string like BODY_1: the two places this
 // paragraph names a part of the site — the gallery, and the converter that
 // feeds it — link straight there, so the invitation is clickable where it's
@@ -103,7 +103,7 @@ const WORKS = [
     ],
     detail: [
       "I started at Cobrains straight out of high school, knowing essentially nothing. A senior developer took me on and taught me the job properly — most of what I know about building for the web starts there. When he left, I became the only dedicated frontend. That was the part that changed how I work: no one above me to check the decisions, so I had to get good at making them. Later the company brought in help, and I ended up doing the teaching instead.",
-      "I'd do all of it again. I went in as someone who could write code and came out as someone who could build things, and that changed more than my job.",
+      "i realy value all my time at cobrains, not only for all the cool people that worked there over the years.",
     ],
     clientsLead: "Companies I built products for / worked with:",
     stack: ["React", "JavaScript", "CSS", "Kubernetes"],
