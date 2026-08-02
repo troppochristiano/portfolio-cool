@@ -77,14 +77,15 @@ const SCRAMBLE_SETTLE_MS = 120;
 // only) fills the auto-scroll marquee; `status` (optional) tags a project
 // that isn't live yet, as a badge beside the year.
 //
-// State of the entries: everything except arewefucked?.com carries real copy
-// and real imagery, each built by its own script in scripts/ from the
-// project's own output — ascii widgets from its ascii renders, RRead from its
-// docs screenshots, cobrains from its archived project mockups.
-// arewefucked?.com is the last placeholder: Christian's own one-line
-// description plus a name-only image. A single-image entry renders without the
-// cycler or the frame counter, which is why that placeholder is one image
-// rather than a repeated set.
+// State of the entries: every one carries real copy and imagery built by its
+// own script in scripts/ from the project's own output — ascii widgets from
+// its ascii renders, RRead from its docs screenshots, cobrains from its
+// archived project mockups.
+// check-earth is the exception only in that it hasn't shipped, so there are no
+// screenshots to composite: generate-works-check-earth.cjs draws the product
+// itself instead — a real equirectangular projection with the hazard markers
+// at their true coordinates. A single-image entry renders without the cycler
+// or the frame counter, which is why it's one image rather than a set.
 // Chronological, oldest first, with the unreleased one last — so the list
 // reads as a career rather than a feed.
 const WORKS = [
@@ -102,10 +103,10 @@ const WORKS = [
       "/works/cobrains-3.webp",
     ],
     detail: [
-      "I started at Cobrains straight out of high school, knowing essentially nothing. A senior developer took me on and taught me the job properly — most of what I know about building for the web starts there. When he left, I became the only dedicated frontend. That was the part that changed how I work: no one above me to check the decisions, so I had to get good at making them. Later the company brought in help, and I ended up doing the teaching instead.",
-      "i realy value all my time at cobrains, not only for all the cool people that worked there over the years.",
+      "I started at Cobrains straight out of high school, knowing essentially nothing. A another developer took me on and taught me the job properly — most of what I know about building for the web starts there. When he left, I became the only dedicated frontend. That was the part that changed how I work: no one above me to check the decisions, so I had to get good at making them. Later the company brought in help, and I ended up doing the teaching instead.",
+      "i realy value all my time at cobrains, it realy helped me grow on only as a developer but a also as a person and i got to work on great projects with great people.",
     ],
-    clientsLead: "Companies I built products for / worked with:",
+    clientsLead: "Some of the companies i worked with:",
     stack: ["React", "JavaScript", "CSS", "Kubernetes"],
     clients: [
       { name: "DKC", src: "/works/clients/dkc.webp" },
@@ -159,12 +160,13 @@ const WORKS = [
   {
     // Undated on purpose: it isn't out, so the badge carries the whole story
     // and `meta` is omitted (the year span is conditional).
-    title: "arewefucked?.com",
+    title: "check-earth",
     status: "coming soon",
-    images: ["/works/arewefucked-1.svg"],
+    thumb: "/works/check-earth-thumb.svg",
+    images: ["/works/check-earth-1.svg"],
     detail:
-      "A single-serving site that answers one question with live data and slightly too much honesty.",
-    stack: ["React", "Vite", "Cloudflare Pages"],
+      "A live map of Earth and the natural phenomena moving across it — earthquakes, wildfires, storms and volcanic activity, drawn on the globe as they happen rather than listed as headlines.",
+    stack: ["React", "three.js"],
   },
 ];
 
@@ -1193,7 +1195,7 @@ export function AboutOverlay({
                   </div>
                 </header>
                 <p className="contact-footer__copy">
-                  Have a project, a role, or something odd worth building? My
+                  Have a project, a role, or something worth building? My
                   inbox is open.
                 </p>
               </div>

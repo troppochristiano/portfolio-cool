@@ -2216,7 +2216,7 @@ body {
 /* Phones: single column, source order (image → text → marquee → stack). */
 @media (max-width: 767.98px) {
     /* Bigger rows: the title leads, the year drops beneath it — the longest
-       title ("arewefucked?.com") plus the sliding thumb needs the full column
+       title ("ascii widgets") plus the sliding thumb needs the full column
        or it wraps mid-spotlight. */
     .works-row__toggle {
         grid-template-columns: 1fr;

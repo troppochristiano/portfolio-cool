@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000" viewBox="0 0 800 1000">
-  <!-- Name-only placeholder until real shots land. 800x1000 (4:5) to match the
-       works panel; the name sits on the vertical centre line so it also shows
-       in the 160x56 cover-cropped row hover thumb. textLength keeps the width
-       identical whatever monospace the renderer picks. -->
-  <rect width="800" height="1000" fill="#000000"/>
-  <text x="60" y="525" font-family="ui-monospace, Menlo, Consolas, &quot;DejaVu Sans Mono&quot;, monospace" font-size="70" font-weight="700" fill="#ffffff" textLength="680" lengthAdjust="spacing">AREWEFUCKED?.COM</text>
-</svg>
