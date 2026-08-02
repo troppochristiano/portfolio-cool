@@ -210,12 +210,17 @@ const WORKS = [
   },
 ];
 
-// Placeholder contact links — swap in real handles/URLs later.
+// The contact-footer's "Elsewhere" column, in the order it reads on the page.
 const SOCIALS = [
-  { label: "Instagram", href: "#" },
-  { label: "GitHub", href: "#" },
-  { label: "LinkedIn", href: "#" },
+  { label: "Instagram", href: "https://www.instagram.com/bian_chill" },
+  { label: "GitHub", href: "https://github.com/troppochristiano" },
+  {
+    label: "LinkedIn",
+    href: "https://www.linkedin.com/in/christian-bianchi-40102b183/",
+  },
 ];
+
+const EMAIL = "christianbianchi007@gmail.com";
 
 // ?debug (or the older ?wrapdebug) paints the generated wrap polygons as
 // translucent overlays so the mask the copy is avoiding can be eyeballed
@@ -1303,11 +1308,8 @@ export function AboutOverlay({
                 <div className="contact-footer__meta-row">
                   <div className="contact-footer__col">
                     <span className="contact-footer__label">Get in touch</span>
-                    <a
-                      className="contact-link"
-                      href="mailto:christianmail046@gmail.com"
-                    >
-                      christianmail046@gmail.com
+                    <a className="contact-link" href={`mailto:${EMAIL}`}>
+                      {EMAIL}
                     </a>
                   </div>
                   <div className="contact-footer__col">
