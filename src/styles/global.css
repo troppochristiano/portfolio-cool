@@ -2256,8 +2256,14 @@ body {
         font-size: clamp(22px, 6.4vw, 26px);
     }
 
+    /* The thumbs are ~2.86:1 strips (480x168). The box must keep that ratio or
+       object-fit:cover throws the rest away — at 60px tall against a 5rem-wide
+       image the visible slice was 1.33:1, i.e. the left 47%: check-earth showed
+       only the Americas and cobrains only its logo. 28px against the same 5rem
+       is 2.857:1, so this is simply the desktop strip (160x56) at half scale,
+       and the reveal width below is untouched. */
     .works-row__thumb {
-        height: 60px;
+        height: 28px;
     }
 
     .works-row__thumb img {
