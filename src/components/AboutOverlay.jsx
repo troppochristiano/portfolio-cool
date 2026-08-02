@@ -103,8 +103,8 @@ const WORKS = [
       "/works/cobrains-3.webp",
     ],
     detail: [
-      "I started at Cobrains straight out of high school, knowing essentially nothing. A another developer took me on and taught me the job properly — most of what I know about building for the web starts there. When he left, I became the only dedicated frontend. That was the part that changed how I work: no one above me to check the decisions, so I had to get good at making them. Later the company brought in help, and I ended up doing the teaching instead.",
-      "i realy value all my time at cobrains, it realy helped me grow on only as a developer but a also as a person and i got to work on great projects with great people.",
+      "I started at Cobrains straight out of high school, knowing essentially nothing. Another developer took me on and taught me the job properly — most of what I know about building for the web starts there. When he left, I became the only dedicated frontend. That was the part that changed how I work: no one above me to check the decisions, so I had to get good at making them. Later the company brought in help, and I ended up doing the teaching instead.",
+      "i really value all my time at cobrains, it really helped me grow not only as a developer but also as a person and i got to work on great projects with great people.",
     ],
     clientsLead: "Some of the companies i worked with:",
     stack: ["React", "JavaScript", "CSS", "Kubernetes"],
