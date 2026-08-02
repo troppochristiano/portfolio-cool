@@ -11,6 +11,10 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="theme-color" content="#050505" />
 
+    <!-- Both the apex and www serve the site, so name the apex as canonical
+         and keep every crawler pointed at one host. -->
+    <link rel="canonical" href="https://christianbianchi.com/" />
+
     <!-- Social cards. og:image must stay an absolute URL — scrapers don't
          resolve relative paths. Update the two absolute URLs if the site
          moves to a custom domain. -->
@@ -20,8 +24,8 @@
       property="og:description"
       content="Christian Bianchi, frontend developer — with a live ascii media converter and community gallery."
     />
-    <meta property="og:url" content="https://portfolio-a5n.pages.dev/" />
-    <meta property="og:image" content="https://portfolio-a5n.pages.dev/og.png" />
+    <meta property="og:url" content="https://christianbianchi.com/" />
+    <meta property="og:image" content="https://christianbianchi.com/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
