@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useLocation } from "react-router-dom";
 import gsap from "gsap";
 // Steps stay a static import (pure math, no three.js) so the preload URL list
 // builds immediately. The viewer and wall pull in all of three.js, so they load
@@ -144,6 +145,8 @@ const INTRO_LOOK_AROUND = false;
 // everything that would still run underneath — render loops, blinking, the
 // intro, and the ui-chrome's window-level wheel/touch listeners.
 export default function App({ suspended = false }) {
+  // Read for `state.aboutTarget` only — the hero itself never routes.
+  const location = useLocation();
   // Staged reveal so the hero's GPU warm-up (shader compile + texture uploads) happens
   // behind the intro: preload HTTP assets -> mount scene hidden -> wait until the
   // avatar reports GPU-warm -> reveal. Avoids post-reveal jank on the focal point.
@@ -275,6 +278,19 @@ export default function App({ suspended = false }) {
     setDialogFigure(null);
     setSkipPromptOpen(false);
   }, [suspended]);
+
+  // Coming back from /gallery or /create having LEFT from inside the overlay:
+  // reopen it at the section the visitor was reading. Two routes carry the
+  // flag here — the page's "← HOME" pill (which forwards `fromAbout`), and the
+  // browser's own Back button, because AboutOutLink restamps the entry it
+  // navigates away from. Either way the overlay reopens and its existing
+  // pending-scroll path takes it to the section once the build settles.
+  useEffect(() => {
+    const target = location.state?.aboutTarget;
+    if (!target || suspended) return;
+    setAboutTarget(target);
+    setAboutOpen(true);
+  }, [location, suspended]);
 
   // forming -> face once the headline is assembled AND the avatar is warm; with the
   // avatar hidden there is no face phase — go straight to the scatter.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import FigureCard from "../components/FigureCard.jsx";
 import FigureDialog from "../components/FigureDialog.jsx";
 import { descriptorFor, getGalleryPage } from "../lib/api.js";
@@ -31,6 +31,10 @@ export default function Gallery() {
   // layer is visibility:hidden, which does NOT stop IntersectionObservers,
   // so the infinite scroll must switch itself off explicitly.
   const pageActive = usePageActive();
+  // Set when an in-copy About link sent us here (AboutOutLink). Handing it
+  // back on the way home reopens the overlay at that section instead of
+  // landing on the bare hero.
+  const fromAbout = useLocation().state?.fromAbout;
 
   const loadMore = useCallback(async (cur) => {
     if (loadingRef.current) return;
@@ -74,7 +78,11 @@ export default function Gallery() {
         {/* Slim single row (pill + squeezed title), matching the Create
             masthead — no chapter eyebrow. */}
         <div className="gallery-head__bar">
-          <Link className="home-pill" to="/">
+          <Link
+            className="home-pill"
+            to="/"
+            state={fromAbout ? { aboutTarget: fromAbout } : undefined}
+          >
             ← Home
           </Link>
           <h1 className="chapter-band__line gallery-title">community gallery</h1>

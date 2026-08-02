@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import gsap from "gsap";
 import { useDissolveReveal } from "../hooks/useDissolveReveal";
 import { useLenisScroll } from "../hooks/useLenisScroll";
@@ -32,6 +32,39 @@ import { WorksTitleScramble } from "./WorksTitleScramble.jsx";
 // stated once instead of twice.
 const BODY_1 =
   "The work I've done professionally has mostly been practical: configurators, dashboards, backoffice tools people sat in front of all day. Unglamorous software, but the kind where a bad decision shows up immediately in someone's afternoon. For a few years I was the only frontend at the company, so the architecture and the small details were both my problem. I also spent a lot of that time helping the junior devs, which turned out to be the fastest way to find out whether I actually understood something. The part I like is when something is broken and then it isn't. I'll pick up whatever the problem asks for";
+// A link OUT of the overlay from inside the copy. It fires two navigations on
+// purpose:
+//   1. replace the entry we're standing on, stamping it with `aboutTarget` —
+//      that's what the browser's own Back button lands on, so Back reopens the
+//      overlay at this section instead of dumping you on the bare hero;
+//   2. push the destination carrying `fromAbout`, which the page's "← HOME"
+//      pill reads to offer the same return.
+// Kept as a plain <a> (not <Link>) so modifier-clicks still open a new tab the
+// way any other link would — the handler bails before preventDefault.
+function AboutOutLink({ to, section = "about", children }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return (
+    <a
+      className="about-link"
+      href={to}
+      data-cursor="link"
+      onClick={(e) => {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+          return;
+        e.preventDefault();
+        navigate(`${location.pathname}${location.search}`, {
+          replace: true,
+          state: { aboutTarget: section },
+        });
+        navigate(to, { state: { fromAbout: section } });
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
 // A fragment rather than a plain string like BODY_1: the two places this
 // paragraph names a part of the site — the gallery, and the converter that
 // feeds it — link straight there, so the invitation is clickable where it's
@@ -45,13 +78,9 @@ const Body2 = () => (
       "showed me I wasn't the only one, and that's the part of it I still " +
       "value most — the community side, people finding each other over the " +
       "same strange thing. So the "}
-    <Link className="about-link" to="/gallery">
-      gallery
-    </Link>
+    <AboutOutLink to="/gallery">gallery</AboutOutLink>
     {" is open. Anyone can "}
-    <Link className="about-link" to="/create">
-      put something in it
-    </Link>
+    <AboutOutLink to="/create">put something in it</AboutOutLink>
     {", and I'd rather it filled up with things I wouldn't have made myself"}
   </>
 );
@@ -75,7 +104,9 @@ const SCRAMBLE_SETTLE_MS = 120;
 // ~2.86:1 art sized for 56px tall.
 // `stack` renders as the chip row at the panel's bottom; `clients` (cobrains
 // only) fills the auto-scroll marquee; `status` (optional) tags a project
-// that isn't live yet, as a badge beside the year.
+// that isn't live yet, as a badge beside the year. `links` (optional) is a
+// [{label, href}] list rendered at the foot of the copy — new-tab external
+// links, for entries whose source or site is public.
 //
 // State of the entries: every one carries real copy and imagery built by its
 // own script in scripts/ from the project's own output — ascii widgets from
@@ -142,20 +173,29 @@ const WORKS = [
     detail:
       "A text-to-speech reader that runs entirely in your browser: paste text or drop in a PDF, EPUB, TXT or MD, pick any voice your OS already has, and listen — current word highlighted, click any word to seek. No account, no API keys, nothing uploaded; documents are parsed locally and your place is kept on the device. Free and unlimited because there's no server to pay for — live at rread.org.",
     stack: ["React 19", "Web Speech API", "Vite"],
+    links: [{ label: "rread.org ↗", href: "https://rread.org" }],
   },
   {
     title: "ascii widgets",
     meta: "2026",
-    thumb: "/works/ascii-widgets-thumb.svg",
+    // Screenshots of the two demo apps running, composited by
+    // scripts/generate-works-asciidemos.cjs: the widget index, the persona
+    // viewer mid-gaze, the noise-text page caught mid-decrypt, the canvas
+    // portrait with a hover cluster lit.
+    thumb: "/works/ascii-widgets-thumb.webp",
     images: [
-      "/works/ascii-widgets-1.svg",
-      "/works/ascii-widgets-2.svg",
-      "/works/ascii-widgets-3.svg",
-      "/works/ascii-widgets-4.svg",
+      "/works/ascii-widgets-1.webp",
+      "/works/ascii-widgets-2.webp",
+      "/works/ascii-widgets-3.webp",
+      "/works/ascii-widgets-4.webp",
     ],
     detail:
       "Two open-source repos: the ascii effects from this site as ten drop-in React components, and the face viewer behind the hero — pose photos displaced in three.js, drawn as glyphs, following your cursor. There's no package to install; you copy the folder you want, and each ships its own props table and the gotchas worth knowing. Built on wesbos/eye-ballz, which carries no ascii of its own.",
     stack: ["React", "three.js", "Canvas", "GSAP"],
+    links: [
+      { label: "ascii-widgets ↗", href: "https://github.com/troppochristiano/ascii-widgets" },
+      { label: "ascii-persona ↗", href: "https://github.com/troppochristiano/ascii-persona" },
+    ],
   },
   {
     // Undated on purpose: it isn't out, so the badge carries the whole story
@@ -688,6 +728,42 @@ export function AboutOverlay({
     },
   });
 
+  // Ride the scroller back to the top, THEN dissolve. playClose slams
+  // scrollTop to 0 on its own, so closing from Works or Contact used to make
+  // the overlay vanish from wherever you happened to be — the hero came back
+  // with no sense of having travelled. Rewinding first makes the return read
+  // as one movement instead of a cut.
+  //
+  // Tweening raw scrollTop is safe here precisely because Lenis is already
+  // gone: useLenisScroll is gated on `open && revealed` and is declared ABOVE
+  // this effect, so React tears it down before this runs. Nothing to fight.
+  const closeTweenRef = useRef(null);
+  const killCloseTween = useCallback(() => {
+    closeTweenRef.current?.kill();
+    closeTweenRef.current = null;
+  }, []);
+
+  const closeWithRewind = useCallback(() => {
+    killCloseTween();
+    const scroller = scrollRef.current;
+    // Already at the top (or motion is unwelcome): nothing to rewind.
+    if (!scroller || scroller.scrollTop < 1 || prefersReducedMotion()) {
+      playClose();
+      return;
+    }
+    closeTweenRef.current = gsap.to(scroller, {
+      scrollTop: 0,
+      // Scaled by distance so a nudge off the top doesn't cost the same as a
+      // return from Contact, and capped so it never feels like a wait.
+      duration: Math.min(0.62, 0.24 + scroller.scrollTop / 4200),
+      ease: "power2.inOut",
+      onComplete: () => {
+        closeTweenRef.current = null;
+        playClose();
+      },
+    });
+  }, [killCloseTween, playClose]);
+
   // Drive the dissolve from the `open` prop (ABOUT button / Escape / close button). Skip when
   // a scrub already settled us into that state, so we don't re-animate on the echoed prop.
   const prevOpen = useRef(open);
@@ -695,11 +771,15 @@ export function AboutOverlay({
     if (open === prevOpen.current) return;
     prevOpen.current = open;
     if (open) {
+      // Reopened mid-rewind: drop the tween or it would finish and close us.
+      killCloseTween();
       if (getState() !== "open") playOpen();
     } else {
-      if (getState() !== "closed") playClose();
+      if (getState() !== "closed") closeWithRewind();
     }
-  }, [open, playOpen, playClose, getState]);
+  }, [open, playOpen, closeWithRewind, killCloseTween, getState]);
+
+  useEffect(() => killCloseTween, [killCloseTween]);
 
   // Header shortcut while the overlay is already open: scroll immediately. When still
   // closed, just queue it — the onSettle handler scrolls once the build finishes.
@@ -1144,6 +1224,26 @@ export function AboutOverlay({
                                 ).map((para, pi) => (
                                   <p key={pi}>{para}</p>
                                 ))}
+                                {/* Repo/site links live inside the text block
+                                    rather than as their own grid child, so the
+                                    panel's explicit desktop placement doesn't
+                                    need a new track. */}
+                                {work.links?.length ? (
+                                  <p className="works-panel__links">
+                                    {work.links.map((l) => (
+                                      <a
+                                        key={l.href}
+                                        className="works-panel__link"
+                                        href={l.href}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        data-cursor="link"
+                                      >
+                                        {l.label}
+                                      </a>
+                                    ))}
+                                  </p>
+                                ) : null}
                               </div>
                               {work.clients?.length && work.clientsLead ? (
                                 <p className="works-panel__clients-lead">

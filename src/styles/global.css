@@ -661,7 +661,7 @@ body {
     font-weight: 600;
     line-height: 1;
     letter-spacing: 0;
-    padding: 4px 10px;
+    padding: 4px 8px;
     color: #fff;
     background-color: var(--blue);
     transition: gap 0.4s var(--ease-out);
@@ -1653,15 +1653,20 @@ body {
         width: 58%;
         /* Turned, so the box is as wide as the crop is TALL: the visible slice
            is (yspan·67) across by (xspan·40) down. */
-        aspect-ratio: calc(
-            (var(--head-yspan) * 67) / (var(--head-xspan) * 40)
-        );
+        aspect-ratio: calc((var(--head-yspan) * 67) / (var(--head-xspan) * 40));
         /* Top margin sets how much copy runs full width before the head
            arrives — the figure is first in DOM, so nothing else can put text
            above it. */
         margin: clamp(20px, 6vw, 48px) calc(-1 * var(--gutter)) 1.2em 1.2em;
         /* First-paint fallback only — see .about-silh--l. */
-        shape-outside: polygon(23% 0, 100% 0, 100% 100%, 8% 100%, 14% 60%, 23% 22%)
+        shape-outside: polygon(
+                23% 0,
+                100% 0,
+                100% 100%,
+                8% 100%,
+                14% 60%,
+                23% 22%
+            )
             /* border-box, not the default margin-box: the polygon is authored
                against the drawn box, and the margins here would otherwise
                stretch the reference box and drag the shape off the glyphs. */
@@ -1678,9 +1683,7 @@ body {
         /* Narrower than the head crop: it's twice as tall, so the copy runs
            down it for ~16 lines and needs the measure more. */
         width: 50%;
-        aspect-ratio: calc(
-            (var(--legs-yspan) * 67) / (var(--legs-xspan) * 40)
-        );
+        aspect-ratio: calc((var(--legs-yspan) * 67) / (var(--legs-xspan) * 40));
         margin: 0.4em 1.2em 1.2em calc(-1 * var(--gutter));
         /* First-paint fallback only — see .about-silh--l. */
         shape-outside: polygon(77% 0, 0 0, 0 100%, 92% 100%, 86% 60%, 77% 22%)
@@ -2048,6 +2051,30 @@ body {
    own rhythm. Adjacent-sibling only: a one-paragraph entry stays flush. */
 .works-panel__text p + p {
     margin-top: 1em;
+}
+
+/* Repo/site links, rendered as the last child of the text block. Sits on the
+   `p + p` rhythm above, then adds a little more air because it reads as a
+   separate affordance rather than another sentence. */
+.works-panel__links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.2em;
+    margin-top: 1.6em;
+}
+
+.works-panel__link {
+    color: var(--blue);
+    text-decoration: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--blue) 40%, transparent);
+    padding-bottom: 2px;
+    transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.works-panel__link:hover,
+.works-panel__link:focus-visible {
+    color: var(--fg);
+    border-bottom-color: var(--fg);
 }
 
 .works-panel__media {
@@ -2551,17 +2578,24 @@ body {
     }
 }
 
-/* ── culture-page rhythm: full-viewport section beats (About overlay) ──
-   Appended block (2026-07-22): sections meter by viewport heights like the
+/* ── culture-page rhythm: section beats (About overlay) ──
+   Appended block (2026-07-22): sections metered by viewport heights like the
    negative-films /culture page. ID-scoped so it wins over .about-section's
-   base padding without touching the rules above. */
+   base padding without touching the rules above.
 
-/* About = the overlay's "Inside The Studio" beat. 72px = the inner's top
-   padding. Original static composition (no sticky — see the block below). */
-#about.about-section {
-    min-height: calc(100vh - 72px);
-    min-height: calc(100svh - 72px);
-}
+   2026-08-02: the 100svh meters are GONE. They only ever produced the
+   intended one-beat-per-screen rhythm on a ~16:10 desktop; everywhere else
+   they forced black, because none of the three sections has content that
+   grows with viewport height. Measured voids before removal —
+     phone   430×932   works 159px   contact 342px
+     tablet  1024×1112 works 345px   contact 507px   about  71px
+     tablet  1024×1366 works 345px   contact 507px   about 438px
+     desktop 2560×1440 works 628px   contact 793px   about 282px
+   Sections are content-sized now. The rhythm they were reaching for lives in
+   the vh-based PADDING below, which scales without being able to strand
+   anything. #about needs no rule at all — its meter was inert on phones (the
+   two-crop block is 1211–1312px tall) and on desktop (the spread is taller
+   than 100svh at every width), and harmful only on tablets. */
 
 /* Desktop reading spread. 1200px, not 768: two columns flanking the figure
    each get half the measure a single-column float gives at the same figure
@@ -2651,72 +2685,111 @@ body {
     }
 }
 
-/* Works: OUTER meter only — internals styled by their own rules. */
+/* ── big monitors: the composition scales instead of stretching ────────────
+   1445px is where --fig-w's 900px cap starts binding, i.e. the exact width
+   above which the figure stops growing while the columns do not. Past it the
+   old rules stretched the container and froze the contents: at 2560 the copy
+   ran 98–107ch and at 3440 it ran 142–150ch — the same blowout this file's own
+   note at the tablet float calls "worse than the ladder" — while the figure sat
+   at 900px, the row titles at 26px and the footer copy at 530px inside a
+   2422–3302px column.
+
+   The overlay stays full-bleed (the wordmark is sized to fill 100vw and the
+   contact water bleeds the gutters — that edge-to-edge language is the point);
+   what changes is that the CONTENTS grow with it. Type and figure scale on the
+   same vw slope, so the measure holds at its 1920 profile — 11 and 9 lines,
+   ~57–74ch — from 1445px all the way to 3440px.
+
+   Every value is continuous at 1445: --fig-w's floor is the 900px it arrives
+   at, and 0.95vw crosses 17px at 1789px, so this block is a verified no-op at
+   the boundary and only starts doing work above it. */
+@media (min-width: 1445px) {
+    .chapter-reading__flow {
+        /* Was frozen at 900px. Holds ~50% of the content width instead, so the
+           silhouette floats keep pace with the columns and the contour still
+           carves the copy. Ceiling at 1800px — past ~3600px the figure would
+           outgrow any plausible screen height. */
+        --fig-w: clamp(900px, calc(53vw - 68px), 1800px);
+    }
+
+    .chapter-reading__col {
+        /* The measure knob. Holding a constant ch count as the column doubles
+           genuinely needs ~32px type at 3440 — that is what "scales with the
+           monitor" costs, and it is what keeps 150ch lines from happening. */
+        font-size: clamp(17px, 0.95vw, 32px);
+    }
+
+    /* The works list is a table of contents across the full width; frozen at
+       26px/101px it read as a caption stranded in a 2400px row. 1.8vw crosses
+       26px at exactly 1445, so this too is continuous at the boundary. */
+    .works-row__title {
+        font-size: clamp(26px, 1.8vw, 46px);
+    }
+
+    .works-row__toggle {
+        padding-top: clamp(22px, 1.5vw, 40px);
+        padding-bottom: clamp(22px, 1.5vw, 40px);
+    }
+
+    .works-row__year,
+    .works-row__status,
+    .works-indicator {
+        font-size: clamp(11px, 0.62vw, 16px);
+    }
+
+    /* max-width on the copy is in ch, so it widens with the font on its own —
+       only the size needs stating. */
+    .contact-footer__copy {
+        font-size: clamp(17px, 0.95vw, 32px);
+    }
+
+    .contact-link {
+        font-size: clamp(14px, 0.78vw, 26px);
+    }
+}
+
+/* Works: OUTER rhythm only — internals styled by their own rules. */
 #works.about-section {
-    min-height: 100vh;
-    min-height: 100svh;
     padding-top: clamp(48px, 10vh, 120px);
     padding-bottom: clamp(64px, 12vh, 140px);
 }
 
-/* Contact: negative-films footer anatomy — full-height column justified to
-   the bottom; heading block + copy up top, border-top meta row at the base. */
+/* Contact: negative-films footer anatomy — heading block + copy up top,
+   border-top meta row at the base.
+
+   padding-top IS the composition here: it's the band of ascii water above the
+   footer. It used to be whatever 100svh minus the content happened to leave,
+   which meant half a viewport of it on a tall screen (793px at 2560×1440) and
+   a footer that read as having fallen off the bottom. Stated explicitly it
+   scales instead of stranding:
+     740 → 118px   932 → 149px   1112 → 178px   1440 → 230px
+   justify-content:flex-end has no free space to distribute now and is inert;
+   left in place so the anatomy still reads from the rule. */
 #contact.about-section {
     position: relative;
-    min-height: 100vh;
-    min-height: 100svh;
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
+    padding-top: clamp(80px, 16vh, 240px);
     padding-bottom: 0;
 }
 
-/* ── tablets: the viewport meters relax ────────────────────────────────────
-   768–1199.98. The three meters above work when the content roughly fills a
-   16:10 desktop screen. On a tall portrait tablet they just force black: at
-   1024×1112 they were producing 345px under the last works row and 507px
-   above the contact footer. Content-sized here; the vh-based paddings still
-   carry the beat.
-
-   MUST stay after the meters it overrides — media queries contribute no
-   specificity, so a block up with the reading-block tier would lose to the
-   unmediated min-height declarations above on source order alone. */
+/* ── tablets: tighter section rhythm ───────────────────────────────────────
+   768–1199.98. The sections are content-sized for everyone now (see the note
+   on the meters above); what's left here is tablet-specific proportion. */
 @media (min-width: 768px) and (max-width: 1199.98px) {
-    /* The reading block is top-anchored and its height is set by the copy
-       budget, not the viewport — and widening the flow (see the tablet block
-       in the reading section) makes the copy SHORTER, so this meter would
-       newly bite here too: 438px of black under the figure at 1024×1366. */
-    #about.about-section {
-        min-height: auto;
-    }
-
-    /* The rows are content-sized (4 × 101px; the 56px thumb sets the row
-       height, so the toggle's padding is the only knob) and can't be stretched
-       by a viewport meter without leaving dead space below the last one. Meter
-       off, vh padding kept, rows given the extra tap area a tablet wants:
-       101px → 117px. */
+    /* Less vertical air than desktop — a tablet's screen is shorter than the
+       works list wants, so the beat comes from the rows, not the margins. */
     #works.about-section {
-        min-height: auto;
         padding-top: clamp(48px, 7vh, 96px);
         padding-bottom: clamp(56px, 8vh, 112px);
     }
 
+    /* 101px → 117px. The 56px thumb sets the row height, so the toggle's
+       padding is the only knob; tablets get the extra tap area. */
     .works-row__toggle {
         padding-top: 30px;
         padding-bottom: 30px;
-    }
-
-    /* The gap above the footer is the liquid sim's field, not blank — so don't
-       delete it, budget it. min-height:auto leaves flex-end with no free space
-       to distribute, so the water band has to be restated as explicit padding;
-       that also makes it scale with the viewport instead of being whatever
-       100svh minus the content happened to leave:
-         1180×820 → 164px   1024×1112 → 222px   1024×1366 → 240px
-       justify-content:flex-end goes inert here and is left in place for the
-       tiers that still have free space to justify. */
-    #contact.about-section {
-        min-height: auto;
-        padding-top: clamp(120px, 20vh, 240px);
     }
 }
 
@@ -2844,24 +2917,8 @@ body {
         justify-content: space-between;
     }
 
-    /* Same meter problem as the tablet tier, and worse the taller the phone
-       gets: the works rows are content-sized (545px for four) so 100svh was
-       forcing 85px of black under the last row at 844 tall and 159px at 932.
-       #about needs no equivalent — its two-crop reading block is 1211–1297px
-       tall, so that meter has always been inert on phones. */
     #works.about-section {
-        min-height: auto;
         padding-top: 40px;
-    }
-
-    /* The footer's own content is a near-constant ~592px here, so every pixel
-       of 100svh above it was liquid field: 250px at 844 tall, 342px at 932.
-       Budget it instead, and smaller than the tablet tier's 20vh — a phone has
-       less room to spend on texture, and the water is already dimmed below:
-         640 → 90px   844 → 118px   932 → 130px */
-    #contact.about-section {
-        min-height: auto;
-        padding-top: clamp(80px, 14vh, 140px);
     }
 
     /* Phones: the ripples share a small screen with the footer copy —

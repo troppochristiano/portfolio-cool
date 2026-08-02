@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { SUPERSAMPLE, computeRows } from "../create/asciify.js";
 import { FONT_STACKS, STYLE_DEFAULTS } from "../create/styleOptions.js";
 import {
@@ -82,6 +82,10 @@ function PreviewStack({
 // With an adminSecret (the /admin/create route), the tool is identical except
 // the share dialog: no Turnstile and the server waives the upload limits.
 export default function Create({ adminSecret = null }) {
+  // Set when an in-copy About link sent us here (AboutOutLink). Handing it
+  // back on the way home reopens the overlay at that section instead of
+  // landing on the bare hero.
+  const fromAbout = useLocation().state?.fromAbout;
   const videoRef = useRef(null);
   const compositeRef = useRef(null); // displayed <canvas> = photo + strokes; also the sample source
   const canvasRef = useRef(null); // offscreen sampler
@@ -757,7 +761,16 @@ export default function Create({ adminSecret = null }) {
     <div className="create-page" ref={pageRef}>
       <div className="app">
         <header className="masthead">
-          <Link to={adminSecret ? "/admin" : "/"} className="home-link">
+          <Link
+            to={adminSecret ? "/admin" : "/"}
+            className="home-link"
+            // Only the home trip carries it — /admin has no overlay to reopen.
+            state={
+              !adminSecret && fromAbout
+                ? { aboutTarget: fromAbout }
+                : undefined
+            }
+          >
             {adminSecret ? "← moderation" : "← Home"}
           </Link>
           {/* Single slim row — the tool below should own the viewport, so no

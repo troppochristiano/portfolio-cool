@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { prefersReducedMotion } from "../lib/utils.js";
+import { clampedDpr, prefersReducedMotion } from "../lib/utils.js";
 
 // Blocky → full-res image decode on a canvas — the downsample/upscale trick
 // from github.com/agentPritam47/pixel-image. Each step draws the source tiny
@@ -45,12 +45,23 @@ export function usePixelDecode({
       const cw = box.offsetWidth;
       const ch = box.offsetHeight;
       if (!cw || !ch) return;
-      canvas.width = cw;
-      canvas.height = ch;
+      // The canvas is stretched to the box by CSS, so the backing store has to
+      // carry the DEVICE pixels or the settled image is upscaled by the
+      // compositor — 2x on a retina laptop, 3x on a phone, which is exactly as
+      // soft as it sounds. Capped at 2 like every other canvas here: the
+      // sources are 800px wide, so a 3x backing store would invent detail the
+      // file doesn't have. All the geometry below is in device pixels.
+      const dpr = clampedDpr(2);
+      const bw = Math.round(cw * dpr);
+      const bh = Math.round(ch * dpr);
+      if (canvas.width !== bw || canvas.height !== bh) {
+        canvas.width = bw;
+        canvas.height = bh;
+      }
 
       // Slight over-scan so upscaled pixels bleed past the edges (no seams).
-      const w = cw * 1.05;
-      const h = ch * 1.05;
+      const w = bw * 1.05;
+      const h = bh * 1.05;
       // Cover-fit the over-scanned box, then centre the result on the CANVAS.
       // Centring against w/h instead (the old bug) leaves the draw anchored at
       // the origin, so the whole 5% hangs off the right and bottom and nothing
@@ -62,17 +73,34 @@ export function usePixelDecode({
         dh = h;
         dw = Math.round(h * ratio);
       }
-      const dx = (cw - dw) / 2;
-      const dy = (ch - dh) / 2;
+      const dx = (bw - dw) / 2;
+      const dy = (bh - dh) / 2;
 
       // Clamped: resize redraws land here after the decode finished, when
       // pxIndex has walked past the end — they redraw the final full-res step.
       const size = PX_STEPS[Math.min(pxIndex, PX_STEPS.length - 1)] * 0.01;
-      ctx.imageSmoothingEnabled = size === 1;
-      ctx.clearRect(0, 0, cw, ch);
-      // Downsample into the corner, then blow that small region back up.
-      ctx.drawImage(img, 0, 0, w * size, h * size);
-      ctx.drawImage(canvas, 0, 0, w * size, h * size, dx, dy, dw, dh);
+      ctx.clearRect(0, 0, bw, bh);
+
+      if (size === 1) {
+        // Settled frame: draw the source straight in. The canvas round-trip
+        // below would resample an already-rasterized copy (and read past the
+        // over-scanned edge, where there are no pixels) — pure loss once
+        // there's nothing left to pixelate.
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(img, dx, dy, dw, dh);
+        return;
+      }
+
+      // Blocky step: downsample into the corner, then blow that small region
+      // back up with smoothing off. The region is sized in CSS pixels, not
+      // device ones, so the chunks stay the same visual size on every display
+      // — scaling it with the backing store would halve them on retina and
+      // quietly weaken the effect.
+      ctx.imageSmoothingEnabled = false;
+      const sw = (w * size) / dpr;
+      const sh = (h * size) / dpr;
+      ctx.drawImage(img, 0, 0, sw, sh);
+      ctx.drawImage(canvas, 0, 0, sw, sh, dx, dy, dw, dh);
     };
 
     const step = () => {

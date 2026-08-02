@@ -49,9 +49,13 @@ const PANELS = [
   ["landing-light.png", "landing", "rread-5.webp"],
 ];
 
-// The highlighted word "fox" sits at ~(976, 301) in the reading shots; this
-// window holds it plus enough surrounding text to read as a paragraph.
-const THUMB_CROP = { left: 630, top: 210, width: 600, height: 210 };
+// The thumb ends up 160x56 CSS px in the works row, which is far too small for
+// body text — a prose crop collapses into an unreadable smudge. Take the one
+// region with large, high-contrast shapes instead: the RREAD wordmark, the
+// dotted rule and the voice picker, which still reads as "an app" at that size.
+// 2.86:1 to match the strip, off the landing shot rather than the reading one.
+const THUMB_SRC = "landing-dark.png";
+const THUMB_CROP = { left: 600, top: 140, width: 1360, height: 476 };
 
 if (!fs.existsSync(path.join(SHOTS, "reading-dark.png"))) {
   console.error(
@@ -92,7 +96,7 @@ if (!fs.existsSync(path.join(SHOTS, "reading-dark.png"))) {
   }
 
   const thumb = "rread-thumb.webp";
-  await sharp(path.join(SHOTS, "reading-dark.png"))
+  await sharp(path.join(SHOTS, THUMB_SRC))
     .extract(THUMB_CROP)
     .resize({ width: 480, height: 168 })
     .webp({ quality: 92 })
