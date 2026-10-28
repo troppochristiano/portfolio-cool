@@ -7,6 +7,14 @@ import "./styles/global.css";
 // Side effect: registers the block-reveal leave/enter tweens into the
 // pageTransitions seam that RouteTransition drives.
 import "./lib/blockRevealTransition.js";
+import { queryParam } from "./lib/utils.js";
+
+// `?perf=1`: frame-pacing recorder with a copyable report (lib/perfProbe.js).
+// Its own chunk, fetched only when asked for, and started before the app
+// mounts so the first visit's intro is on the record too.
+if (queryParam("perf")) {
+  import("./lib/perfProbe.js").then((m) => m.startPerfProbe());
+}
 
 // Lazy chunks: none of these routes belong in the hero bundle — the gallery is
 // a separate page, the admin queue is only ever visited by the site owner, and
@@ -17,6 +25,10 @@ const Create = lazy(() => import("./pages/Create"));
 const Gallery = lazy(() => import("./pages/Gallery"));
 const Admin = lazy(() => import("./pages/Admin"));
 const AdminCreate = lazy(() => import("./pages/AdminCreate"));
+
+// TEMPORARY (2026-08-02) — boot markers for the ?diag=1 readout in index.html.
+// Remove together with that block.
+if (window.__diag) window.__diag("3 main bundle executed");
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>

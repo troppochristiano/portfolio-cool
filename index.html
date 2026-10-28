@@ -48,6 +48,62 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- TEMPORARY boot diagnostic (2026-08-02). Only runs with ?diag=1, so
+         normal visitors never see it. Remove once the mobile blank-page on the
+         apex is understood. -->
+    <script>
+      (function () {
+        if (location.search.indexOf("diag") === -1) return;
+        var d = document.createElement("div");
+        d.setAttribute(
+          "style",
+          "position:fixed;top:0;left:0;right:0;max-height:45vh;z-index:2147483647;" +
+            "padding:14px;margin:0;font:12px/1.45 ui-monospace,Menlo,monospace;" +
+            "color:#0f0;background:rgba(0,0,0,.82);pointer-events:none;" +
+            "white-space:pre-wrap;word-break:break-all;overflow:auto"
+        );
+        d.textContent = "1 html parsed + inline script ran";
+        document.body.appendChild(d);
+        function log(m) {
+          d.textContent += "\n" + m;
+        }
+        window.__diag = log;
+        log("host: " + location.host);
+        log("path: " + location.pathname);
+        log("ua: " + navigator.userAgent);
+        window.addEventListener(
+          "error",
+          function (e) {
+            if (e.target && (e.target.src || e.target.href))
+              log("RESOURCE FAILED: " + (e.target.src || e.target.href));
+            else
+              log(
+                "ERROR: " + (e.message || "?") + " @ " +
+                  (e.filename || "?") + ":" + (e.lineno || "?")
+              );
+          },
+          true
+        );
+        window.addEventListener("unhandledrejection", function (e) {
+          log("PROMISE REJECTED: " + (e.reason && (e.reason.stack || e.reason.message || e.reason)));
+        });
+        [1000, 3000, 6000, 10000].forEach(function (ms) {
+          setTimeout(function () {
+            var r = document.getElementById("root");
+            var c = document.querySelectorAll("canvas").length;
+            log(
+              "+" + ms / 1000 + "s root=" +
+                (r ? r.childElementCount : "NO ROOT") +
+                " canvas=" + c +
+                " sheets=" + document.styleSheets.length
+            );
+          }, ms);
+        });
+      })();
+    </script>
+    <script type="module">
+      if (window.__diag) window.__diag("2 module scripts execute");
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
