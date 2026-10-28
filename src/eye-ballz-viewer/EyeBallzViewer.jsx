@@ -566,6 +566,7 @@ function EyeBallzViewerInner(
       if (h.asciiEffect?.domElement.parentElement) {
         h.container.removeChild(h.asciiEffect.domElement);
       }
+      h.asciiEffect?.dispose(); // its GPU readback targets
       // Scale the resolution to the live container so mobile keeps desktop-like detail.
       const cw = h.container.clientWidth || width;
       const resolution = effectiveAsciiResolution(a.resolution, cw);
@@ -598,6 +599,10 @@ function EyeBallzViewerInner(
       // Hidden behind a routed page — skip everything (uTime freezes too, so a
       // time-based distortion resumes where it left off instead of jumping).
       if (suspendedRef.current) return;
+      // Turn a finished async GPU readback into glyphs (never blocks; see
+      // PhraseAsciiEffect). Polled every tick so a frame lands as soon as the GPU
+      // has it, independent of the render cadence below.
+      if (h.asciiEnabled) h.asciiEffect?.poll();
       h.uniforms.uTime.value = performance.now() / 1000;
 
       // Subtle mouse-follow tilt: ease the mesh rotation toward the cursor (or back
@@ -913,6 +918,7 @@ function EyeBallzViewerInner(
       geometry.dispose();
       material.dispose();
       handles.asciiEffect?.domElement.remove();
+      handles.asciiEffect?.dispose();
       renderer.dispose();
       canvas.remove();
       three.current = null;

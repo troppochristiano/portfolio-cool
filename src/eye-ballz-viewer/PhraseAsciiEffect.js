@@ -62,7 +62,43 @@ class PhraseAsciiEffect {
 		this.render = function ( scene, camera ) {
 
 			renderer.render( scene, camera );
-			asciifyImage( oAscii );
+
+			if ( bAsyncReadback ) {
+
+				issueReadback();
+
+			} else {
+
+				oCtx.clearRect( 0, 0, iWidth, iHeight );
+				oCtx.drawImage( oCanvasImg, 0, 0, iWidth, iHeight );
+				asciifyImage( oAscii, oCtx.getImageData( 0, 0, iWidth, iHeight ).data, false );
+
+			}
+
+		};
+
+		// Async path only: call once per animation-loop tick. Turns the last issued
+		// readback into glyphs as soon as the GPU has finished it, without ever
+		// blocking on it. A no-op while nothing is pending (and on the sync path).
+		this.poll = function () {
+
+			if ( ! oFence ) return;
+			// Never blocks: timeout 0 just reports whether the GPU is done yet.
+			if ( gl.clientWaitSync( oFence, 0, 0 ) === gl.TIMEOUT_EXPIRED ) return;
+			gl.deleteSync( oFence );
+			oFence = null;
+			gl.bindBuffer( gl.PIXEL_PACK_BUFFER, oPbo );
+			gl.getBufferSubData( gl.PIXEL_PACK_BUFFER, 0, aPixels );
+			gl.bindBuffer( gl.PIXEL_PACK_BUFFER, null );
+			asciifyImage( oAscii, aPixels, true );
+
+		};
+
+		this.dispose = function () {
+
+			if ( oFence ) gl.deleteSync( oFence );
+			oFence = null;
+			releaseTargets();
 
 		};
 
@@ -138,6 +174,122 @@ class PhraseAsciiEffect {
 		if ( ! oCtx.getImageData ) {
 
 			return;
+
+		}
+
+		// ── async GPU readback (WebGL2) ──
+		// drawImage(webglCanvas) + getImageData is a synchronous readback: the main
+		// thread waits for the GPU to finish the whole frame — including whatever page
+		// raster is queued ahead of it — before a single glyph is built. Measured on the
+		// hero that was ~4.6ms of pure stall per render (spikes to 11ms), ~100ms of
+		// every second at the 30fps cap, and the main source of dropped frames.
+		// Instead: downscale on the GPU (blit), read into a pixel-pack buffer, fence,
+		// and pick the pixels up on a later loop tick once the fence has signalled.
+		// Same bilinear downscale of the same premultiplied pixels as drawImage, so
+		// the glyphs are the same; they just land a frame later, which the 30fps
+		// glyph grid can't show.
+		const gl = renderer.getContext();
+		const bAsyncReadback = typeof WebGL2RenderingContext !== 'undefined'
+			&& gl instanceof WebGL2RenderingContext;
+		// A multisampled default framebuffer can only be blitted at its own size, so
+		// antialiased contexts resolve into a full-size target before the downscale.
+		const bResolve = bAsyncReadback && !! gl.getContextAttributes()?.antialias;
+		let oFence = null;
+		let oPbo = null;
+		let aPixels = null;
+		const oSmall = { fbo: null, rbo: null, w: 0, h: 0 };
+		const oFull = { fbo: null, rbo: null, w: 0, h: 0 };
+
+		function sizeTarget( t, w, h ) {
+
+			if ( t.fbo && t.w === w && t.h === h ) return;
+			if ( t.fbo ) {
+
+				gl.deleteFramebuffer( t.fbo );
+				gl.deleteRenderbuffer( t.rbo );
+
+			}
+
+			t.w = w;
+			t.h = h;
+			t.rbo = gl.createRenderbuffer();
+			gl.bindRenderbuffer( gl.RENDERBUFFER, t.rbo );
+			gl.renderbufferStorage( gl.RENDERBUFFER, gl.RGBA8, w, h );
+			gl.bindRenderbuffer( gl.RENDERBUFFER, null );
+			t.fbo = gl.createFramebuffer();
+			gl.bindFramebuffer( gl.FRAMEBUFFER, t.fbo );
+			gl.framebufferRenderbuffer( gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, t.rbo );
+			gl.bindFramebuffer( gl.FRAMEBUFFER, null );
+
+		}
+
+		function releaseTargets() {
+
+			for ( const t of [ oSmall, oFull ] ) {
+
+				if ( t.fbo ) {
+
+					gl.deleteFramebuffer( t.fbo );
+					gl.deleteRenderbuffer( t.rbo );
+
+				}
+
+				t.fbo = t.rbo = null;
+				t.w = t.h = 0;
+
+			}
+
+			if ( oPbo ) gl.deleteBuffer( oPbo );
+			oPbo = null;
+			aPixels = null;
+
+		}
+
+		function issueReadback() {
+
+			if ( ! iWidth || ! iHeight ) return;
+			const bytes = iWidth * iHeight * 4;
+			if ( ! oPbo || aPixels.length !== bytes ) {
+
+				if ( oPbo ) gl.deleteBuffer( oPbo );
+				oPbo = gl.createBuffer();
+				gl.bindBuffer( gl.PIXEL_PACK_BUFFER, oPbo );
+				gl.bufferData( gl.PIXEL_PACK_BUFFER, bytes, gl.STREAM_READ );
+				gl.bindBuffer( gl.PIXEL_PACK_BUFFER, null );
+				aPixels = new Uint8Array( bytes );
+
+			}
+
+			sizeTarget( oSmall, iWidth, iHeight );
+			const dw = gl.drawingBufferWidth;
+			const dh = gl.drawingBufferHeight;
+			let src = null; // the default framebuffer
+			if ( bResolve ) {
+
+				sizeTarget( oFull, dw, dh );
+				gl.bindFramebuffer( gl.READ_FRAMEBUFFER, null );
+				gl.bindFramebuffer( gl.DRAW_FRAMEBUFFER, oFull.fbo );
+				gl.blitFramebuffer( 0, 0, dw, dh, 0, 0, dw, dh, gl.COLOR_BUFFER_BIT, gl.NEAREST );
+				src = oFull.fbo;
+
+			}
+
+			gl.bindFramebuffer( gl.READ_FRAMEBUFFER, src );
+			gl.bindFramebuffer( gl.DRAW_FRAMEBUFFER, oSmall.fbo );
+			gl.blitFramebuffer( 0, 0, dw, dh, 0, 0, iWidth, iHeight, gl.COLOR_BUFFER_BIT, gl.LINEAR );
+			gl.bindFramebuffer( gl.READ_FRAMEBUFFER, oSmall.fbo );
+			gl.bindBuffer( gl.PIXEL_PACK_BUFFER, oPbo );
+			gl.readPixels( 0, 0, iWidth, iHeight, gl.RGBA, gl.UNSIGNED_BYTE, 0 );
+			gl.bindBuffer( gl.PIXEL_PACK_BUFFER, null );
+			// Back to the default framebuffer, which is what three's state cache
+			// believes is bound after rendering to the screen.
+			gl.bindFramebuffer( gl.FRAMEBUFFER, null );
+
+			// A newer frame supersedes one still in flight: its pixels are about to be
+			// overwritten in the same buffer anyway, so only the latest fence matters.
+			if ( oFence ) gl.deleteSync( oFence );
+			oFence = gl.fenceSync( gl.SYNC_GPU_COMMANDS_COMPLETE, 0 );
+			gl.flush();
 
 		}
 
@@ -274,11 +426,10 @@ class PhraseAsciiEffect {
 
 		}
 
-		function asciifyImage( oAscii ) {
-
-			oCtx.clearRect( 0, 0, iWidth, iHeight );
-			oCtx.drawImage( oCanvasImg, 0, 0, iWidth, iHeight );
-			const oImgData = oCtx.getImageData( 0, 0, iWidth, iHeight ).data;
+		// oImgData: iWidth×iHeight RGBA. bGL marks a raw GL readback, which differs
+		// from getImageData in two ways handled below: rows run bottom-up, and the
+		// colour is still premultiplied by alpha (getImageData un-premultiplies).
+		function asciifyImage( oAscii, oImgData, bGL ) {
 
 			// Coloring loop starts now
 			let strChars = '';
@@ -291,12 +442,20 @@ class PhraseAsciiEffect {
 
 				for ( let x = 0; x < iWidth; x ++ ) {
 
-					const iOffset = ( y * iWidth + x ) * 4;
+					const iOffset = ( ( bGL ? iHeight - 1 - y : y ) * iWidth + x ) * 4;
 
-					const iRed = oImgData[ iOffset ];
-					const iGreen = oImgData[ iOffset + 1 ];
-					const iBlue = oImgData[ iOffset + 2 ];
+					let iRed = oImgData[ iOffset ];
+					let iGreen = oImgData[ iOffset + 1 ];
+					let iBlue = oImgData[ iOffset + 2 ];
 					const iAlpha = oImgData[ iOffset + 3 ];
+					if ( bGL && iAlpha > 0 && iAlpha < 255 ) {
+
+						const fUn = 255 / iAlpha;
+						iRed = Math.min( 255, Math.round( iRed * fUn ) );
+						iGreen = Math.min( 255, Math.round( iGreen * fUn ) );
+						iBlue = Math.min( 255, Math.round( iBlue * fUn ) );
+
+					}
 					let iCharIdx;
 
 					let fBrightness;

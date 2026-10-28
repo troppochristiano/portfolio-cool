@@ -186,6 +186,12 @@
      and buries the backplate — this thins them back out without giving up any columns. */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* The glyph table is rewritten up to 30×/s. Its box is fixed (absolute, 100%×100%,
+     clipped), so strict containment keeps each rewrite's style+layout inside it
+     instead of dirtying the hero around it; optimizeSpeed skips kerning/ligature
+     shaping, which a monospace grid never uses (same pairing as the wall's <pre>s). */
+  contain: strict;
+  text-rendering: optimizeSpeed;
 }
 
 /* CSS CRT effect, after njbair's "Pure CSS CRT Effect" (codepen ZVPomJ).
