@@ -120,13 +120,69 @@ export function AsciiPortraitHover({
 
   // Everything imperative lives on stateRef; these three helpers close over
   // refs only, so the effects below can share them without dependencies.
+  //
+  // Once the decode has settled, the only thing that changes frame to frame is
+  // the handful of lit cells. Repainting the whole grid for that (~5-7k
+  // fillText, measured ~11ms a draw) is what made scrolling past the portrait
+  // under a resting cursor drop frames, since every scroll re-ignites it. So the
+  // settled figure is painted once into an offscreen copy, and a hover frame is
+  // one blit of that copy plus the lit cells on top.
   const draw = (now) => {
     const st = stateRef.current;
     if (!st) return;
-    const { ctx } = st;
+    if (activeRef.current && now >= st.decodeEndsAt) {
+      if (!st.settled) st.settled = paintSettled(st);
+      const { ctx } = st;
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, st.settled.width, st.settled.height);
+      ctx.drawImage(st.settled, 0, 0);
+      ctx.restore();
+      for (const cell of st.cellList) {
+        if (cell.highlightEnd > now) paintLit(ctx, st, cell, now);
+      }
+      return;
+    }
+    paintFull(st.ctx, st, now);
+  };
+
+  // A highlighted cell: the blue block with its glyph re-rolling on its own
+  // cadence, so the cluster reads as decoding text. The opaque block covers
+  // the base glyph and any detail glyphs beneath it.
+  const paintLit = (ctx, st, cell, now) => {
+    if (now >= cell.scrAt) {
+      cell.scr = NOISE_POOL[(Math.random() * NOISE_POOL.length) | 0];
+      cell.scrAt = now + SCRAMBLE_MS + Math.random() * SCRAMBLE_JITTER;
+    }
+    const x = cell.col * CELL;
+    const y = cell.row * CELL;
+    ctx.font = st.baseFont;
+    ctx.fillStyle = HOVER_FILL;
+    ctx.fillRect(x, y, CELL, CELL);
+    ctx.fillStyle = HOVER_CHAR;
+    ctx.fillText(cell.scr, x + CELL / 2, y + st.baseline);
+  };
+
+  // The decoded figure with nothing lit, painted once into an offscreen canvas
+  // that matches the visible one (same backing size, transform and text setup).
+  const paintSettled = (st) => {
+    const off = document.createElement("canvas");
+    off.width = st.ctx.canvas.width;
+    off.height = st.ctx.canvas.height;
+    const octx = off.getContext("2d");
+    octx.setTransform(st.ctx.getTransform());
+    octx.textAlign = st.ctx.textAlign;
+    octx.textBaseline = st.ctx.textBaseline;
+    paintFull(octx, st, 0, true);
+    return off;
+  };
+
+  // The whole grid. `settled` paints every cell decoded and unlit, which is
+  // what the cached copy holds.
+  const paintFull = (ctx, st, now, settled = false) => {
     ctx.clearRect(0, 0, COLS * CELL, st.rows * CELL);
 
-    if (!activeRef.current) {
+    if (!settled && !activeRef.current) {
       // Overlay closed / mid-dissolve: sparse scatter, mirroring the old
       // portrait's low-res thumb.
       ctx.fillStyle = BASE_COLOR;
@@ -144,31 +200,18 @@ export function AsciiPortraitHover({
     // Base chunky grid.
     ctx.font = st.baseFont;
     for (const cell of st.cellList) {
-      if (cell.revealAt > now) continue; // not decoded in yet
-      const x = cell.col * CELL;
-      const y = cell.row * CELL;
-      const lit = cell.highlightEnd > now;
-      let ch;
-      if (lit) {
-        // Highlighted cell: paint the blue block and keep re-rolling the glyph
-        // (each cell on its own cadence) so the cluster reads as decoding text.
-        if (now >= cell.scrAt) {
-          cell.scr = NOISE_POOL[(Math.random() * NOISE_POOL.length) | 0];
-          cell.scrAt = now + SCRAMBLE_MS + Math.random() * SCRAMBLE_JITTER;
-        }
-        ch = cell.scr;
-        ctx.fillStyle = HOVER_FILL;
-        ctx.fillRect(x, y, CELL, CELL);
-        ctx.fillStyle = HOVER_CHAR;
-      } else {
-        // Fresh-decoded cells flicker briefly, then settle on the figure glyph.
-        const inNoise = now < cell.revealAt + NOISE_MS;
-        ch = inNoise
-          ? NOISE_POOL[(Math.random() * NOISE_POOL.length) | 0]
-          : cell.char;
-        ctx.fillStyle = BASE_COLOR;
+      if (!settled && cell.revealAt > now) continue; // not decoded in yet
+      if (!settled && cell.highlightEnd > now) {
+        paintLit(ctx, st, cell, now);
+        continue;
       }
-      ctx.fillText(ch, x + CELL / 2, y + st.baseline);
+      // Fresh-decoded cells flicker briefly, then settle on the figure glyph.
+      const inNoise = !settled && now < cell.revealAt + NOISE_MS;
+      const ch = inNoise
+        ? NOISE_POOL[(Math.random() * NOISE_POOL.length) | 0]
+        : cell.char;
+      ctx.fillStyle = BASE_COLOR;
+      ctx.fillText(ch, cell.col * CELL + CELL / 2, cell.row * CELL + st.baseline);
     }
 
     // Finer overlays on top — each fine glyph reveals with the base cell
@@ -183,7 +226,8 @@ export function AsciiPortraitHover({
         const base = st.cells.get(f.baseKey);
         // No base cell at all → no decode timing to borrow, so skip rather
         // than paint it early and through hover clusters.
-        if (!base || base.revealAt > now || base.highlightEnd > now) continue;
+        if (!base) continue;
+        if (!settled && (base.revealAt > now || base.highlightEnd > now)) continue;
         ctx.fillText(f.char, f.cx, f.top + p.baseline);
       }
     }
@@ -422,6 +466,8 @@ export function AsciiPortraitHover({
           const fH = fm.actualBoundingBoxAscent + fm.actualBoundingBoxDescent;
           p.baseline = p.cellH / 2 + fH / 2 - fm.actualBoundingBoxDescent;
         }
+        // Fonts or metrics changed: the cached settled copy is stale.
+        st.settled = null;
       };
 
       const st = {
@@ -434,6 +480,7 @@ export function AsciiPortraitHover({
         patches,
         decodeEndsAt: 0,
         lastHighlightEnd: 0,
+        settled: null, // offscreen copy of the decoded, unlit figure (see draw)
       };
       stateRef.current = st;
       setupCtx();
