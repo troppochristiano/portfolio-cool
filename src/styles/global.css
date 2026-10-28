@@ -661,7 +661,7 @@ body {
     font-weight: 600;
     line-height: 1;
     letter-spacing: 0;
-    padding: 4px 8px;
+    padding: 4px 4px;
     color: #fff;
     background-color: var(--blue);
     transition: gap 0.4s var(--ease-out);
