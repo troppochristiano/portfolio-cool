@@ -31,7 +31,7 @@ import { WorksTitleScramble } from "./WorksTitleScramble.jsx";
 // composition lopsided. Every claim the longer draft made is still here, just
 // stated once instead of twice.
 const BODY_1 =
-  "The work I've done professionally has mostly been practical: configurators, dashboards, backoffice tools people sat in front of all day. Unglamorous software, but the kind where a bad decision shows up immediately in someone's afternoon. For a few years I was the only frontend at the company, so the architecture and the small details were both my problem. I also spent a lot of that time helping the junior devs, which turned out to be the fastest way to find out whether I actually understood something. The part I like is when something is broken and then it isn't. I'll pick up whatever the problem asks for";
+  "Most of my professional work has been practical: configurators, dashboards, backoffice tools that people sit in front of all day. It isn't glamorous software, but a bad decision in it costs somebody an afternoon. For a few years I was the only frontend at the company, which meant the architecture and the small stuff were both mine to get right. A lot of that time went into helping the junior devs, and explaining things to them is how I found out what I actually understood. I like the part where something is broken and then it isn't, and I'll pick up whatever the problem needs";
 // A link OUT of the overlay from inside the copy. It fires two navigations on
 // purpose:
 //   1. replace the entry we're standing on, stamping it with `aboutTarget` —
@@ -71,13 +71,13 @@ function AboutOutLink({ to, section = "about", children }) {
 // made instead of sending people back to the nav.
 const Body2 = () => (
   <>
-    {"This site is the other half — no client, no spec, no requirements to " +
-      "satisfy. Everything here exists because I wanted to make something " +
-      "cool and nobody was going to ask me for it. I come from a small town " +
-      "where it was hard to find anyone with the same interests. The internet " +
-      "showed me I wasn't the only one, and that's the part of it I still " +
-      "value most — the community side, people finding each other over the " +
-      "same strange thing. So the "}
+    {"This site is the other half of it. Nobody commissioned it and nobody " +
+      "wrote a spec, so everything here exists because I wanted to make it " +
+      "and no one was ever going to ask me for it. I grew up in a small town " +
+      "where it was hard to find anyone with the same interests, and the " +
+      "internet showed me I wasn't the only one. That community side is still " +
+      "the part I value most, people finding each other over the same strange " +
+      "thing. So the "}
     <AboutOutLink to="/gallery">gallery</AboutOutLink>
     {" is open. Anyone can "}
     <AboutOutLink to="/create">put something in it</AboutOutLink>
@@ -110,14 +110,10 @@ const SCRAMBLE_SETTLE_MS = 120;
 //
 // State of the entries: every one carries real copy and imagery built by its
 // own script in scripts/ from the project's own output — ascii widgets from
-// its ascii renders, RRead from its docs screenshots, cobrains from its
-// archived project mockups.
-// check-earth is the exception only in that it hasn't shipped, so there are no
-// screenshots to composite: generate-works-check-earth.cjs draws the product
-// itself instead — a real equirectangular projection with the hazard markers
-// at their true coordinates. A single-image entry renders without the cycler
-// or the frame counter, which is why it's one image rather than a set.
-// Chronological, oldest first, with the unreleased one last — so the list
+// its ascii renders, RRead and Mappify from their own screenshots, cobrains
+// from its archived project mockups. A single-image entry renders without the
+// cycler or the frame counter.
+// Chronological, oldest first, with anything unreleased last — so the list
 // reads as a career rather than a feed.
 const WORKS = [
   {
@@ -134,7 +130,7 @@ const WORKS = [
       "/works/cobrains-3.webp",
     ],
     detail: [
-      "I started at Cobrains straight out of high school, knowing essentially nothing. Another developer took me on and taught me the job properly — most of what I know about building for the web starts there. When he left, I became the only dedicated frontend. That was the part that changed how I work: no one above me to check the decisions, so I had to get good at making them. Later the company brought in help, and I ended up doing the teaching instead.",
+      "I started at Cobrains straight out of high school knowing essentially nothing. Another developer took me on and taught me the job properly, and most of what I know about building for the web starts there. When he left I became the only dedicated frontend, with no one above me to check the decisions, so I had to get good at making them. Later the company brought in more people and I was the one doing the teaching.",
       "i really value all my time at cobrains, it really helped me grow not only as a developer but also as a person and i got to work on great projects with great people.",
     ],
     clientsLead: "Some of the companies i worked with:",
@@ -171,7 +167,7 @@ const WORKS = [
       "/works/rread-5.webp",
     ],
     detail:
-      "A text-to-speech reader that runs entirely in your browser: paste text or drop in a PDF, EPUB, TXT or MD, pick any voice your OS already has, and listen — current word highlighted, click any word to seek. No account, no API keys, nothing uploaded; documents are parsed locally and your place is kept on the device. Free and unlimited because there's no server to pay for — live at rread.org.",
+      "A text-to-speech reader that runs entirely in your browser. Paste text or drop in a PDF, EPUB, TXT or MD, pick any voice your OS already has, and listen: the current word is highlighted, and clicking any word seeks to it. There's no account, no API keys, and nothing gets uploaded. Documents are parsed locally and your place is kept on the device. It's free and unlimited because there's no server to pay for. Live at rread.org.",
     stack: ["React 19", "Web Speech API", "Vite"],
     links: [{ label: "rread.org ↗", href: "https://rread.org" }],
   },
@@ -190,7 +186,7 @@ const WORKS = [
       "/works/ascii-widgets-4.webp",
     ],
     detail:
-      "Two open-source repos: the ascii effects from this site as ten drop-in React components, and the face viewer behind the hero — pose photos displaced in three.js, drawn as glyphs, following your cursor. There's no package to install; you copy the folder you want, and each ships its own props table and the gotchas worth knowing. Built on wesbos/eye-ballz, which carries no ascii of its own.",
+      "Two open-source repos: the ascii effects from this site as ten drop-in React components, and the face viewer behind the hero, where pose photos get displaced in three.js and drawn as glyphs that follow your cursor. There's no package to install. You copy the folder you want, and each one ships its own props table plus the gotchas worth knowing. It's built on wesbos/eye-ballz, which has no ascii of its own.",
     stack: ["React", "three.js", "Canvas", "GSAP"],
     links: [
       { label: "ascii-widgets ↗", href: "https://github.com/troppochristiano/ascii-widgets" },
@@ -198,15 +194,26 @@ const WORKS = [
     ],
   },
   {
-    // Undated on purpose: it isn't out, so the badge carries the whole story
-    // and `meta` is omitted (the year span is conditional).
-    title: "check-earth",
-    status: "coming soon",
-    thumb: "/works/check-earth-thumb.svg",
-    images: ["/works/check-earth-1.svg"],
+    title: "Mappify",
+    meta: "2026",
+    // Real app screenshots on a real library (mappify/docs/screenshots),
+    // composed to 4:5 by scripts/generate-works-mappify.cjs, one per feature:
+    // the globe, a playlist filter, an artist's origin and provenance, a
+    // place-built playlist, compare with a friend, the match card. The friend
+    // is anonymised to "A friend" in the compare shots.
+    thumb: "/works/mappify-thumb.webp",
+    images: [
+      "/works/mappify-1.webp",
+      "/works/mappify-2.webp",
+      "/works/mappify-3.webp",
+      "/works/mappify-4.webp",
+      "/works/mappify-5.webp",
+      "/works/mappify-6.webp",
+    ],
     detail:
-      "A live map of Earth and the natural phenomena moving across it — earthquakes, wildfires, storms and volcanic activity, drawn on the globe as they happen rather than listed as headlines.",
-    stack: ["React", "three.js"],
+      "A globe of your music. Every artist in your Spotify library is placed where they're actually from, resolved through MusicBrainz and Wikidata. You can spin the world, open a city, play something from it and turn any place into a playlist. You can export your library and compare it with a friend's.",
+    stack: ["React", "TypeScript", "MapLibre", "Node", "SQLite"],
+    links: [{ label: "GitHub ↗", href: "https://github.com/troppochristiano/mappify" }],
   },
 ];
 
